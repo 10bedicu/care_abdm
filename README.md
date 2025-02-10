@@ -3,12 +3,13 @@
 [![Release Status](https://img.shields.io/pypi/v/care_abdm.svg)](https://pypi.python.org/pypi/care_abdm)
 [![Build Status](https://github.com/ohcnetwork/care_abdm/actions/workflows/build.yaml/badge.svg)](https://github.com/ohcnetwork/care_abdm/actions/workflows/build.yaml)
 
-Care Abdm is a plugin for care to add voice auto fill support using external services like OpenAI whisper and Google Speech to Text.
+Care ABDM is a plugin for care to integrate ABDM (of India's Ayushman Bharat Digital Mission) specifications. By integrating ABDM with CARE, it creates a seamless, interconnected network where patient data is readily accessible accross various health facilities.
 
 ## Features
 
-- Voice auto fill support for care
-- Support for OpenAI whisper and Google Speech to Text
+- **Digital Health ID:** Every citizen is assigned a unique digital health identifier, ensuring that their health records are accurately and securely linked across the healthcare system.
+- **Electronic Health Records (EHR):** Comprehensive and interoperable health records allow for seamless sharing of patient data among hospitals, clinics, and other healthcare providers, facilitating better-coordinated care.
+- **Interoperability:** Standardized protocols and a unified framework enable various health systems and platforms to exchange information smoothly, enhancing communication and reducing duplication of efforts.
 
 ## Installation
 
