@@ -22,7 +22,6 @@ class Migration(migrations.Migration):
     dependencies = [
         ('abdm', '0018_alter_consentartefact_hi_types_and_more'),
         ('facility', '0491_migrate_consent_records'),
-        ('emr', '0021_metaartifact'),
     ]
 
     operations = [
