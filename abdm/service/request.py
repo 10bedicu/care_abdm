@@ -6,7 +6,9 @@ from django.core.cache import cache
 
 from abdm.settings import plugin_settings as settings
 
-ABDM_TOKEN_URL = settings.ABDM_GATEWAY_URL + "/gateway/v3/sessions"
+ABDM_TOKEN_URL = settings.ABDM_AUTH_URL or (
+    settings.ABDM_GATEWAY_URL + "/gateway/v3/sessions"
+)
 ABDM_TOKEN_CACHE_KEY = "abdm_token"
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,7 @@ class Request:
                 {
                     "clientId": settings.ABDM_CLIENT_ID,
                     "clientSecret": settings.ABDM_CLIENT_SECRET,
-                    "grantType": "client_credentials"
+                    "grantType": "client_credentials",
                 }
             )
             headers = {
