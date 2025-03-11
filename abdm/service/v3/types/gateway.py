@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional, TypedDict
+from typing import Literal, TypedDict
 
 from abdm.models import (
     AbhaNumber,
@@ -6,8 +6,7 @@ from abdm.models import (
     ConsentRequest,
     HealthInformationType,
 )
-
-from care.facility.models import PatientRegistration
+from care.emr.models.patient import Patient
 from care.users.models import User
 
 
@@ -19,8 +18,8 @@ class CareContext(TypedDict):
 
 class TokenGenerateTokenBody(TypedDict):
     abha_number: AbhaNumber
-    purpose: Optional[Literal["LINK_CARECONTEXT"]]
-    care_contexts: Optional[List[CareContext]]
+    purpose: Literal["LINK_CARECONTEXT"] | None
+    care_contexts: list[CareContext] | None
 
 
 class TokenGenerateTokenResponse(TypedDict):
@@ -28,8 +27,8 @@ class TokenGenerateTokenResponse(TypedDict):
 
 
 class LinkCarecontextBody(TypedDict):
-    patient: PatientRegistration
-    care_contexts: List[CareContext]
+    patient: Patient
+    care_contexts: list[CareContext]
     user: User
 
 
@@ -40,8 +39,8 @@ class LinkCarecontextResponse(TypedDict):
 class UserInitiatedLinkingPatientCareContextOnDiscoverBody(TypedDict):
     transaction_id: str
     request_id: str
-    patient: PatientRegistration
-    matched_by: List[Literal["MOBILE", "ABHA_NUMBER", "MR"]]
+    patient: Patient
+    matched_by: list[Literal["MOBILE", "ABHA_NUMBER", "MR"]]
 
 
 class UserInitiatedLinkingPatientCareContextOnDiscoverResponse(TypedDict):
@@ -60,8 +59,8 @@ class UserInitiatedLinkingLinkCareContextOnInitResponse(TypedDict):
 
 class UserInitiatedLinkingLinkCareContextOnConfirmBody(TypedDict):
     request_id: str
-    patient: PatientRegistration
-    care_contexts: List[str]
+    patient: Patient
+    care_contexts: list[str]
 
 
 class UserInitiatedLinkingLinkCareContextOnConfirmResponse(TypedDict):

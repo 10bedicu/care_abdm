@@ -1,3 +1,6 @@
+from django.db import models
+from jsonschema import validate
+
 from abdm.models.json_schema.transaction import (
     CREATE_ABHA_ADDRESS,
     CREATE_OR_LINK_ABHA_NUMBER,
@@ -5,9 +8,6 @@ from abdm.models.json_schema.transaction import (
     LINK_CARE_CONTEXT,
     SCAN_AND_SHARE,
 )
-from django.db import models
-from jsonschema import validate
-
 from care.users.models import User
 from care.utils.models.base import BaseModel
 

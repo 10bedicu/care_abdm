@@ -11,13 +11,63 @@ Care ABDM is a plugin for care to integrate ABDM (of India's Ayushman Bharat Dig
 - **Electronic Health Records (EHR):** Comprehensive and interoperable health records allow for seamless sharing of patient data among hospitals, clinics, and other healthcare providers, facilitating better-coordinated care.
 - **Interoperability:** Standardized protocols and a unified framework enable various health systems and platforms to exchange information smoothly, enhancing communication and reducing duplication of efforts.
 
-## Installation
+## Local Development
 
-https://care-be-docs.ohc.network/pluggable-apps/configuration.html
+To develop the plug in local environment along with care, follow the steps below:
 
-https://github.com/ohcnetwork/care/blob/develop/plug_config.py
+1. Go to the care root directory and clone the plugin repository:
 
-To install care abdm, you can add the plugin config in [care/plug_config.py](https://github.com/ohcnetwork/care/blob/develop/plug_config.py) as follows:
+```bash
+cd care
+git clone git@github.com:ohcnetwork/care_abdm.git
+```
+
+2. Add the plugin config in plug_config.py
+
+```python
+...
+
+abdm_plugin = Plug(
+    name="abdm",
+    package_name="/app/care_abdm",
+    version="",
+    configs={},
+)
+plugs = [abdm_plug]
+
+...
+```
+
+3. Tweak the code in plugs/manager.py, install the plugin in editable mode
+
+```python
+...
+
+subprocess.check_call(
+    [sys.executable, "-m", "pip", "install", "-e", *packages] # add -e flag to install in editable mode
+)
+
+...
+```
+
+4. Rebuild the docker image and run the server
+
+```bash
+make re-build
+make up
+```
+
+5. Setup the enviroment values:
+
+- ABDM_AUTH_URL: "https://abdm-auth.coolify.ohc.network"
+- Use the default value for the others
+
+> [!IMPORTANT]
+> Do not push these changes in a PR. These changes are only for local development.
+
+## Production Setup
+
+To install care hello, you can add the plugin config in [care/plug_config.py](https://github.com/ohcnetwork/care/blob/develop/plug_config.py) as follows:
 
 ```python
 ...
@@ -26,22 +76,13 @@ abdm_plug = Plug(
     name="abdm",
     package_name="git+https://github.com/ohcnetwork/care_abdm.git",
     version="@master",
-    configs={
-        "ABDM_CLIENT_ID": "abdm_client_id",
-        "ABDM_CLIENT_SECRET": "abdm_client_secret",
-        "ABDM_GATEWAY_URL": "",
-        "ABDM_ABHA_URL": "",
-        "ABDM_FACILITY_URL": "",
-        "ABDM_HIP_NAME_PREFIX": "",
-        "ABDM_HIP_NAME_SUFFIX": "",
-        "ABDM_USERNAME": "",
-        "ABDM_CM_ID": "",
-        "AUTH_USER_MODEL": "users.User"
-    },
+    configs={},
 )
 plugs = [abdm_plug]
 ...
 ```
+
+[Extended Docs on Plug Installation](https://care-be-docs.ohc.network/pluggable-apps/configuration.html)
 
 ## Configuration
 
@@ -49,6 +90,7 @@ The following configurations variables are available for Care Abdm:
 
 - `ABDM_CLIENT_ID`: The client id for the ABDM service.
 - `ABDM_CLIENT_SECRET`: The client secret for the ABDM service.
+- `ABDM_AUTH_URL`: This is a proxy URL used only for local development to get the auth token.
 - `ABDM_GATEWAY_URL`: The URL for the ABDM service APIs.
 - `ABDM_ABHA_URL`: The URL for the health service APIs.
 - `ABDM_FACILITY_URL`: The URL for the ABDM facility APIs.

@@ -1,10 +1,11 @@
 from base64 import b64encode, b64decode
+<<<<<<< HEAD
 from datetime import datetime, timezone
+=======
+from datetime import UTC, datetime
+>>>>>>> 3595f43ebcfdf6f187fb17f9be577a9de4119aec
 from uuid import uuid4
 
-from abdm.models import AbhaNumber, HealthInformationType
-from abdm.service.request import Request
-from abdm.settings import plugin_settings as settings
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Hash import SHA1
 from Crypto.PublicKey import RSA
@@ -12,14 +13,12 @@ from django.db.models import Q
 from django.db.models.functions import TruncDate
 from rest_framework.exceptions import APIException
 
-from care.facility.models import (
-    DailyRound,
-    InvestigationSession,
-    PatientConsultation,
-    PatientRegistration,
-    Prescription,
-    SuggestionChoices,
-)
+from abdm.models import AbhaNumber, HealthInformationType
+from abdm.service.request import Request
+from abdm.settings import plugin_settings as settings
+from care.emr.models.encounter import Encounter
+from care.emr.models.medication_request import MedicationRequest
+from care.emr.models.patient import Patient
 
 
 class ABDMAPIException(APIException):
@@ -35,7 +34,11 @@ class ABDMInternalException(APIException):
 
 
 def timestamp():
+<<<<<<< HEAD
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+=======
+    return datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+>>>>>>> 3595f43ebcfdf6f187fb17f9be577a9de4119aec
 
 
 def uuid():
@@ -70,7 +73,8 @@ def hf_id_from_abha_id(health_id: str):
     if not abha_number.patient:
         ABDMInternalException(detail="Given ABHA Number is not linked to any patient")
 
-    patient_facility = abha_number.patient.last_consultation.facility
+    last_encounter = Encounter.objects.filter(patient=abha_number.patient).last()
+    patient_facility = last_encounter.facility
 
     if not hasattr(patient_facility, "healthfacility"):
         raise ABDMInternalException(
@@ -84,58 +88,22 @@ def cm_id():
     return settings.ABDM_CM_ID
 
 
-def generate_care_contexts_for_existing_data(patient: PatientRegistration):
+def generate_care_contexts_for_existing_data(patient: Patient):
     care_contexts = []
 
-    consultations = PatientConsultation.objects.filter(patient=patient)
-    for consultation in consultations:
+    medication_requests = (
+        MedicationRequest.objects.filter(patient=patient)
+        .annotate(day=TruncDate("created_date"))
+        .order_by("day")
+        .distinct("day")
+    )
+    for request in medication_requests:
         care_contexts.append(
             {
-                "reference": f"v1::consultation::{consultation.external_id}",
-                "display": f"Encounter on {consultation.created_date.date()}",
-                "hi_type": (
-                    HealthInformationType.DISCHARGE_SUMMARY
-                    if consultation.suggestion == SuggestionChoices.A
-                    else HealthInformationType.OP_CONSULTATION
-                ),
+                "reference": f"v2::medication_request::{request.created_date.date()}",
+                "display": f"Medication Prescribed on {request.created_date.date()}",
+                "hi_type": HealthInformationType.PRESCRIPTION,
             }
         )
-
-        daily_rounds = DailyRound.objects.filter(consultation=consultation)
-        for daily_round in daily_rounds:
-            care_contexts.append(
-                {
-                    "reference": f"v1::daily_round::{daily_round.external_id}",
-                    "display": f"Daily Round on {daily_round.created_date.date()}",
-                    "hi_type": HealthInformationType.WELLNESS_RECORD,
-                }
-            )
-
-        investigation_sessions = InvestigationSession.objects.filter(
-            investigationvalue__consultation=consultation
-        )
-        for investigation_session in investigation_sessions:
-            care_contexts.append(
-                {
-                    "reference": f"v1::investigation_session::{investigation_session.external_id}",
-                    "display": f"Investigation on {investigation_session.created_date.date()}",
-                    "hi_type": HealthInformationType.DIAGNOSTIC_REPORT,
-                }
-            )
-
-        prescriptions = (
-            Prescription.objects.filter(consultation=consultation)
-            .annotate(day=TruncDate("created_date"))
-            .order_by("day")
-            .distinct("day")
-        )
-        for prescription in prescriptions:
-            care_contexts.append(
-                {
-                    "reference": f"v1::prescription::{prescription.created_date.date()}",
-                    "display": f"Medication Prescribed on {prescription.created_date.date()}",
-                    "hi_type": HealthInformationType.PRESCRIPTION,
-                }
-            )
 
     return care_contexts
