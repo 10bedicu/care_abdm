@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from functools import reduce
+import random
 
 from abdm.api.v3.serializers.hip import (
     ConsentRequestHipNotifySerializer,
@@ -38,6 +39,7 @@ from care.facility.models import (
     PatientRegistration,
     State,
 )
+from care.utils.sms.send_sms import send_sms
 
 logger = logging.getLogger(__name__)
 
@@ -231,16 +233,29 @@ class HIPCallbackViewSet(GenericViewSet):
         )
 
         reference_id = uuid()
+        
+        # Get patient details
+        patient_id = validated_data.get("patient", [{}])[0].get("referenceNumber")
+        abha_address = validated_data.get("abhaAddress")
+        
+        # Get patient from database to retrieve phone number
+        patient = PatientRegistration.objects.filter(external_id=patient_id).first()
+        
+        # Generate a random 6-digit OTP
+        otp = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        # Send SMS to patient if phone number is available
+        if patient and patient.phone_number:
+            message = f"Your OTP for linking your health records with ABHA address {abha_address} is {otp}. This OTP is valid for 10 minutes."
+            send_sms(patient.phone_number, message)
+        
         cache.set(
             "abdm_user_initiated_linking__" + reference_id,
             {
                 "reference_id": reference_id,
-                # TODO: generate OTP and send it to the patient
-                "otp": "000000",
-                "abha_address": validated_data.get("abhaAddress"),
-                "patient_id": validated_data.get("patient", [{}])[0].get(
-                    "referenceNumber"
-                ),
+                "otp": otp,
+                "abha_address": abha_address,
+                "patient_id": patient_id,
                 "care_contexts": care_contexts,
             },
         )
