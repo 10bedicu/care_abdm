@@ -121,6 +121,7 @@ DEFAULTS = {
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
+    "ABDM_ENABLED": False,  # Default to False, must be explicitly enabled
 }
 
 plugin_settings = PluginSettings(
