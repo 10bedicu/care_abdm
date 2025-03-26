@@ -11,6 +11,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+import random
 
 from abdm.api.v3.serializers.hip import (
     ConsentRequestHipNotifySerializer,
@@ -32,8 +33,25 @@ from abdm.models import (
 )
 from abdm.service.helper import uuid
 from abdm.service.v3.gateway import GatewayService
-from care.emr.models.patient import Patient
+from care.emr.models import Patient
 from care.emr.resources.patient.spec import GenderChoices
+from django.contrib.postgres.search import TrigramSimilarity
+from django.core.cache import cache
+from django.db.models import Q
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
+
+from care.facility.api.serializers.patient import PatientTransferSerializer
+from care.facility.models import (
+    District,
+    PatientConsultation,
+    PatientRegistration,
+    State,
+)
+from care.utils.sms.send_sms import send_sms
 
 logger = logging.getLogger(__name__)
 
@@ -229,16 +247,25 @@ class HIPCallbackViewSet(GenericViewSet):
         )
 
         reference_id = uuid()
+        
+        patient_id = validated_data.get("patient", [{}])[0].get("referenceNumber")
+        abha_address = validated_data.get("abhaAddress")
+        
+        patient = Patient.objects.filter(external_id=patient_id).first()
+        
+        otp = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        if patient and patient.phone_number:
+            message = f"Your OTP for linking your health records with ABHA address {abha_address} is {otp}. This OTP is valid for 10 minutes."
+            send_sms(patient.phone_number, message)
+        
         cache.set(
             "abdm_user_initiated_linking__" + reference_id,
             {
                 "reference_id": reference_id,
-                # TODO: generate OTP and send it to the patient
-                "otp": "000000",
-                "abha_address": validated_data.get("abhaAddress"),
-                "patient_id": validated_data.get("patient", [{}])[0].get(
-                    "referenceNumber"
-                ),
+                "otp": otp,
+                "abha_address": abha_address,
+                "patient_id": patient_id,
                 "care_contexts": care_contexts,
             },
         )
