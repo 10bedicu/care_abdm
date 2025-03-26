@@ -55,7 +55,7 @@ from care.emr.models.medication_statement import (
 from care.emr.models.observation import Observation as ObservationModel
 from care.emr.models.patient import Patient as PatientModel
 from care.emr.resources.allergy_intolerance.spec import AllergyIntoleranceReadSpec
-from care.emr.resources.base import Coding as CodingSpec
+from care.emr.resources.common.coding import Coding as CodingSpec
 from care.emr.resources.condition.spec import ConditionReadSpec
 from care.emr.resources.encounter.spec import EncounterRetrieveSpec
 from care.emr.resources.facility.spec import FacilityRetrieveSpec
