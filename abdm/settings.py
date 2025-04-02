@@ -105,6 +105,7 @@ REQUIRED_SETTINGS = {
     "ABDM_CM_ID",
     "CURRENT_DOMAIN",
     "BACKEND_DOMAIN",
+    "ABDM_HPR_URL",  # HPR URL is required
 }
 
 DEFAULTS = {
@@ -121,6 +122,11 @@ DEFAULTS = {
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
+    # HPR settings
+    "ABDM_HPR_URL": "https://hprsbx.abdm.gov.in",  # Sandbox URL for HPR
+    "ENABLE_HPR_ON_PLUGIN_ENABLE": True,  # Run the management command when plugin is enabled
+    "HPR_VERIFY_AADHAAR_ENABLED": True,  # Enable Aadhaar-based HPR ID verification
+    "HPR_CREATE_ALLOWED": True,  # Allow creation of new HPR IDs
 }
 
 plugin_settings = PluginSettings(

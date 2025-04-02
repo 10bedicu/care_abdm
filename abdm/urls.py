@@ -8,6 +8,7 @@ from abdm.api.viewsets.abha_number import AbhaNumberViewSet
 from abdm.api.viewsets.consent import ConsentViewSet
 from abdm.api.viewsets.health_facility import HealthFacilityViewSet
 from abdm.api.viewsets.health_information import HealthInformationViewSet
+from abdm.api.viewsets.healthcare_provider import HealthcareProviderRegistryViewSet
 
 
 class OptionalSlashRouter(SimpleRouter):
@@ -28,6 +29,9 @@ router.register(
 router.register("abha_number", AbhaNumberViewSet, basename="abdm__abha_number")
 router.register(
     "health_facility", HealthFacilityViewSet, basename="abdm__health_facility"
+)
+router.register(
+    "healthcare_provider", HealthcareProviderRegistryViewSet, basename="abdm__healthcare_provider"
 )
 
 ## ABDM Proxy Routes
