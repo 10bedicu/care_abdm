@@ -1,5 +1,5 @@
 from base64 import b64encode, b64decode
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from Crypto.Cipher import PKCS1_OAEP
@@ -30,7 +30,7 @@ class ABDMInternalException(APIException):
 
 
 def timestamp():
-    return datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def uuid():
