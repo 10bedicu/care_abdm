@@ -7,8 +7,15 @@ class AbhaNumber(BaseModel):
     abha_number = models.TextField(null=True, blank=True, unique=True)
     health_id = models.TextField(null=True, blank=True, unique=True)
 
-    patient = models.OneToOneField(
+    deprecated_patient = models.OneToOneField(
         "facility.PatientRegistration",
+        related_name="abha_number",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    patient = models.OneToOneField(
+        "emr.Patient",
         related_name="abha_number",
         on_delete=models.PROTECT,
         null=True,

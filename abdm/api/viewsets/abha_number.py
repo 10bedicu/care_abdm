@@ -1,15 +1,17 @@
-from abdm.api.serializers.abha_number import AbhaNumberSerializer
-from abdm.models import AbhaNumber, Transaction, TransactionType
-from abdm.service.helper import uuid
 from django.db.models import Q
 from django.http import Http404
+from drf_spectacular.utils import extend_schema
 from rest_framework.mixins import CreateModelMixin, RetrieveModelMixin
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.viewsets import GenericViewSet
 
-from care.utils.queryset.patient import get_patient_queryset
+from abdm.api.serializers.abha_number import AbhaNumberSerializer
+from abdm.models import AbhaNumber, Transaction, TransactionType
+from abdm.service.helper import uuid
+from care.security.authorization.base import AuthorizationController
 
 
+@extend_schema(tags=["ABDM: ABHA Number"])
 class AbhaNumberViewSet(
     GenericViewSet,
     CreateModelMixin,
@@ -27,8 +29,11 @@ class AbhaNumberViewSet(
             Q(abha_number=id) | Q(health_id=id) | Q(patient__external_id=id)
         ).first()
 
-        if not instance or not get_patient_queryset(self.request.user).contains(
-            instance.patient
+        if not instance:
+            raise Http404
+
+        if not AuthorizationController.call(
+            "can_view_patient_obj", self.request.user, instance.patient
         ):
             raise Http404
 

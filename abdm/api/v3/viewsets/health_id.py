@@ -1,5 +1,14 @@
 from datetime import datetime
 
+from django.db.models import Q
+from django.http import HttpResponse
+from drf_spectacular.utils import extend_schema
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
+
 from abdm.api.serializers.abha_number import AbhaNumberSerializer
 from abdm.api.v3.serializers.health_id import (
     AbhaCreateAbhaAddressSuggestionSerializer,
@@ -18,17 +27,11 @@ from abdm.service.helper import generate_care_contexts_for_existing_data
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
-from django.db.models import Q
-from django.http import HttpResponse
-from rest_framework import status
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet
-
-from care.utils.queryset.patient import get_patient_queryset
+from care.emr.models.patient import Patient
+from care.security.authorization.base import AuthorizationController
 
 
+@extend_schema(tags=["ABDM: Health ID"])
 class HealthIdViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
 
@@ -61,12 +64,13 @@ class HealthIdViewSet(GenericViewSet):
     def link_abha_number_and_patient(self, request):
         validated_data = self.validate_request(request)
 
-        patient_queryset = get_patient_queryset(request.user)
-        patient = patient_queryset.filter(
+        patient = Patient.objects.filter(
             external_id=validated_data.get("patient")
         ).first()
 
-        if not patient:
+        if not AuthorizationController.call(
+            "can_write_patient_obj", self.request.user, patient
+        ):
             return Response(
                 {
                     "detail": "Patient not found or you do not have permission to access the patient",

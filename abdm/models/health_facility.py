@@ -1,10 +1,9 @@
-from care.utils.models.base import BaseModel
 from django.db import models
 
-from abdm.models.permissions.health_facility import HealthFacilityPermissions
+from care.utils.models.base import BaseModel
 
 
-class HealthFacility(BaseModel, HealthFacilityPermissions):
+class HealthFacility(BaseModel):
     hf_id = models.CharField(max_length=50, unique=True)
     registered = models.BooleanField(default=False)
     facility = models.OneToOneField(

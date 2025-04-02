@@ -1,3 +1,8 @@
+from django.contrib.postgres.fields import ArrayField
+from django.core.validators import MinValueValidator
+from django.db import models
+from django.utils import timezone
+
 from abdm.models import AbhaNumber
 from abdm.models.base import (
     AccessMode,
@@ -7,13 +12,10 @@ from abdm.models.base import (
     Status,
 )
 from abdm.models.json_schema import CARE_CONTEXTS
+from abdm.settings import plugin_settings as settings
 from abdm.utils.cipher import Cipher
-from django.contrib.postgres.fields import ArrayField
-from django.core.validators import MinValueValidator
-from django.db import models
-from django.utils import timezone
-
-from care.facility.models.file_upload import FileUpload
+from care.emr.models.file_upload import FileUpload
+from care.emr.resources.file_upload.spec import FileCategoryChoices, FileTypeChoices
 from care.users.models import User
 from care.utils.models.base import BaseModel
 from care.utils.models.validators import JSONFieldSchemaValidator
@@ -124,7 +126,9 @@ class ConsentArtefact(Consent):
         if self.status in [Status.REVOKED.value, Status.EXPIRED.value]:
             file = FileUpload.objects.filter(
                 internal_name__contains=f"{self.external_id}.json",
-                file_type=FileUpload.FileType.ABDM_HEALTH_INFORMATION.value,
+                file_type=FileTypeChoices.patient.value,
+                file_category=FileCategoryChoices.unspecified.value,
+                created_by__username=settings.ABDM_USERNAME,
             ).first()
 
             if file:

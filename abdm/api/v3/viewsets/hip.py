@@ -2,6 +2,16 @@ import logging
 from datetime import datetime
 from functools import reduce
 
+from django.contrib.postgres.search import TrigramSimilarity
+from django.core.cache import cache
+from django.db.models import Q
+from drf_spectacular.utils import extend_schema
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
+
 from abdm.api.v3.serializers.hip import (
     ConsentRequestHipNotifySerializer,
     HipHealthInformationRequestSerializer,
@@ -22,26 +32,13 @@ from abdm.models import (
 )
 from abdm.service.helper import uuid
 from abdm.service.v3.gateway import GatewayService
-from django.contrib.postgres.search import TrigramSimilarity
-from django.core.cache import cache
-from django.db.models import Q
-from rest_framework import status
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet
-
-from care.facility.api.serializers.patient import PatientTransferSerializer
-from care.facility.models import (
-    District,
-    PatientConsultation,
-    PatientRegistration,
-    State,
-)
+from care.emr.models.patient import Patient
+from care.emr.resources.patient.spec import GenderChoices
 
 logger = logging.getLogger(__name__)
 
 
+@extend_schema(tags=["ABDM: HIP"])
 class HIPViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
 
@@ -55,6 +52,7 @@ class HIPViewSet(GenericViewSet):
         )
 
 
+@extend_schema(tags=["ABDM: HIP Callback"])
 class HIPCallbackViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
     authentication_classes = [ABDMAuthentication]
@@ -71,7 +69,7 @@ class HIPCallbackViewSet(GenericViewSet):
     }
 
     def get_patient_by_abha_id(self, abha_id: str):
-        patient = PatientRegistration.objects.filter(
+        patient = Patient.objects.filter(
             Q(abha_number__abha_number=abha_id) | Q(abha_number__health_id=abha_id)
         ).first()
 
@@ -96,7 +94,7 @@ class HIPCallbackViewSet(GenericViewSet):
             logger.warning(
                 f"Validation failed for request data: {request.data}, "
                 f"Path: {request.path}, Method: {request.method}, "
-                f"Error details: {str(exception)}"
+                f"Error details: {exception!s}"
             )
 
             raise exception
@@ -114,7 +112,7 @@ class HIPCallbackViewSet(GenericViewSet):
 
         if not cached_data:
             logger.warning(
-                f"Request ID: {str(validated_data.get('response').get('requestId'))} not found in cache"
+                f"Request ID: {validated_data.get('response').get('requestId')!s} not found in cache"
             )
 
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -172,7 +170,7 @@ class HIPCallbackViewSet(GenericViewSet):
         health_id_number = next(
             filter(lambda x: x.get("type") == "ABHA_NUMBER", identifiers), {}
         ).get("value")
-        patient = PatientRegistration.objects.filter(
+        patient = Patient.objects.filter(
             Q(abha_number__abha_number=health_id_number)
             | Q(abha_number__health_id=patient_data.get("id"))
         ).first()
@@ -183,7 +181,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 filter(lambda x: x.get("type") == "MOBILE", identifiers), {}
             ).get("value")
             patient = (
-                PatientRegistration.objects.annotate(
+                Patient.objects.annotate(
                     similarity=TrigramSimilarity("name", patient_data.get("name"))
                 )
                 .filter(
@@ -271,9 +269,7 @@ class HIPCallbackViewSet(GenericViewSet):
 
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        if not cached_data.get("otp") == validated_data.get("confirmation").get(
-            "token"
-        ):
+        if cached_data.get("otp") != validated_data.get("confirmation").get("token"):
             logger.warning(
                 f"Invalid OTP: {validated_data.get('confirmation').get('token')} for Reference ID: {validated_data.get('confirmation').get('linkRefNumber')}"
             )
@@ -281,7 +277,7 @@ class HIPCallbackViewSet(GenericViewSet):
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
         patient_id = cached_data.get("patient_id")
-        patient = PatientRegistration.objects.filter(external_id=patient_id).first()
+        patient = Patient.objects.filter(external_id=patient_id).first()
 
         if not patient:
             logger.warning(f"Patient with ID: {patient_id} not found in the database")
@@ -400,7 +396,7 @@ class HIPCallbackViewSet(GenericViewSet):
             )
         except Exception as exception:
             logger.error(
-                f"Error occurred while transferring health information: {str(exception)}"
+                f"Error occurred while transferring health information: {exception!s}"
             )
 
             GatewayService.data_flow__health_information__notify(
@@ -452,27 +448,39 @@ class HIPCallbackViewSet(GenericViewSet):
         is_existing_patient = True
         if not abha_number:
             is_existing_patient = False
-            patient = PatientRegistration.objects.create(
-                facility=health_facility.facility,
+
+            full_address = ", ".join(
+                filter(
+                    lambda x: x,
+                    [
+                        patient_data.get("address").get("line"),
+                        patient_data.get("address").get("district"),
+                        patient_data.get("address").get("state"),
+                        patient_data.get("address").get("pinCode"),
+                    ],
+                )
+            )
+            phone_number = (
+                "+91" + patient_data.get("phoneNumber", "").replace(" ", "")[-10:]
+            )
+            date_of_birth = datetime.strptime(
+                f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth')}-{patient_data.get('dayOfBirth')}",
+                "%Y-%m-%d",
+            ).date()
+            patient = Patient.objects.create(
                 name=patient_data.get("name"),
-                gender={"M": 1, "F": 2, "O": 3, None: None}.get(
-                    patient_data.get("gender"), None
-                ),
-                date_of_birth=datetime.strptime(
-                    f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth')}-{patient_data.get('dayOfBirth')}",
-                    "%Y-%m-%d",
-                ),
-                phone_number=patient_data.get("phoneNumber"),
-                emergency_phone_number=patient_data.get("phoneNumber"),
-                address=patient_data.get("address").get("line"),
+                gender={
+                    "M": GenderChoices.male,
+                    "F": GenderChoices.female,
+                    "O": GenderChoices.non_binary,
+                }.get(patient_data.get("gender"), "O"),
+                date_of_birth=date_of_birth,
+                phone_number=phone_number,
+                emergency_phone_number=phone_number,
+                address=full_address,
+                permanent_address=full_address,
                 pincode=patient_data.get("address").get("pinCode"),
-                state=State.objects.filter(
-                    name__iexact=patient_data.get("address").get("state")
-                ).first(),
-                district=District.objects.filter(
-                    name__iexact=patient_data.get("address").get("district")
-                ).first(),
-                is_antenatal=False,
+                geo_organization=None,
             )
 
             abha_number = AbhaNumber.objects.create(
@@ -481,10 +489,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 health_id=patient_data.get("abhaAddress"),
                 name=patient_data.get("name"),
                 gender=patient_data.get("gender"),
-                date_of_birth=datetime.strptime(
-                    f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth')}-{patient_data.get('dayOfBirth')}",
-                    "%Y-%m-%d",
-                ),
+                date_of_birth=date_of_birth,
                 address=patient_data.get("address").get("line"),
                 district=patient_data.get("address").get("district"),
                 state=patient_data.get("address").get("state"),
@@ -492,16 +497,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 mobile=patient_data.get("phoneNumber"),
             )
 
-        else:
-            serializer = PatientTransferSerializer(
-                abha_number.patient,
-                data={
-                    "facility": str(health_facility.facility.external_id),
-                    "year_of_birth": patient_data.get("yearOfBirth"),
-                },
-            )
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
+        # TODO: add the patient to the facility queue
 
         cached_data = cache.get("abdm_patient_share__" + abha_number.health_id)
 

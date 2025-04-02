@@ -1,9 +1,5 @@
-from abdm.api.serializers.health_facility import HealthFacilitySerializer
-from abdm.models import HealthFacility
-from abdm.service.v3.facility import FacilityService
-from abdm.settings import plugin_settings as settings
 from celery import shared_task
-from dry_rest_permissions.generics import DRYPermissions
+from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import action
 from rest_framework.mixins import (
     CreateModelMixin,
@@ -15,7 +11,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
-from care.utils.queryset.facility import get_facility_queryset
+from abdm.api.serializers.health_facility import HealthFacilitySerializer
+from abdm.models import HealthFacility
+from abdm.service.v3.facility import FacilityService
+from abdm.settings import plugin_settings as settings
+from care.emr.models.organization import FacilityOrganizationUser
 
 
 @shared_task
@@ -62,6 +62,7 @@ def register_health_facility_as_service(facility_external_id):
     return [False, None]
 
 
+@extend_schema(tags=["ABDM: Health Facility"])
 class HealthFacilityViewSet(
     GenericViewSet,
     CreateModelMixin,
@@ -72,12 +73,18 @@ class HealthFacilityViewSet(
     serializer_class = HealthFacilitySerializer
     model = HealthFacility
     queryset = HealthFacility.objects.all()
-    permission_classes = (IsAuthenticated, DRYPermissions)
+    permission_classes = (IsAuthenticated,)
     lookup_field = "facility__external_id"
 
     def get_queryset(self):
         queryset = self.queryset
-        facilities = get_facility_queryset(self.request.user)
+        facilities = [
+            organization.organization.facility
+            for organization in FacilityOrganizationUser.objects.filter(
+                user=self.request.user
+            ).select_related("organization__facility")
+        ]
+
         return queryset.filter(facility__in=facilities)
 
     @action(detail=True, methods=["POST"])

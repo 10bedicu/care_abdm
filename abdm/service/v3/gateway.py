@@ -51,14 +51,8 @@ from abdm.service.v3.types.gateway import (
 )
 from abdm.settings import plugin_settings as settings
 from abdm.utils.cipher import Cipher
-from abdm.utils.fhir_v1 import Fhir
-from care.facility.models import (
-    DailyRound,
-    InvestigationSession,
-    PatientConsultation,
-    Prescription,
-    SuggestionChoices,
-)
+from abdm.utils.fhir import Fhir
+from care.emr.models.medication_request import MedicationRequest
 
 
 class GatewayService:
@@ -474,59 +468,24 @@ class GatewayService:
 
             [version, model, param] = care_context_reference.split("::")
 
-            if model == "consultation":
-                consultation = PatientConsultation.objects.filter(
-                    external_id=param
-                ).first()
+            if version != "v2":
+                # Skip if version is not v2
+                # TODO: Register the v1 care contexts as v2 after emr migration
+                continue
 
-                if not consultation:
-                    continue
-
-                if (
-                    consultation.suggestion == SuggestionChoices.A
-                    and HealthInformationType.DISCHARGE_SUMMARY in consent.hi_types
-                ):
-                    fhir_data = Fhir().create_discharge_summary_record(consultation)
-                elif HealthInformationType.OP_CONSULTATION in consent.hi_types:
-                    fhir_data = Fhir().create_op_consultation_record(consultation)
-                else:
-                    continue
-
-            elif (
-                model == "investigation_session"
-                and HealthInformationType.DIAGNOSTIC_REPORT in consent.hi_types
-            ):
-                session = InvestigationSession.objects.filter(external_id=param).first()
-
-                if not session:
-                    continue
-
-                fhir_data = Fhir().create_diagnostic_report_record(session)
-
-            elif (
-                model == "prescription"
+            if (
+                model == "medication_request"
                 and HealthInformationType.PRESCRIPTION in consent.hi_types
             ):
-                prescriptions = Prescription.objects.filter(
+                medication_requests = MedicationRequest.objects.filter(
                     created_date__date=param,
-                    consultation__patient__external_id=patient_reference,
+                    patient__external_id=patient_reference,
                 )
 
-                if not prescriptions.exists():
+                if not medication_requests.exists():
                     continue
 
-                fhir_data = Fhir().create_prescription_record(list(prescriptions))
-
-            elif (
-                model == "daily_round"
-                and HealthInformationType.WELLNESS_RECORD in consent.hi_types
-            ):
-                daily_round = DailyRound.objects.filter(external_id=param).first()
-
-                if not daily_round:
-                    continue
-
-                fhir_data = Fhir().create_wellness_record(daily_round)
+                fhir_data = Fhir().create_prescription_record(list(medication_requests))
 
             else:
                 continue
@@ -571,6 +530,7 @@ class GatewayService:
             path,
             json=payload,
             headers=headers,
+            timeout=20,
         )
 
         if response.status_code != 202:
@@ -704,7 +664,7 @@ class GatewayService:
                 "patient": {"id": consent.patient_abha.health_id},
                 "hiu": {"id": hiu_id},
                 "requester": {
-                    "name": f"{consent.requester.REVERSE_TYPE_MAP[consent.requester.user_type]}, {consent.requester.first_name} {consent.requester.last_name}",
+                    "name": f"{consent.requester.first_name} {consent.requester.last_name}",
                     "identifier": {
                         "type": "CARE Username",
                         "value": consent.requester.username,
