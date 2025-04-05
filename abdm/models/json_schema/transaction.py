@@ -58,9 +58,10 @@ LINK_CARE_CONTEXT = {
                 "type": "string",
             },
         },
+        "hf_id": {"type": "string"},
     },
     "additionalProperties": False,
-    "required": ["abha_number", "care_contexts", "type"],
+    "required": ["abha_number", "care_contexts", "type", "hf_id"],
 }
 
 

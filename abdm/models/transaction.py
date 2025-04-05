@@ -1,3 +1,6 @@
+from django.db import models
+from jsonschema import validate
+
 from abdm.models.json_schema.transaction import (
     CREATE_ABHA_ADDRESS,
     CREATE_OR_LINK_ABHA_NUMBER,
@@ -5,9 +8,6 @@ from abdm.models.json_schema.transaction import (
     LINK_CARE_CONTEXT,
     SCAN_AND_SHARE,
 )
-from django.db import models
-from jsonschema import validate
-
 from care.users.models import User
 from care.utils.models.base import BaseModel
 
@@ -20,6 +20,11 @@ class TransactionType(models.IntegerChoices):
     EXCHANGE_DATA = 5
     ACCESS_DATA = 6  # tracks internal data access within care
 
+class TransactionStatus(models.IntegerChoices):
+    INITIATED = 1
+    COMPLETED = 2
+    FAILED = 3
+    CANCELLED = 4
 
 class Transaction(BaseModel):
     reference_id = models.CharField(
@@ -28,6 +33,12 @@ class Transaction(BaseModel):
 
     type = models.SmallIntegerField(
         choices=TransactionType.choices, null=False, blank=False
+    )
+    status = models.SmallIntegerField(
+        choices=TransactionStatus.choices,
+        default=TransactionStatus.COMPLETED,
+        null=False,
+        blank=False,
     )
     meta_data = models.JSONField(null=True, blank=True)
 

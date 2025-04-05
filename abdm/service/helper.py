@@ -1,10 +1,7 @@
-from base64 import b64encode, b64decode
-from datetime import datetime, timezone
+from base64 import b64decode, b64encode
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from abdm.models import AbhaNumber, HealthInformationType
-from abdm.service.request import Request
-from abdm.settings import plugin_settings as settings
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Hash import SHA1
 from Crypto.PublicKey import RSA
@@ -12,6 +9,9 @@ from django.db.models import Q
 from django.db.models.functions import TruncDate
 from rest_framework.exceptions import APIException
 
+from abdm.models import AbhaNumber, HealthInformationType
+from abdm.service.request import Request
+from abdm.settings import plugin_settings as settings
 from care.facility.models import (
     DailyRound,
     InvestigationSession,
@@ -35,7 +35,7 @@ class ABDMInternalException(APIException):
 
 
 def timestamp():
-    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def uuid():
@@ -84,12 +84,20 @@ def cm_id():
     return settings.ABDM_CM_ID
 
 
-def generate_care_contexts_for_existing_data(patient: PatientRegistration):
-    care_contexts = []
+def generate_care_contexts_for_existing_data(
+    patient: PatientRegistration, hf_id: str | None = None
+):
+    care_contexts = {}
 
-    consultations = PatientConsultation.objects.filter(patient=patient)
+    consultations = PatientConsultation.objects.filter(patient_id=patient.id)
+    if hf_id:
+        care_contexts[hf_id] = []
+        consultations = consultations.filter(facility__healthfacility__hf_id=hf_id)
+
     for consultation in consultations:
-        care_contexts.append(
+        consultation_care_contexts = []
+
+        consultation_care_contexts.append(
             {
                 "reference": f"v1::consultation::{consultation.external_id}",
                 "display": f"Encounter on {consultation.created_date.date()}",
@@ -103,7 +111,7 @@ def generate_care_contexts_for_existing_data(patient: PatientRegistration):
 
         daily_rounds = DailyRound.objects.filter(consultation=consultation)
         for daily_round in daily_rounds:
-            care_contexts.append(
+            consultation_care_contexts.append(
                 {
                     "reference": f"v1::daily_round::{daily_round.external_id}",
                     "display": f"Daily Round on {daily_round.created_date.date()}",
@@ -115,7 +123,7 @@ def generate_care_contexts_for_existing_data(patient: PatientRegistration):
             investigationvalue__consultation=consultation
         )
         for investigation_session in investigation_sessions:
-            care_contexts.append(
+            consultation_care_contexts.append(
                 {
                     "reference": f"v1::investigation_session::{investigation_session.external_id}",
                     "display": f"Investigation on {investigation_session.created_date.date()}",
@@ -130,12 +138,23 @@ def generate_care_contexts_for_existing_data(patient: PatientRegistration):
             .distinct("day")
         )
         for prescription in prescriptions:
-            care_contexts.append(
+            consultation_care_contexts.append(
                 {
                     "reference": f"v1::prescription::{prescription.created_date.date()}",
                     "display": f"Medication Prescribed on {prescription.created_date.date()}",
                     "hi_type": HealthInformationType.PRESCRIPTION,
                 }
             )
+
+        facility = consultation.facility
+        if not hasattr(facility, "healthfacility"):
+            # TODO: create transaction to log failed transaction for care_context
+            pass
+
+        hf_id = facility.healthfacility.hf_id
+        if hf_id in care_contexts:
+            care_contexts[hf_id].extend(consultation_care_contexts)
+        else:
+            care_contexts[hf_id] = consultation_care_contexts
 
     return care_contexts
