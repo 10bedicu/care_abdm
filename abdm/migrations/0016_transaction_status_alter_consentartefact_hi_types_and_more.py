@@ -65,11 +65,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # migrations.AddField(
-        #     model_name='transaction',
-        #     name='status',
-        #     field=models.SmallIntegerField(choices=[(1, 'Initiated'), (2, 'Completed'), (3, 'Failed'), (4, 'Cancelled')], default=2),
-        # ),
+        migrations.AddField(
+            model_name='transaction',
+            name='status',
+            field=models.SmallIntegerField(choices=[(1, 'Initiated'), (2, 'Completed'), (3, 'Failed'), (4, 'Cancelled')], default=2),
+        ),
         migrations.AlterField(
             model_name='consentartefact',
             name='hi_types',
