@@ -1,9 +1,13 @@
+import logging
+
 from celery import shared_task
 from django.db.models import Q
 
 from abdm.models.abha_number import AbhaNumber
 from abdm.models.transaction import Transaction, TransactionStatus, TransactionType
 from abdm.service.v3.gateway import GatewayService
+
+logger = logging.getLogger(__name__)
 
 
 @shared_task
@@ -28,11 +32,19 @@ def retry_failed_care_contexts():
         if not patient:
             continue
 
-        GatewayService.link__carecontext(
-            {
-                "patient": patient,
-                "care_contexts": transaction.meta_data.get("care_contexts"),
-                "user": transaction.created_by,
-                "hf_id": transaction.meta_data.get("hf_id"),
-            }
-        )
+        try:
+            GatewayService.link__carecontext(
+                {
+                    "patient": patient,
+                    "care_contexts": transaction.meta_data.get("care_contexts"),
+                    "user": transaction.created_by,
+                    "hf_id": transaction.meta_data.get("hf_id"),
+                }
+            )
+        except Exception as e:
+            logger.exception(
+                "Error while retrying care context linking for transaction %s with error %s",
+                transaction.id,
+                str(e),
+            )
+            continue
