@@ -63,6 +63,7 @@ class HealthInformationType(models.TextChoices):
     IMMUNIZATION_RECORD = "ImmunizationRecord"
     RECORD_ARTIFACT = "HealthDocumentRecord"
     WELLNESS_RECORD = "WellnessRecord"
+    INVOICE = "Invoice"
 
 
 class AccessMode(models.TextChoices):

@@ -1,12 +1,12 @@
 import logging
 
-from abdm.models import HealthInformationType
-from abdm.service.helper import ABDMAPIException
-from abdm.service.v3.gateway import GatewayService
 from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
+from abdm.models import HealthInformationType
+from abdm.service.helper import ABDMAPIException, hf_id_from_abha_id
+from abdm.service.v3.gateway import GatewayService
 from care.facility.models import (
     DailyRound,
     InvestigationValue,
@@ -44,18 +44,19 @@ def create_care_context_on_consultation_creation(
                         }
                     ],
                     "user": instance.created_by,
+                    "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
                 }
             )
         )
     except ABDMAPIException as e:
         # TODO: send a notification to the consultation.created_by to manually link the care_context
         logger.warning(
-            f"Failed to link care context for consultation {instance.external_id} with patient {patient.external_id}, {str(e.detail)}"
+            f"Failed to link care context for consultation {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
         )
 
     except Exception as e:
         logger.exception(
-            f"Failed to link care context for consultation {instance.external_id} with patient {patient.external_id}, {str(e)}"
+            f"Failed to link care context for consultation {instance.external_id} with patient {patient.external_id}, {e!s}"
         )
 
 
@@ -87,17 +88,18 @@ def create_care_context_on_investigation_creation(
                         }
                     ],
                     "user": instance.session.created_by,
+                    "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
                 }
             )
         )
     except ABDMAPIException as e:
         logger.warning(
-            f"Failed to link care context for investigation {instance.session.external_id} with patient {patient.external_id}, {str(e.detail)}"
+            f"Failed to link care context for investigation {instance.session.external_id} with patient {patient.external_id}, {e.detail!s}"
         )
 
     except Exception as e:
         logger.exception(
-            f"Failed to link care context for investigation {instance.session.external_id} with patient {patient.external_id}, {str(e)}"
+            f"Failed to link care context for investigation {instance.session.external_id} with patient {patient.external_id}, {e!s}"
         )
 
 
@@ -123,17 +125,18 @@ def create_care_context_on_daily_round_creation(
                         }
                     ],
                     "user": instance.created_by,
+                    "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
                 }
             )
         )
     except ABDMAPIException as e:
         logger.warning(
-            f"Failed to link care context for daily round {instance.external_id} with patient {patient.external_id}, {str(e.detail)}"
+            f"Failed to link care context for daily round {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
         )
 
     except Exception as e:
         logger.exception(
-            f"Failed to link care context for daily round {instance.external_id} with patient {patient.external_id}, {str(e)}"
+            f"Failed to link care context for daily round {instance.external_id} with patient {patient.external_id}, {e!s}"
         )
 
 
@@ -168,15 +171,16 @@ def create_care_context_on_prescription_creation(
                         }
                     ],
                     "user": instance.prescribed_by,
+                    "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
                 }
             )
         )
     except ABDMAPIException as e:
         logger.warning(
-            f"Failed to link care context for prescription {instance.external_id} with patient {patient.external_id}, {str(e.detail)}"
+            f"Failed to link care context for prescription {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
         )
 
     except Exception as e:
         logger.exception(
-            f"Failed to link care context for prescription {instance.external_id} with patient {patient.external_id}, {str(e)}"
+            f"Failed to link care context for prescription {instance.external_id} with patient {patient.external_id}, {e!s}"
         )
