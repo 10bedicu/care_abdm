@@ -1,10 +1,11 @@
 import logging
 
 from celery import shared_task
-from django.db.models import Q
+from django.db.models import Count, F, Q
 
 from abdm.models.abha_number import AbhaNumber
 from abdm.models.transaction import Transaction, TransactionStatus, TransactionType
+from abdm.service.helper import care_context_dict_from_reference_id
 from abdm.service.v3.gateway import GatewayService
 
 logger = logging.getLogger(__name__)
@@ -12,16 +13,18 @@ logger = logging.getLogger(__name__)
 
 @shared_task
 def retry_failed_care_contexts():
-    unsuccessfull_care_context_transactions = Transaction.objects.filter(
-        ~Q(status=TransactionStatus.COMPLETED),
+    filtered_transactions = Transaction.objects.filter(
+        status__in=[TransactionStatus.INITIATED, TransactionStatus.FAILED],
         type=TransactionType.LINK_CARE_CONTEXT,
     )
 
-    for transaction in unsuccessfull_care_context_transactions:
-        if transaction.meta_data.get("type") != "hip_initiated_linking":
-            continue
+    grouped_transactions = filtered_transactions.values(
+        hf_id=F("meta_data__hf_id"),
+        abha_number=F("meta_data__abha_number"),
+    ).annotate(count=Count("id"))
 
-        abha_id = transaction.meta_data.get("abha_number")
+    for transaction_query in grouped_transactions:
+        abha_id = transaction_query["abha_number"]
         abha_number = AbhaNumber.objects.filter(
             Q(abha_number=abha_id) | Q(health_id=abha_id) | Q(external_id=abha_id)
         ).first()
@@ -32,11 +35,35 @@ def retry_failed_care_contexts():
         if not patient:
             continue
 
+        patients_transactions = filtered_transactions.filter(
+            meta_data__hf_id=transaction_query["hf_id"],
+            meta_data__abha_number=transaction_query["abha_number"],
+        )
+
+        care_contexts = []
+        for transaction in patients_transactions:
+            if transaction.meta_data.get("type") != "hip_initiated_linking":
+                continue
+
+            for care_context_reference in transaction.meta_data.get("care_contexts"):
+                care_context = care_context_dict_from_reference_id(
+                    care_context_reference
+                )
+
+                if care_context:
+                    care_contexts.append(care_context)
+
+            transaction.status = TransactionStatus.CANCELLED
+            transaction.save()
+
+        if len(care_contexts) == 0:
+            continue
+
         try:
             GatewayService.link__carecontext(
                 {
                     "patient": patient,
-                    "care_contexts": transaction.meta_data.get("care_contexts"),
+                    "care_contexts": care_contexts,
                     "user": transaction.created_by,
                     "hf_id": transaction.meta_data.get("hf_id"),
                 }

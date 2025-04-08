@@ -45,11 +45,14 @@ def uuid():
 def encrypt_message(message: str):
     rsa_public_key = RSA.importKey(
         b64decode(
-            Request(settings.ABDM_ABHA_URL).get(
+            Request(settings.ABDM_ABHA_URL)
+            .get(
                 "/v3/profile/public/certificate",
                 None,
-                { "TIMESTAMP": timestamp(), "REQUEST-ID": uuid() }
-            ).json().get("publicKey", "")
+                {"TIMESTAMP": timestamp(), "REQUEST-ID": uuid()},
+            )
+            .json()
+            .get("publicKey", "")
         )
     )
 
@@ -158,3 +161,64 @@ def generate_care_contexts_for_existing_data(
             care_contexts[hf_id] = consultation_care_contexts
 
     return care_contexts
+
+
+def care_context_dict_from_reference_id(reference_id: str):
+    [version, model, param] = reference_id.split("::")
+
+    if version != "v1":
+        return None
+
+    if model == "consultation":
+        patient_consultation = PatientConsultation.objects.filter(
+            external_id=param
+        ).first()
+        if not patient_consultation:
+            return None
+
+        return {
+            "reference": f"v1::consultation::{patient_consultation.external_id}",
+            "display": f"Encounter on {patient_consultation.created_date.date()}",
+            "hi_type": (
+                HealthInformationType.DISCHARGE_SUMMARY
+                if patient_consultation.suggestion == SuggestionChoices.A
+                else HealthInformationType.OP_CONSULTATION
+            ),
+        }
+
+    if model == "daily_round":
+        daily_round = DailyRound.objects.filter(external_id=param).first()
+        if not daily_round:
+            return None
+
+        return {
+            "reference": f"v1::daily_round::{daily_round.external_id}",
+            "display": f"Daily Round on {daily_round.created_date.date()}",
+            "hi_type": HealthInformationType.WELLNESS_RECORD,
+        }
+
+    if model == "investigation_session":
+        investigation_session = InvestigationSession.objects.filter(
+            external_id=param
+        ).first()
+        if not investigation_session:
+            return None
+
+        return {
+            "reference": f"v1::investigation_session::{investigation_session.external_id}",
+            "display": f"Investigation on {investigation_session.created_date.date()}",
+            "hi_type": HealthInformationType.DIAGNOSTIC_REPORT,
+        }
+
+    if model == "prescription":
+        prescription = Prescription.objects.filter(created_date__date=param).first()
+        if not prescription:
+            return None
+
+        return {
+            "reference": f"v1::prescription::{prescription.created_date.date()}",
+            "display": f"Medication Prescribed on {prescription.created_date.date()}",
+            "hi_type": HealthInformationType.PRESCRIPTION,
+        }
+
+    return None
