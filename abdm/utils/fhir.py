@@ -54,6 +54,9 @@ from care.emr.models.medication_statement import (
 )
 from care.emr.models.observation import Observation as ObservationModel
 from care.emr.models.patient import Patient as PatientModel
+from care.emr.models.questionnaire import (
+    QuestionnaireResponse as QuestionnaireResponseModel,
+)
 from care.emr.resources.allergy_intolerance.spec import AllergyIntoleranceReadSpec
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.emr.resources.condition.spec import ConditionReadSpec
@@ -783,6 +786,68 @@ class Fhir:
             author=[self._reference(self._organization(encounter.facility))],
         )
 
+    def _wellness_record_composition(
+        self,
+        responses: list[QuestionnaireResponseModel],
+        files: list[FileUploadModel],
+        care_context_id: str,
+    ):
+        patient = responses[0].patient
+        encounter = responses[0].encounter
+        created_by = responses[0].created_by
+
+        return Composition(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/composition"
+            ),
+            status="final",
+            type=CodeableConcept(text="Wellness Record"),
+            title="Wellness Record",
+            date=datetime.now(UTC).isoformat(),
+            section=[
+                CompositionSection(
+                    title="Physical Examination",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="425044008",
+                                display="Physical exam section",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._observation(observation))
+                        for observation in ObservationModel.objects.filter(
+                            questionnaire_response__in=responses
+                        ).exclude(Q(main_code__isnull=True) | Q(main_code={}))
+                    ],
+                ),
+                CompositionSection(
+                    title="Document Reference",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="371530004",
+                                display="Clinical consultation report",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._document_reference(file))
+                        for file in files
+                    ],
+                ),
+            ],
+            subject=self._reference(self._patient(patient)),
+            encounter=self._reference(self._encounter(encounter))
+            if encounter
+            else None,
+            author=[self._reference(self._practitioner(created_by))],
+        )
+
     def _bundle_entry(self, resource: Resource):
         return BundleEntry(fullUrl=self._reference_url(resource), resource=resource)
 
@@ -819,6 +884,27 @@ class Fhir:
             entry=[
                 self._bundle_entry(
                     self._op_consult_composition(encounter, care_context_id)
+                ),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
+        )
+
+    def create_wellness_record(
+        self,
+        responses: list[QuestionnaireResponseModel],
+        files: list[FileUploadModel],
+        care_context_id: str = uuid(),
+    ):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(
+                    self._wellness_record_composition(responses, files, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],

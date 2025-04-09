@@ -6,6 +6,7 @@ from abdm.models import (
     ConsentRequest,
     HealthInformationType,
 )
+from care.emr.models.encounter import Encounter
 from care.emr.models.patient import Patient
 from care.users.models import User
 
@@ -30,9 +31,19 @@ class LinkCarecontextBody(TypedDict):
     patient: Patient
     care_contexts: list[CareContext]
     user: User
+    encounter: Encounter
 
 
 class LinkCarecontextResponse(TypedDict):
+    pass
+
+
+class DeepLinkNotifyBody(TypedDict):
+    patient: Patient
+    encounter: Encounter
+
+
+class DeepLinkNotifyResponse(TypedDict):
     pass
 
 
