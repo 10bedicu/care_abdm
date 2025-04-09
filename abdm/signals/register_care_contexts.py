@@ -22,7 +22,6 @@ def create_care_context_on_medication_request_creation(
     if (
         not created
         or not patient
-        or getattr(patient, "abha_number", None) is None
         or MedicationRequest.objects.filter(
             encounter=instance.encounter,
             created_date__date=instance.created_date.date(),
