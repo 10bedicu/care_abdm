@@ -786,52 +786,11 @@ class Fhir:
             author=[self._reference(self._organization(encounter.facility))],
         )
 
-    def _bundle_entry(self, resource: Resource):
-        return BundleEntry(fullUrl=self._reference_url(resource), resource=resource)
-
-    def create_prescription_record(
-        self,
-        prescriptions: list[MedicationRequestModel],
-        care_context_id: str = uuid(),
-    ):
-        return Bundle(
-            id=care_context_id,
-            identifier=Identifier(
-                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
-            ),
-            type="document",
-            timestamp=datetime.now(UTC).isoformat(),
-            entry=[
-                self._bundle_entry(
-                    self._prescription_composition(prescriptions, care_context_id)
-                ),
-                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
-            ],
-        )
-
-    def create_op_consult_record(
-        self, encounter: EncounterModel, care_context_id: str = uuid()
-    ):
-        return Bundle(
-            id=care_context_id,
-            identifier=Identifier(
-                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
-            ),
-            type="document",
-            timestamp=datetime.now(UTC).isoformat(),
-            entry=[
-                self._bundle_entry(
-                    self._op_consult_composition(encounter, care_context_id)
-                ),
-                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
-            ],
-        )
-
     def _wellness_record_composition(
         self,
         responses: list[QuestionnaireResponseModel],
         files: list[FileUploadModel],
-        care_context_id: str = uuid(),
+        care_context_id: str,
     ):
         patient = responses[0].patient
         encounter = responses[0].encounter
@@ -887,6 +846,47 @@ class Fhir:
             if encounter
             else None,
             author=[self._reference(self._practitioner(created_by))],
+        )
+
+    def _bundle_entry(self, resource: Resource):
+        return BundleEntry(fullUrl=self._reference_url(resource), resource=resource)
+
+    def create_prescription_record(
+        self,
+        prescriptions: list[MedicationRequestModel],
+        care_context_id: str = uuid(),
+    ):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(
+                    self._prescription_composition(prescriptions, care_context_id)
+                ),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
+        )
+
+    def create_op_consult_record(
+        self, encounter: EncounterModel, care_context_id: str = uuid()
+    ):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(
+                    self._op_consult_composition(encounter, care_context_id)
+                ),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
         )
 
     def create_wellness_record(

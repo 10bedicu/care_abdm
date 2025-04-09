@@ -40,6 +40,7 @@ class LinkCarecontextResponse(TypedDict):
 
 class DeepLinkNotifyBody(TypedDict):
     patient: Patient
+    encounter: Encounter
 
 
 class DeepLinkNotifyResponse(TypedDict):
