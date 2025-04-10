@@ -15,7 +15,7 @@ def migrate_patient_reference(apps, schema_editor):
             abha_number.patient_id = abha_number.deprecated_patient.migrated_emr_patient_id
             bulk.append(abha_number)
 
-        AbhaNumber.objects.bulk_update(bulk, ["patient_id"])
+        AbhaNumber.objects.bulk_update(bulk, ignore_conflicts=True)
 
 class Migration(migrations.Migration):
 
@@ -26,5 +26,4 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunPython(migrate_patient_reference, migrations.RunPython.noop),
-        migrations.RemoveField(model_name="abhanumber", name="deprecated_patient"),
     ]
