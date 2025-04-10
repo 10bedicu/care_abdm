@@ -15,7 +15,7 @@ def migrate_patient_reference(apps, schema_editor):
             abha_number.patient_id = abha_number.deprecated_patient.migrated_emr_patient_id
             bulk.append(abha_number)
 
-        AbhaNumber.objects.bulk_update(bulk, ["patient"])
+        AbhaNumber.objects.bulk_update(bulk, ["patient_id"])
 
 class Migration(migrations.Migration):
 
