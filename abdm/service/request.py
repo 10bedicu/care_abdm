@@ -42,7 +42,7 @@ class Request:
             }
 
             response = requests.post(
-                ABDM_TOKEN_URL, data=data, headers=headers, timeout=10
+                ABDM_TOKEN_URL, data=data, headers=headers, timeout=settings.ABDM_REQUEST_TIMEOUT
             )
 
             if response.status_code < 300:
@@ -75,7 +75,7 @@ class Request:
         url = self.url + path
         headers = self.headers(headers, auth)
 
-        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response = requests.get(url, headers=headers, params=params, timeout=settings.ABDM_REQUEST_TIMEOUT)
 
         if response.status_code == 400 or response.status_code == 401:
             result = response.json()
@@ -90,7 +90,7 @@ class Request:
         payload = json.dumps(data)
         headers = self.headers(headers, auth)
 
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(url, data=payload, headers=headers, timeout=settings.ABDM_REQUEST_TIMEOUT)
 
         if response.status_code == 400 or response.status_code == 401:
             result = response.json()

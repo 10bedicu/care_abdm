@@ -117,6 +117,7 @@ DEFAULTS = {
     "ABDM_HIP_NAME_SUFFIX": "",
     "ABDM_USERNAME": "abdm_user_internal",
     "ABDM_CM_ID": "sbx",
+    "ABDM_REQUEST_TIMEOUT": 30,
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
