@@ -1,14 +1,22 @@
-from typing import Any, Dict
+from typing import Any
 
-from abdm.service.helper import ABDMAPIException, encrypt_message, timestamp, uuid
+from abdm.service.helper import (
+    ABDMAPIException,
+    benefit_name,
+    encrypt_message,
+    timestamp,
+    uuid,
+)
 from abdm.service.request import Request
 from abdm.service.v3.types.health_id import (
     EnrollmentAuthByAbdmBody,
     EnrollmentAuthByAbdmResponse,
     EnrollmentEnrolAbhaAddressBody,
     EnrollmentEnrolAbhaAddressResponse,
-    EnrollmentEnrolByAadhaarBody,
-    EnrollmentEnrolByAadhaarResponse,
+    EnrollmentEnrolByAadhaarViaDemographicsBody,
+    EnrollmentEnrolByAadhaarViaDemographicsResponse,
+    EnrollmentEnrolByAadhaarViaOtpBody,
+    EnrollmentEnrolByAadhaarViaOtpResponse,
     EnrollmentEnrolSuggestionBody,
     EnrollmentEnrolSuggestionResponse,
     EnrollmentRequestOtpBody,
@@ -37,7 +45,7 @@ class HealthIdService:
     request = Request(f"{settings.ABDM_ABHA_URL}/v3")
 
     @staticmethod
-    def handle_error(error: Dict[str, Any] | str) -> str:
+    def handle_error(error: dict[str, Any] | str) -> str:
         if isinstance(error, list):
             return HealthIdService.handle_error(error[0])
 
@@ -59,6 +67,45 @@ class HealthIdService:
             return "".join(list(map(lambda x: str(x), list(error.values()))))
 
         return "Unknown error occurred at ABDM's end while processing the request. Please try again later."
+
+    @staticmethod
+    def enrollment__enrol__byAadhaar__via_demographics(
+        data: EnrollmentEnrolByAadhaarViaDemographicsBody,
+    ) -> EnrollmentEnrolByAadhaarViaDemographicsResponse:
+        if not benefit_name():
+            raise ABDMAPIException(
+                detail="This action is not allowed. This action is only available for selected entities."
+            )
+
+        payload = {
+            "authData": {
+                "authMethods": ["demo_auth"],
+                "demo_auth": {
+                    "txnId": data.get("transaction_id", ""),
+                    "aadhaarNumber": encrypt_message(data.get("aadhaar_number", "")),
+                    "name": data.get("name", ""),
+                    "gender": data.get("gender", ""),
+                    "dateOfBirth": data.get("date_of_birth", ""),
+                },
+            },
+            "consent": {"code": "abha-enrollment", "version": "1.4"},
+        }
+
+        path = "/enrollment/enrol/byAadhaar"
+        response = HealthIdService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "BENEFIT-NAME": benefit_name(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
 
     @staticmethod
     def enrollment__request__otp(
@@ -90,9 +137,9 @@ class HealthIdService:
         return response.json()
 
     @staticmethod
-    def enrollment__enrol__byAadhaar(
-        data: EnrollmentEnrolByAadhaarBody,
-    ) -> EnrollmentEnrolByAadhaarResponse:
+    def enrollment__enrol__byAadhaar__via_otp(
+        data: EnrollmentEnrolByAadhaarViaOtpBody,
+    ) -> EnrollmentEnrolByAadhaarViaOtpResponse:
         payload = {
             "authData": {
                 "authMethods": ["otp"],

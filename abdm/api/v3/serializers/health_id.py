@@ -1,4 +1,18 @@
-from rest_framework.serializers import CharField, ChoiceField, Serializer, UUIDField
+from rest_framework.serializers import (
+    CharField,
+    ChoiceField,
+    DateField,
+    Serializer,
+    UUIDField,
+)
+
+
+class AbhaCreateVerifyAadhaarDemographicsSerializer(Serializer):
+    aadhaar = CharField(max_length=12, min_length=12, required=True)
+    transaction_id = UUIDField(required=False)
+    name = CharField(max_length=50, required=True)
+    date_of_birth = DateField(required=True)
+    gender = ChoiceField(choices=["M", "F", "O"], required=True)
 
 
 class AbhaCreateSendAadhaarOtpSerializer(Serializer):
