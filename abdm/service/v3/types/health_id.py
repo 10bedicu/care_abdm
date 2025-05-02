@@ -1,4 +1,4 @@
-from typing import Dict, List, Literal, Optional, TypedDict
+from typing import Literal, TypedDict
 
 
 class LocalizedDetails(TypedDict):
@@ -9,7 +9,7 @@ class LocalizedDetails(TypedDict):
     wardName: str
     townName: str
     gender: str
-    localizedLabels: Dict[str, str]
+    localizedLabels: dict[str, str]
 
 
 class ABHAProfileFull(TypedDict):
@@ -35,8 +35,8 @@ class ABHAProfileFull(TypedDict):
     districtName: str
     subdistrictName: str
     townName: str
-    authMethods: List[str]
-    tags: Dict[str, str]
+    authMethods: list[str]
+    tags: dict[str, str]
     kycVerified: bool
     localizedDetails: LocalizedDetails
     createdDate: str
@@ -56,7 +56,7 @@ class ABHAProfile(TypedDict):
     middleName: str
     mobile: str
     photo: str
-    phrAddress: List[str]
+    phrAddress: list[str]
     pinCode: str
     stateCode: str
     stateName: str
@@ -71,13 +71,13 @@ class Token(TypedDict):
 
 class Account(TypedDict):
     ABHANumber: str
-    preferredAbhaAddress: Optional[str]
-    name: Optional[str]
-    gender: Optional[Literal["M", "F", "O"]]
-    dob: Optional[str]
-    status: Optional[Literal["ACTIVE"]]
-    profilePhoto: Optional[str]
-    kycVerified: Optional[bool]
+    preferredAbhaAddress: str | None
+    name: str | None
+    gender: Literal["M", "F", "O"] | None
+    dob: str | None
+    status: Literal["ACTIVE"] | None
+    profilePhoto: str | None
+    kycVerified: bool | None
 
 
 class User(TypedDict):
@@ -89,8 +89,8 @@ class User(TypedDict):
 
 
 class EnrollmentRequestOtpBody(TypedDict):
-    transaction_id: Optional[str]
-    scope: List[Literal["abha-enrol", "dl-flow", "mobile-verify", "email-verify"]]
+    transaction_id: str | None
+    scope: list[Literal["abha-enrol", "dl-flow", "mobile-verify", "email-verify"]]
     type: Literal["aadhaar", "mobile"]
     value: str
 
@@ -100,13 +100,21 @@ class EnrollmentRequestOtpResponse(TypedDict):
     message: str
 
 
-class EnrollmentEnrolByAadhaarBody(TypedDict):
+class EnrollmentEnrolByAadhaarViaOtpBody(TypedDict):
     transaction_id: str
     otp: str
     mobile: str
 
 
-class EnrollmentEnrolByAadhaarResponse(TypedDict):
+class EnrollmentEnrolByAadhaarViaDemographicsBody(TypedDict):
+    transaction_id: str
+    aadhaar_number: str
+    name: str
+    date_of_birth: str
+    gender: Literal["M", "F", "O"]
+
+
+class EnrollmentEnrolByAadhaarViaOtpResponse(TypedDict):
     ABHAProfile: ABHAProfile
     isNew: bool
     message: str
@@ -114,14 +122,40 @@ class EnrollmentEnrolByAadhaarResponse(TypedDict):
     txnId: str
 
 
+class EnrollmentEnrolByAadhaarViaDemographicsResponse(TypedDict):
+    healthIdNumber: str
+    healthId: str
+    mobile: str
+    firstName: str
+    middleName: str
+    lastName: str
+    name: str
+    yearOfBirth: str
+    dayOfBirth: str
+    monthOfBirth: str
+    gender: Literal["M", "F", "O"]
+    profilePhoto: str
+    stateCode: str
+    districtCode: str
+    pincode: str
+    address: str
+    stateName: str
+    districtName: str
+    kycVerified: str
+    token: str
+    jwtResponse: Token
+    status: Literal["ACTIVE"]
+    new: bool
+
+
 class EnrollmentAuthByAbdmBody(TypedDict):
-    scope: List[Literal["abha-enrol", "dl-flow", "mobile-verify", "email-verify"]]
+    scope: list[Literal["abha-enrol", "dl-flow", "mobile-verify", "email-verify"]]
     transaction_id: str
     otp: str
 
 
 class EnrollmentAuthByAbdmResponse(TypedDict):
-    accounts: List[Account]
+    accounts: list[Account]
     message: str
     authResult: Literal["success", "failure"]
     txnId: str
@@ -132,7 +166,7 @@ class EnrollmentEnrolSuggestionBody(TypedDict):
 
 
 class EnrollmentEnrolSuggestionResponse(TypedDict):
-    abhaAddressList: List[str]
+    abhaAddressList: list[str]
     txnId: str
 
 
@@ -149,7 +183,7 @@ class EnrollmentEnrolAbhaAddressResponse(TypedDict):
 
 
 class ProfileLoginRequestOtpBody(TypedDict):
-    scope: List[
+    scope: list[
         Literal[
             "abha-login",
             "aadhaar-verify",
@@ -167,7 +201,7 @@ class ProfileLoginRequestOtpResponse(TypedDict):
 
 
 class ProfileLoginVerifyBody(TypedDict):
-    scope: List[
+    scope: list[
         Literal[
             "abha-login",
             "aadhaar-verify",
@@ -186,11 +220,11 @@ class ProfileLoginVerifyResponse(TypedDict):
     expiresIn: int
     refreshToken: str
     refreshExpiresIn: int
-    accounts: List[Account]
+    accounts: list[Account]
 
 
 class PhrWebLoginAbhaRequestOtpBody(TypedDict):
-    scope: List[
+    scope: list[
         Literal[
             "abha-address-login",
             "aadhaar-verify",
@@ -208,7 +242,7 @@ class PhrWebLoginAbhaRequestOtpResponse(TypedDict):
 
 
 class PhrWebLoginAbhaVerifyBody(TypedDict):
-    scope: List[
+    scope: list[
         Literal[
             "abha-address-login",
             "aadhaar-verify",
@@ -222,7 +256,7 @@ class PhrWebLoginAbhaVerifyBody(TypedDict):
 class PhrWebLoginAbhaVerifyResponse(TypedDict):
     message: str
     authResult: Literal["success", "failure"]
-    users: List[User]
+    users: list[User]
     tokens: Token
 
 
@@ -233,8 +267,8 @@ class PhrWebLoginAbhaSearchBody(TypedDict):
 class PhrWebLoginAbhaSearchResponse(TypedDict):
     healthIdNumber: str
     abhaAddress: str
-    authMethods: List[Literal["AADHAAR_OTP", "MOBILE_OTP", "DEMOGRAPHICS"]]
-    blockedAuthMethods: List[Literal["AADHAAR_OTP", "MOBILE_OTP", "DEMOGRAPHICS"]]
+    authMethods: list[Literal["AADHAAR_OTP", "MOBILE_OTP", "DEMOGRAPHICS"]]
+    blockedAuthMethods: list[Literal["AADHAAR_OTP", "MOBILE_OTP", "DEMOGRAPHICS"]]
     status: Literal["ACTIVE"]
     message: str | None
     fullName: str
