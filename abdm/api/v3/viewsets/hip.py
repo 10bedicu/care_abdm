@@ -2,6 +2,15 @@ import logging
 from datetime import datetime
 from functools import reduce
 
+from django.contrib.postgres.search import TrigramSimilarity
+from django.core.cache import cache
+from django.db.models import Q
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
+
 from abdm.api.v3.serializers.hip import (
     ConsentRequestHipNotifySerializer,
     HipHealthInformationRequestSerializer,
@@ -22,22 +31,8 @@ from abdm.models import (
 )
 from abdm.service.helper import uuid
 from abdm.service.v3.gateway import GatewayService
-from django.contrib.postgres.search import TrigramSimilarity
-from django.core.cache import cache
-from django.db.models import Q
-from rest_framework import status
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet
-
 from care.facility.api.serializers.patient import PatientTransferSerializer
-from care.facility.models import (
-    District,
-    PatientConsultation,
-    PatientRegistration,
-    State,
-)
+from care.facility.models import District, PatientRegistration, State
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +91,7 @@ class HIPCallbackViewSet(GenericViewSet):
             logger.warning(
                 f"Validation failed for request data: {request.data}, "
                 f"Path: {request.path}, Method: {request.method}, "
-                f"Error details: {str(exception)}"
+                f"Error details: {exception!s}"
             )
 
             raise exception
@@ -114,7 +109,7 @@ class HIPCallbackViewSet(GenericViewSet):
 
         if not cached_data:
             logger.warning(
-                f"Request ID: {str(validated_data.get('response').get('requestId'))} not found in cache"
+                f"Request ID: {validated_data.get('response').get('requestId')!s} not found in cache"
             )
 
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -131,7 +126,7 @@ class HIPCallbackViewSet(GenericViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         cache.set(
-            "abdm_link_token__" + abha_number.health_id,
+            f"abdm_link_token__{cached_data.get("hf_id")}__{abha_number.health_id}",
             validated_data.get("linkToken"),
             timeout=60 * 30,
         )
@@ -139,9 +134,11 @@ class HIPCallbackViewSet(GenericViewSet):
         if cached_data.get("purpose") == "LINK_CARECONTEXT":
             GatewayService.link__carecontext(
                 {
+                    "reference_id": cached_data.get("reference_id"),
                     "patient": abha_number.patient,
                     "care_contexts": cached_data.get("care_contexts", []),
                     "user": request.user,
+                    "hf_id": cached_data.get("hf_id"),
                 }
             )
 
@@ -163,10 +160,10 @@ class HIPCallbackViewSet(GenericViewSet):
     def hip__patient__care_context__discover(self, request):
         validated_data = self.validate_request(request)
 
-        patient_data = validated_data.get("patient")
+        patient_data = validated_data.get("patient", {})
         identifiers = [
-            *patient_data.get("verifiedIdentifiers"),
-            *patient_data.get("unverifiedIdentifiers"),
+            *patient_data.get("verifiedIdentifiers", []),
+            *patient_data.get("unverifiedIdentifiers", []),
         ]
 
         health_id_number = next(
@@ -212,6 +209,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "request_id": request.headers.get("REQUEST-ID"),
                 "patient": patient,
                 "matched_by": [matched_by],
+                "hf_id": request.headers.get("x-hip-id"),
             }
         )
 
@@ -271,9 +269,7 @@ class HIPCallbackViewSet(GenericViewSet):
 
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        if not cached_data.get("otp") == validated_data.get("confirmation").get(
-            "token"
-        ):
+        if cached_data.get("otp") != validated_data.get("confirmation").get("token"):
             logger.warning(
                 f"Invalid OTP: {validated_data.get('confirmation').get('token')} for Reference ID: {validated_data.get('confirmation').get('linkRefNumber')}"
             )
@@ -293,6 +289,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "request_id": request.headers.get("REQUEST-ID"),
                 "patient": patient,
                 "care_contexts": cached_data.get("care_contexts"),
+                "hf_id": request.headers.get("x-hip-id"),
             }
         )
 
@@ -400,7 +397,7 @@ class HIPCallbackViewSet(GenericViewSet):
             )
         except Exception as exception:
             logger.error(
-                f"Error occurred while transferring health information: {str(exception)}"
+                f"Error occurred while transferring health information: {exception!s}"
             )
 
             GatewayService.data_flow__health_information__notify(

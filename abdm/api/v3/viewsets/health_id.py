@@ -1,5 +1,13 @@
 from datetime import datetime
 
+from django.db.models import Q
+from django.http import HttpResponse
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
+
 from abdm.api.serializers.abha_number import AbhaNumberSerializer
 from abdm.api.v3.serializers.health_id import (
     AbhaCreateAbhaAddressSuggestionSerializer,
@@ -19,14 +27,6 @@ from abdm.service.helper import generate_care_contexts_for_existing_data
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
-from django.db.models import Q
-from django.http import HttpResponse
-from rest_framework import status
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet
-
 from care.utils.queryset.patient import get_patient_queryset
 
 
@@ -107,13 +107,16 @@ class HealthIdViewSet(GenericViewSet):
         abha_number.patient = patient
         abha_number.save()
 
-        care_contexts = generate_care_contexts_for_existing_data(patient)
-        if len(care_contexts) > 0:
+        hf_care_contexts = generate_care_contexts_for_existing_data(patient)
+
+        for hf_id in hf_care_contexts:
+            care_contexts = hf_care_contexts[hf_id]
             GatewayService.link__carecontext(
                 {
                     "patient": patient,
                     "care_contexts": care_contexts,
                     "user": request.user,
+                    "hf_id": hf_id,
                 }
             )
 
