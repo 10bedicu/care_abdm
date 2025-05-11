@@ -141,6 +141,12 @@ class HealthIdViewSet(GenericViewSet):
                 "date_of_birth": validated_data.get("date_of_birth").strftime(
                     "%d-%m-%Y"
                 ),
+                "state_code": validated_data.get("state_code"),
+                "district_code": validated_data.get("district_code"),
+                "address": validated_data.get("address"),
+                "pin_code": validated_data.get("pin_code"),
+                "mobile": validated_data.get("mobile"),
+                "profile_photo": validated_data.get("profile_photo"),
             }
         )
 
