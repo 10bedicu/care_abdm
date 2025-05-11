@@ -112,6 +112,12 @@ class EnrollmentEnrolByAadhaarViaDemographicsBody(TypedDict):
     name: str
     date_of_birth: str
     gender: Literal["M", "F", "O"]
+    state_code: str
+    district_code: str
+    address: str | None
+    pin_code: str | None
+    mobile: str | None
+    profile_photo: str | None
 
 
 class EnrollmentEnrolByAadhaarViaOtpResponse(TypedDict):
