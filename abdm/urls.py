@@ -3,11 +3,11 @@ from rest_framework.routers import SimpleRouter
 from abdm.api.v3.viewsets.health_id import HealthIdViewSet
 from abdm.api.v3.viewsets.hip import HIPCallbackViewSet, HIPViewSet
 from abdm.api.v3.viewsets.hiu import HIUCallbackViewSet, HIUViewSet
+from abdm.api.v3.viewsets.utility import UtilityViewSet
 from abdm.api.viewsets.abha_number import AbhaNumberViewSet
 from abdm.api.viewsets.consent import ConsentViewSet
 from abdm.api.viewsets.health_facility import HealthFacilityViewSet
 from abdm.api.viewsets.health_information import HealthInformationViewSet
-from care_abdm.abdm.api.v3.viewsets.utility import UtilityViewSet
 
 
 class OptionalSlashRouter(SimpleRouter):
