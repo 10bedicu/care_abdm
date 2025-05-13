@@ -17,7 +17,7 @@ class UtilityViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
 
     def get_state_districts(self):
-        current_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
+        current_dir = Path(__file__).resolve().parent.parent.parent.parent
         json_path = current_dir / "data" / "state_districts.json"
 
         with json_path.open() as f:
