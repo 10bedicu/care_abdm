@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 
 import environ
@@ -123,6 +124,7 @@ DEFAULTS = {
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
+    "BASE_FILE_PATH": str(Path(__file__).resolve().parent.parent),
 }
 
 plugin_settings = PluginSettings(
