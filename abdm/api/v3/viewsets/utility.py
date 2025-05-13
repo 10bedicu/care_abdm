@@ -9,6 +9,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
+from abdm.settings import settings as plugin_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,8 +19,12 @@ class UtilityViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
 
     def get_state_districts(self):
-        current_dir = Path(__file__).resolve().parent.parent.parent.parent
-        json_path = current_dir / "data" / "state_districts.json"
+        json_path = (
+            Path(plugin_settings.BASE_FILE_PATH)
+            / "abdm"
+            / "data"
+            / "state_districts.json"
+        )
 
         with json_path.open() as f:
             return json.load(f)
