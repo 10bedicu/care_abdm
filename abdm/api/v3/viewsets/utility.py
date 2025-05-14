@@ -1,6 +1,6 @@
 import json
 import logging
-from pathlib import Path
+from importlib import resources
 
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -8,8 +8,6 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
-
-from abdm.settings import settings as plugin_settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,15 +17,16 @@ class UtilityViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
 
     def get_state_districts(self):
-        json_path = (
-            Path(plugin_settings.BASE_FILE_PATH)
-            / "abdm"
-            / "data"
-            / "state_districts.json"
-        )
-
-        with json_path.open() as f:
-            return json.load(f)
+        try:
+            with (
+                resources.files("abdm.data")
+                .joinpath("state_districts.json")
+                .open() as f
+            ):
+                return json.load(f)
+        except Exception:
+            logger.error("Error loading state_districts.json")
+            raise
 
     @action(detail=False, methods=["get"])
     def states(self, request):

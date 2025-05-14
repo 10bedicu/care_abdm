@@ -47,6 +47,9 @@ setup(
     keywords="abdm",
     name="abdm",
     packages=find_packages(include=["abdm", "abdm.*"]),
+    package_data={
+        "abdm": ["data/*.json"],
+    },
     test_suite="tests",
     tests_require=test_requirements,
     url="https://github.com/ohcnetwork/care_abdm",
