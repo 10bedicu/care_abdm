@@ -95,3 +95,75 @@ class AbhaLoginCheckAuthMethodsSerializer(Serializer):
 class LinkAbhaNumberAndPatientSerializer(Serializer):
     patient = UUIDField(required=True)
     abha_number = UUIDField(required=True)
+
+
+class PhrEnrollmentSendOtpSerializer(Serializer):
+    TYPE_CHOICES = [
+        ("abha-number", "ABHA Number"),
+        ("mobile-number", "Mobile Number"),
+    ]
+
+    OTP_SYSTEM_CHOICES = [
+        ("aadhaar", "Aadhaar"),
+        ("abdm", "Abdm"),
+    ]
+
+    type = ChoiceField(choices=TYPE_CHOICES, required=True)
+    value = CharField(max_length=50, required=True)
+    otp_system = ChoiceField(choices=OTP_SYSTEM_CHOICES, required=True)
+
+
+class PhrEnrollmentVerifyOtpSerializer(Serializer):
+    TYPE_CHOICES = [
+        ("abha-number", "ABHA Number"),
+        ("mobile-number", "Mobile Number"),
+    ]
+
+    OTP_SYSTEM_CHOICES = [
+        ("aadhaar", "Aadhaar"),
+        ("abdm", "Abdm"),
+    ]
+
+    type = ChoiceField(choices=TYPE_CHOICES, required=True)
+    otp = CharField(max_length=6, min_length=6, required=True)
+    otp_system = ChoiceField(choices=OTP_SYSTEM_CHOICES, required=True)
+    transaction_id = UUIDField(required=True)
+
+
+class PhrEnrollmentAbhaAddressSuggestionSerializer(Serializer):
+    transaction_id = UUIDField(required=True)
+    first_name = CharField(max_length=100, required=True)
+    last_name = CharField(max_length=100, required=False, allow_blank=True)
+    year_of_birth = CharField(max_length=4, required=True)
+    month_of_birth = CharField(max_length=2, required=False, allow_blank=True)
+    day_of_birth = CharField(max_length=2, required=False, allow_blank=True)
+
+
+class PhrEnrollmentAbhaAddressExistsSerializer(Serializer):
+    abha_address = CharField(max_length=50, min_length=3, required=True)
+
+
+class PhrAddressDetailsSerializer(Serializer):
+    abha_address = CharField(max_length=50, required=True)
+    address = CharField(max_length=255, required=True)
+    day_of_birth = CharField(max_length=2, required=False, allow_blank=True)
+    district_code = CharField(max_length=10, required=True)
+    district_name = CharField(max_length=100, required=True)
+    email = CharField(max_length=100, required=False, allow_blank=True)
+    profile_photo = CharField(required=False, allow_blank=True)
+    first_name = CharField(max_length=100, required=True)
+    gender = CharField(max_length=1, required=True)
+    last_name = CharField(max_length=100, required=False, allow_blank=True)
+    middle_name = CharField(max_length=100, required=False, allow_blank=True)
+    mobile = CharField(max_length=10, required=True)
+    month_of_birth = CharField(max_length=2, required=False, allow_blank=True)
+    password = CharField(write_only=True, required=True)
+    pin_code = CharField(max_length=6, required=True)
+    state_code = CharField(max_length=10, required=True)
+    state_name = CharField(max_length=100, required=True)
+    year_of_birth = CharField(max_length=4, required=True)
+
+
+class PhrEnrollmentEnrolAbhaAddressSerializer(Serializer):
+    phr_details = PhrAddressDetailsSerializer(required=True)
+    transaction_id = UUIDField(required=True)

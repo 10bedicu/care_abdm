@@ -21,6 +21,15 @@ from abdm.service.v3.types.health_id import (
     EnrollmentEnrolSuggestionResponse,
     EnrollmentRequestOtpBody,
     EnrollmentRequestOtpResponse,
+    PhrEnrollmentAbhaAddressExistsBody,
+    PhrEnrollmentAbhaAddressSuggestionBody,
+    PhrEnrollmentAbhaAddressSuggestionResponse,
+    PhrEnrollmentEnrolAbhaAddressBody,
+    PhrEnrollmentEnrolAbhaAddressResponse,
+    PhrEnrollmentRequestOtpBody,
+    PhrEnrollmentRequestOtpResponse,
+    PhrEnrollmentVerifyOtpBody,
+    PhrEnrollmentVerifyOtpResponse,
     PhrWebLoginAbhaRequestOtpBody,
     PhrWebLoginAbhaRequestOtpResponse,
     PhrWebLoginAbhaSearchBody,
@@ -448,3 +457,154 @@ class HealthIdService:
             raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
 
         return response.content
+
+    """ PHR ENROLLMENT """
+
+    @staticmethod
+    def phr__enrollment__request__otp(
+        data: PhrEnrollmentRequestOtpBody,
+    ) -> PhrEnrollmentRequestOtpResponse:
+        payload = {
+            "scope": data.get("scope", []),
+            "loginHint": data.get("type", ""),
+            "loginId": encrypt_message(data.get("value", "")),
+            "otpSystem": data.get("otp_system", ""),
+        }
+
+        path = "/phr/app/enrollment/request/otp"
+        response = HealthIdService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
+
+    @staticmethod
+    def phr__enrollment__verify__otp(
+        data: PhrEnrollmentVerifyOtpBody,
+    ) -> PhrEnrollmentVerifyOtpResponse:
+        payload = {
+            "scope": data.get("scope", []),
+            "authData": {
+                "authMethods": ["otp"],
+                "otp": {
+                    "txnId": data.get("transaction_id", ""),
+                    "otpValue": encrypt_message(data.get("otp", "")),
+                },
+            },
+        }
+
+        path = "/phr/app/enrollment/verify"
+        response = HealthIdService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
+
+    @staticmethod
+    def phr__enrollment__abha_address__suggestion(
+        data: PhrEnrollmentAbhaAddressSuggestionBody,
+    ) -> PhrEnrollmentAbhaAddressSuggestionResponse:
+        payload = {
+            "txnId": data.get("transaction_id", ""),
+            "firstName": data.get("first_name", ""),
+            "lastName": data.get("last_name", ""),
+            "yearOfBirth": data.get("year_of_birth", ""),
+            "monthOfBirth": data.get("month_of_birth", ""),
+            "dayOfBirth": data.get("day_of_birth", ""),
+        }
+
+        path = "/phr/app/enrollment/suggestion"
+        response = HealthIdService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
+
+    @staticmethod
+    def phr__enrollment__abha_address__exists(
+        data: PhrEnrollmentAbhaAddressExistsBody,
+    ) -> bool:
+        path = "/phr/app/enrollment/isExists"
+        response = HealthIdService.request.get(
+            path,
+            params={"abhaAddress": data.get("abha_address", "")},
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.content.decode().lower() == "true"
+
+    @staticmethod
+    def phr__enrollment__enrol__abha_address(
+        data: PhrEnrollmentEnrolAbhaAddressBody,
+    ) -> PhrEnrollmentEnrolAbhaAddressResponse:
+        phr_details = data.get("phr_details", {})
+        payload = {
+            "phrDetails": {
+                "abhaAddress": phr_details.get("abhaAddress", ""),
+                "address": phr_details.get("address", ""),
+                "dayOfBirth": phr_details.get("dayOfBirth", ""),
+                "districtCode": phr_details.get("districtCode", ""),
+                "districtName": phr_details.get("districtName", ""),
+                "email": encrypt_message(phr_details.get("email", ""))
+                if phr_details.get("email")
+                else "",
+                "profilePhoto": phr_details.get("profilePhoto", ""),
+                "firstName": phr_details.get("firstName", ""),
+                "gender": phr_details.get("gender", ""),
+                "lastName": phr_details.get("lastName", ""),
+                "middleName": phr_details.get("middleName", ""),
+                "mobile": encrypt_message(phr_details.get("mobile", "")),
+                "monthOfBirth": phr_details.get("monthOfBirth", ""),
+                "password": encrypt_message(phr_details.get("password", "")),
+                "pinCode": phr_details.get("pinCode", ""),
+                "stateCode": phr_details.get("stateCode", ""),
+                "stateName": phr_details.get("stateName", ""),
+                "yearOfBirth": phr_details.get("yearOfBirth", ""),
+            },
+            "txnId": data.get("transaction_id", ""),
+        }
+
+        path = "/phr/app/enrollment/enrol"
+        response = HealthIdService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
