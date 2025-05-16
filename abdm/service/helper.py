@@ -1,4 +1,4 @@
-from base64 import b64encode, b64decode
+from base64 import b64decode, b64encode
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -78,6 +78,9 @@ def hf_id_from_abha_id(health_id: str):
 
 def cm_id():
     return settings.ABDM_CM_ID
+
+def benefit_name():
+    return settings.ABDM_BENEFIT_NAME
 
 
 def generate_care_contexts_for_existing_data(patient: Patient):
