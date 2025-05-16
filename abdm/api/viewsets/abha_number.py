@@ -6,7 +6,7 @@ from django.http import Http404
 from rest_framework.mixins import CreateModelMixin, RetrieveModelMixin
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.viewsets import GenericViewSet
-
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from care.utils.queryset.patient import get_patient_queryset
 
 
@@ -19,6 +19,24 @@ class AbhaNumberViewSet(
     model = AbhaNumber
     queryset = AbhaNumber.objects.all()
     permission_classes = (IsAuthenticated,)
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="pk",
+                description="A unique string (alphanumeric) identifying the ABHA number. It can be `abha_number`, `health_id`, or `patient__external_id`.",
+                required=True,
+                type=str, #setting variable character as type for parameters
+                location=OpenApiParameter.PATH,
+            )
+        ],
+        responses={200: AbhaNumberSerializer},
+    )
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Retriving the ABHA Number instance using `pk`, which can be `abha_number`, `health_id`, or `patient__external_id`.
+        """
+        return super().retrieve(request, *args, **kwargs)
 
     def get_object(self):
         id = self.kwargs.get("pk")
@@ -33,7 +51,6 @@ class AbhaNumberViewSet(
             raise Http404
 
         self.check_object_permissions(self.request, instance)
-
         return instance
 
     def perform_create(self, serializer):
