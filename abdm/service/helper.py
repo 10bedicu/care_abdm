@@ -87,6 +87,10 @@ def cm_id():
     return settings.ABDM_CM_ID
 
 
+def benefit_name():
+    return settings.ABDM_BENEFIT_NAME
+
+
 def generate_care_contexts_for_existing_data(
     patient: PatientRegistration, hf_id: str | None = None
 ):
