@@ -34,6 +34,8 @@ from abdm.service.v3.types.gateway import (
     DataFlowHealthInformationRequestResponse,
     DataFlowHealthInformationTransferBody,
     DataFlowHealthInformationTransferResponse,
+    DeepLinkNotifyBody,
+    DeepLinkNotifyResponse,
     IdentityAuthenticationBody,
     IdentityAuthenticationResponse,
     LinkCarecontextBody,
@@ -132,15 +134,19 @@ class GatewayService:
     @staticmethod
     def link__carecontext(data: LinkCarecontextBody) -> LinkCarecontextResponse:
         patient = data.get("patient")
+        encounter = data.get("encounter")
         if not patient:
             raise ABDMAPIException(detail="Provide a patient to link care context")
 
         abha_number = getattr(patient, "abha_number", None)
         if not abha_number:
-            raise ABDMAPIException(
-                detail="Failed to link consultation, Patient does not have an ABHA number"
+            GatewayService.link__patient_sms_notify(
+                {
+                    "patient": patient,
+                    "encounter": encounter,
+                }
             )
-
+            return {}
         care_contexts = data.get("care_contexts", [])
         if len(care_contexts) == 0:
             raise ABDMAPIException(detail="Provide at least 1 care contexts to link")
@@ -213,6 +219,44 @@ class GatewayService:
             },
             created_by=data.get("user"),
         )
+
+        return {}
+
+    @staticmethod
+    def link__patient_sms_notify(data: DeepLinkNotifyBody) -> DeepLinkNotifyResponse:
+        patient = data.get("patient")
+        encounter = data.get("encounter")
+
+        if not encounter:
+            return {}
+
+        request_id = uuid()
+        time_stamp = timestamp()
+
+        payload = {
+            "requestId": request_id,
+            "timestamp": time_stamp,
+            "notification": {
+                "phoneNo": patient.phone_number,
+                "hip": {
+                    "id": encounter.facility.healthfacility.hf_id,
+                },
+            },
+        }
+
+        path = "/hip/v3/link/patient/links/sms/notify2"
+        response = GatewayService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": request_id,
+                "TIMESTAMP": time_stamp,
+                "X-CM-ID": cm_id(),
+            },
+        )
+
+        if response.status_code != 202:
+            raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
 
         return {}
 
