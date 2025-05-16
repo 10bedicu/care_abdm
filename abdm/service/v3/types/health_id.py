@@ -154,6 +154,21 @@ class EnrollmentEnrolByAadhaarViaDemographicsResponse(TypedDict):
     new: bool
 
 
+class EnrollmentEnrolByAadhaarViaBioBody(TypedDict):
+    transaction_id: str
+    aadhaar: str
+    fingerprint_pid: str
+    mobile: str
+
+
+class EnrollmentEnrolByAadhaarViaBioResponse(TypedDict):
+    ABHAProfile: ABHAProfile
+    isNew: bool
+    message: str
+    tokens: Token
+    txnId: str
+
+
 class EnrollmentAuthByAbdmBody(TypedDict):
     scope: list[Literal["abha-enrol", "dl-flow", "mobile-verify", "email-verify"]]
     transaction_id: str

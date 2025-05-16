@@ -7,6 +7,13 @@ from rest_framework.serializers import (
 )
 
 
+class AbhaCreateVerifyAadhaarBioSerializer(Serializer):
+    transaction_id = UUIDField(required=True)
+    aadhaar = CharField(max_length=12, min_length=12, required=True)
+    fingerprint_pid = CharField(max_length=1000, required=True)
+    mobile = CharField(max_length=10, min_length=10, required=True)
+
+
 class AbhaCreateVerifyAadhaarDemographicsSerializer(Serializer):
     aadhaar = CharField(max_length=12, min_length=12, required=True)
     transaction_id = UUIDField(required=False)
