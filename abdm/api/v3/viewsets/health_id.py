@@ -15,6 +15,7 @@ from abdm.api.v3.serializers.health_id import (
     AbhaCreateEnrolAbhaAddressSerializer,
     AbhaCreateLinkMobileNumberSerializer,
     AbhaCreateSendAadhaarOtpSerializer,
+    AbhaCreateVerifyAadhaarBioSerializer,
     AbhaCreateVerifyAadhaarDemographicsSerializer,
     AbhaCreateVerifyAadhaarOtpSerializer,
     AbhaCreateVerifyMobileOtpSerializer,
@@ -37,6 +38,7 @@ class HealthIdViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
 
     serializer_action_classes = {
+        "abha_create__verify_aadhaar_bio": AbhaCreateVerifyAadhaarBioSerializer,
         "abha_create__verify_aadhaar_demographics": AbhaCreateVerifyAadhaarDemographicsSerializer,
         "abha_create__send_aadhaar_otp": AbhaCreateSendAadhaarOtpSerializer,
         "abha_create__verify_aadhaar_otp": AbhaCreateVerifyAadhaarOtpSerializer,
@@ -123,6 +125,77 @@ class HealthIdViewSet(GenericViewSet):
 
         return Response(
             AbhaNumberSerializer(abha_number).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="create/verify_aadhaar_bio")
+    def abha_create__verify_aadhaar_bio(self, request):
+        validated_data = self.validate_request(request)
+
+        result = HealthIdService.enrollment__enrol__byAadhaar__via_bio(
+            {
+                "transaction_id": str(validated_data.get("transaction_id")),
+                "aadhaar": validated_data.get("aadhaar"),
+                "mobile": validated_data.get("mobile"),
+                "fingerprint_pid": validated_data.get("fingerprint_pid"),
+            }
+        )
+
+        abha_profile = result.get("ABHAProfile")
+        token = result.get("tokens")
+        (abha_number, created) = AbhaNumber.objects.update_or_create(
+            abha_number=abha_profile.get("ABHANumber"),
+            defaults={
+                "abha_number": abha_profile.get("ABHANumber"),
+                "health_id": abha_profile.get("phrAddress", [None])[0],
+                "name": " ".join(
+                    list(
+                        filter(
+                            lambda x: x.strip(),
+                            [
+                                abha_profile.get("firstName"),
+                                abha_profile.get("middleName"),
+                                abha_profile.get("lastName"),
+                            ],
+                        )
+                    )
+                ),
+                "first_name": abha_profile.get("firstName"),
+                "middle_name": abha_profile.get("middleName"),
+                "last_name": abha_profile.get("lastName"),
+                "gender": abha_profile.get("gender"),
+                "date_of_birth": datetime.strptime(
+                    abha_profile.get("dob"), "%d-%m-%Y"
+                ).strftime("%Y-%m-%d"),
+                "address": abha_profile.get("address"),
+                "district": abha_profile.get("districtName"),
+                "state": abha_profile.get("stateName"),
+                "pincode": abha_profile.get("pinCode"),
+                "email": abha_profile.get("email"),
+                "mobile": abha_profile.get("mobile"),
+                "profile_photo": abha_profile.get("photo"),
+                "new": result.get("isNew"),
+                "access_token": token.get("token"),
+                "refresh_token": token.get("refreshToken"),
+            },
+        )
+
+        Transaction.objects.create(
+            reference_id=str(validated_data.get("transaction_id")),
+            type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
+            meta_data={
+                "abha_number": str(abha_number.external_id),
+                "method": "create_via_aadhaar_bio",
+            },
+            created_by=request.user,
+        )
+
+        return Response(
+            {
+                "transaction_id": result.get("txnId"),
+                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "created": created,
+            },
             status=status.HTTP_200_OK,
         )
 

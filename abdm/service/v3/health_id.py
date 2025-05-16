@@ -13,6 +13,8 @@ from abdm.service.v3.types.health_id import (
     EnrollmentAuthByAbdmResponse,
     EnrollmentEnrolAbhaAddressBody,
     EnrollmentEnrolAbhaAddressResponse,
+    EnrollmentEnrolByAadhaarViaBioBody,
+    EnrollmentEnrolByAadhaarViaBioResponse,
     EnrollmentEnrolByAadhaarViaDemographicsBody,
     EnrollmentEnrolByAadhaarViaDemographicsResponse,
     EnrollmentEnrolByAadhaarViaOtpBody,
@@ -67,6 +69,38 @@ class HealthIdService:
             return "".join(list(map(lambda x: str(x), list(error.values()))))
 
         return "Unknown error occurred at ABDM's end while processing the request. Please try again later."
+
+    @staticmethod
+    def enrollment__enrol__byAadhaar__via_bio(
+        data: EnrollmentEnrolByAadhaarViaBioBody,
+    ) -> EnrollmentEnrolByAadhaarViaBioResponse:
+        payload = {
+            "authData": {
+                "authMethods": ["bio"],
+                "bio": {
+                    "txnId": data.get("transaction_id", ""),
+                    "aadhaar": encrypt_message(data.get("aadhaar", "")),
+                    "fingerPrintAuthPid": data.get("fingerprint_pid", ""),
+                    "mobile": data.get("mobile", ""),
+                },
+            },
+            "consent": {"code": "abha-enrollment", "version": "1.4"},
+        }
+
+        path = "/enrollment/enrol/byAadhaar"
+        response = HealthIdService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
 
     @staticmethod
     def enrollment__enrol__byAadhaar__via_demographics(
