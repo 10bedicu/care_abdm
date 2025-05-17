@@ -41,7 +41,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
 
         return serializer.validated_data
 
-    @action(detail=False, methods=["post"], url_path="phr/create/send_otp")
+    @action(detail=False, methods=["post"], url_path="create/send_otp")
     def phr_enrollment__send_otp(self, request):
         validated_data = self.validate_request(request)
 
@@ -73,7 +73,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["post"], url_path="phr/create/verify_otp")
+    @action(detail=False, methods=["post"], url_path="create/verify_otp")
     def phr_enrollment__verify_otp(self, request):
         validated_data = self.validate_request(request)
 
@@ -159,9 +159,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(
-        detail=False, methods=["post"], url_path="phr/create/abha_address_suggestion"
-    )
+    @action(detail=False, methods=["post"], url_path="create/abha_address_suggestion")
     def phr_enrollment__abha_address_suggestion(self, request):
         validated_data = self.validate_request(request)
 
@@ -184,7 +182,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["get"], url_path="phr/create/abha_address_exists")
+    @action(detail=False, methods=["get"], url_path="create/abha_address_exists")
     def phr_enrollment__abha_address_exists(self, request):
         validated_data = self.validate_request(request)
 
@@ -204,7 +202,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["post"], url_path="phr/create/enrol_abha_address")
+    @action(detail=False, methods=["post"], url_path="create/enrol_abha_address")
     def phr_enrollment__enrol_abha_address(self, request):
         validated_data = self.validate_request(request)
 
