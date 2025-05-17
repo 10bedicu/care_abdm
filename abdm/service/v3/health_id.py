@@ -458,8 +458,6 @@ class HealthIdService:
 
         return response.content
 
-    """ PHR ENROLLMENT """
-
     @staticmethod
     def phr__enrollment__request__otp(
         data: PhrEnrollmentRequestOtpBody,
