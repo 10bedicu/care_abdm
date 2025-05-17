@@ -1,4 +1,3 @@
-from django.urls import path
 from rest_framework.routers import SimpleRouter
 
 from abdm.api.v3.viewsets.health_id import HealthIdViewSet
@@ -8,6 +7,7 @@ from abdm.api.viewsets.abha_number import AbhaNumberViewSet
 from abdm.api.viewsets.consent import ConsentViewSet
 from abdm.api.viewsets.health_facility import HealthFacilityViewSet
 from abdm.api.viewsets.health_information import HealthInformationViewSet
+from care_abdm.abdm.api.v3.viewsets.phr.health_id import PhrEnrollmentViewSet
 
 
 class OptionalSlashRouter(SimpleRouter):
@@ -34,6 +34,9 @@ router.register(
 router.register("v3/health_id", HealthIdViewSet, basename="abdm__v3__health_id")
 router.register("v3/hip", HIPViewSet, basename="abdm__v3__hip")
 router.register("v3/hiu", HIUViewSet, basename="abdm__v3__hiu")
+router.register(
+    "v3/phr/health_id", PhrEnrollmentViewSet, basename="abdm__v3__phr_health_id"
+)
 
 
 ## Callback Routes
