@@ -22,11 +22,6 @@ from abdm.api.v3.serializers.health_id import (
     AbhaLoginSendOtpSerializer,
     AbhaLoginVerifyOtpSerializer,
     LinkAbhaNumberAndPatientSerializer,
-    PhrEnrollmentAbhaAddressExistsSerializer,
-    PhrEnrollmentAbhaAddressSuggestionSerializer,
-    PhrEnrollmentEnrolAbhaAddressSerializer,
-    PhrEnrollmentSendOtpSerializer,
-    PhrEnrollmentVerifyOtpSerializer,
 )
 from abdm.models import AbhaNumber, Transaction, TransactionType
 from abdm.service.helper import generate_care_contexts_for_existing_data
@@ -53,11 +48,6 @@ class HealthIdViewSet(GenericViewSet):
         "abha_login__verify_otp": AbhaLoginVerifyOtpSerializer,
         "abha_login__check_auth_methods": AbhaLoginCheckAuthMethodsSerializer,
         "link_abha_number_and_patient": LinkAbhaNumberAndPatientSerializer,
-        "phr_enrollment__send_otp": PhrEnrollmentSendOtpSerializer,
-        "phr_enrollment__verify_otp": PhrEnrollmentVerifyOtpSerializer,
-        "phr_enrollment__abha_address_suggestion": PhrEnrollmentAbhaAddressSuggestionSerializer,
-        "phr_enrollment__abha_address_exists": PhrEnrollmentAbhaAddressExistsSerializer,
-        "phr_enrollment__enrol_abha_address": PhrEnrollmentEnrolAbhaAddressSerializer,
     }
 
     def get_serializer_class(self):
