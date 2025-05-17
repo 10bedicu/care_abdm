@@ -111,7 +111,7 @@ REQUIRED_SETTINGS = {
 DEFAULTS = {
     "ABDM_CLIENT_ID": "SBX_001",
     "ABDM_CLIENT_SECRET": "xxxx",
-    "ABDM_AUTH_URL": "",
+    "ABDM_AUTH_URL": "https://abdm-auth.coolify.ohc.network",
     "ABDM_GATEWAY_URL": "https://dev.abdm.gov.in/api/hiecm",
     "ABDM_ABHA_URL": "https://abhasbx.abdm.gov.in/abha/api",
     "ABDM_FACILITY_URL": "https://facilitysbx.abdm.gov.in",
