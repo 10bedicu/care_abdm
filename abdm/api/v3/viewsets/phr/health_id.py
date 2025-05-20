@@ -101,7 +101,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
             account = accounts[0]
             token = result.get("tokens", {})
 
-            (abha_number, created) = AbhaNumber.objects.update_or_create(
+            (abha_number, _) = AbhaNumber.objects.update_or_create(
                 abha_number=account.get("ABHANumber"),
                 defaults={
                     "abha_number": account.get("ABHANumber"),
@@ -145,7 +145,6 @@ class PhrEnrollmentViewSet(GenericViewSet):
                     "detail": result.get("message"),
                     "abha_number": AbhaNumberSerializer(abha_number).data,
                     "users": result.get("users"),
-                    "created": created,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -251,7 +250,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
             {"x_token": abha_number.access_token}
         )
 
-        (abha_number, created) = AbhaNumber.objects.update_or_create(
+        (abha_number, _) = AbhaNumber.objects.update_or_create(
             abha_number=profile_result.get("ABHANumber"),
             defaults={
                 "abha_number": profile_result.get("ABHANumber"),
@@ -291,7 +290,6 @@ class PhrEnrollmentViewSet(GenericViewSet):
                 "health_id": profile_result.get("ABHANumber"),
                 "preferred_abha_address": profile_result.get("preferredAbhaAddress"),
                 "abha_number": AbhaNumberSerializer(abha_number).data,
-                "created": created,
             },
             status=status.HTTP_200_OK,
         )
