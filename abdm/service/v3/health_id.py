@@ -1,3 +1,4 @@
+import base64
 from typing import Any
 
 from abdm.service.helper import (
@@ -80,7 +81,9 @@ class HealthIdService:
                 "bio": {
                     "txnId": data.get("transaction_id", ""),
                     "aadhaar": encrypt_message(data.get("aadhaar", "")),
-                    "fingerPrintAuthPid": data.get("fingerprint_pid", ""),
+                    "fingerPrintAuthPid": base64.b64encode(
+                        data.get("fingerprint_pid", "").encode("utf-8")
+                    ).decode("utf-8"),
                     "mobile": data.get("mobile", ""),
                 },
             },
