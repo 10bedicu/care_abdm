@@ -129,7 +129,7 @@ class HIPCallbackViewSet(GenericViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         cache.set(
-            "abdm_link_token__" + abha_number.health_id,
+            f"abdm_link_token__{cached_data.get("hf_id")}__{abha_number.health_id}",
             validated_data.get("linkToken"),
             timeout=60 * 30,
         )
@@ -137,9 +137,11 @@ class HIPCallbackViewSet(GenericViewSet):
         if cached_data.get("purpose") == "LINK_CARECONTEXT":
             GatewayService.link__carecontext(
                 {
+                    "reference_id": cached_data.get("reference_id"),
                     "patient": abha_number.patient,
                     "care_contexts": cached_data.get("care_contexts", []),
                     "user": request.user,
+                    "hf_id": cached_data.get("hf_id"),
                 }
             )
 
@@ -161,10 +163,10 @@ class HIPCallbackViewSet(GenericViewSet):
     def hip__patient__care_context__discover(self, request):
         validated_data = self.validate_request(request)
 
-        patient_data = validated_data.get("patient")
+        patient_data = validated_data.get("patient", {})
         identifiers = [
-            *patient_data.get("verifiedIdentifiers"),
-            *patient_data.get("unverifiedIdentifiers"),
+            *patient_data.get("verifiedIdentifiers", []),
+            *patient_data.get("unverifiedIdentifiers", []),
         ]
 
         health_id_number = next(
@@ -210,6 +212,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "request_id": request.headers.get("REQUEST-ID"),
                 "patient": patient,
                 "matched_by": [matched_by],
+                "hf_id": request.headers.get("x-hip-id"),
             }
         )
 
@@ -289,6 +292,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "request_id": request.headers.get("REQUEST-ID"),
                 "patient": patient,
                 "care_contexts": cached_data.get("care_contexts"),
+                "hf_id": request.headers.get("x-hip-id"),
             }
         )
 

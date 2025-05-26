@@ -1,4 +1,4 @@
-from base64 import b64encode, b64decode
+from base64 import b64decode, b64encode
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -40,11 +40,14 @@ def uuid():
 def encrypt_message(message: str):
     rsa_public_key = RSA.importKey(
         b64decode(
-            Request(settings.ABDM_ABHA_URL).get(
+            Request(settings.ABDM_ABHA_URL)
+            .get(
                 "/v3/profile/public/certificate",
                 None,
-                { "TIMESTAMP": timestamp(), "REQUEST-ID": uuid() }
-            ).json().get("publicKey", "")
+                {"TIMESTAMP": timestamp(), "REQUEST-ID": uuid()},
+            )
+            .json()
+            .get("publicKey", "")
         )
     )
 
@@ -80,22 +83,71 @@ def cm_id():
     return settings.ABDM_CM_ID
 
 
-def generate_care_contexts_for_existing_data(patient: Patient):
-    care_contexts = []
+def benefit_name():
+    return settings.ABDM_BENEFIT_NAME
 
-    medication_requests = (
-        MedicationRequest.objects.filter(patient=patient)
-        .annotate(day=TruncDate("created_date"))
-        .order_by("day")
-        .distinct("day")
-    )
-    for request in medication_requests:
-        care_contexts.append(
-            {
-                "reference": f"v2::medication_request::{request.created_date.date()}",
-                "display": f"Medication Prescribed on {request.created_date.date()}",
-                "hi_type": HealthInformationType.PRESCRIPTION,
-            }
+
+def generate_care_contexts_for_existing_data(
+    patient: Patient, hf_id: str | None = None
+):
+    care_contexts = {}
+
+    encounters = Encounter.objects.filter(patient_id=patient.id)
+    if hf_id:
+        care_contexts[hf_id] = []
+        encounters = encounters.filter(facility__healthfacility__hf_id=hf_id)
+
+    for encounter in encounters:
+        encounter_care_contexts = []
+
+        medication_requests = (
+            MedicationRequest.objects.filter(
+                patient_id=patient.id, encounter_id=encounter.id
+            )
+            .annotate(day=TruncDate("created_date"))
+            .order_by("day")
+            .distinct("day")
         )
+        for request in medication_requests:
+            encounter_care_contexts.append(
+                {
+                    "reference": f"v2::medication_request::{request.created_date.date()}",
+                    "display": f"Medication Prescribed on {request.created_date.date()}",
+                    "hi_type": HealthInformationType.PRESCRIPTION,
+                }
+            )
+
+        facility = encounter.facility
+        if not hasattr(facility, "healthfacility"):
+            # TODO: create transaction to log failed transaction for care_context
+            pass
+
+        hf_id = facility.healthfacility.hf_id
+        if hf_id in care_contexts:
+            care_contexts[hf_id].extend(encounter_care_contexts)
+        else:
+            care_contexts[hf_id] = encounter_care_contexts
 
     return care_contexts
+
+
+def care_context_dict_from_reference_id(reference_id: str):
+    [version, model, param] = reference_id.split("::")
+
+    if version != "v2":
+        return None
+
+    if model == "medication_request":
+        medication_request = MedicationRequest.objects.filter(
+            created_date__date=param
+        ).first()
+        if not medication_request:
+            return None
+
+        return {
+            "reference": f"v2::prescription::{medication_request.created_date.date()}",
+            "display": f"Medication Prescribed on {medication_request.created_date.date()}",
+            "hi_type": HealthInformationType.PRESCRIPTION,
+        }
+
+    return None
