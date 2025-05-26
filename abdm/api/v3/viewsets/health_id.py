@@ -111,13 +111,16 @@ class HealthIdViewSet(GenericViewSet):
         abha_number.patient = patient
         abha_number.save()
 
-        care_contexts = generate_care_contexts_for_existing_data(patient)
-        if len(care_contexts) > 0:
+        hf_care_contexts = generate_care_contexts_for_existing_data(patient)
+
+        for hf_id in hf_care_contexts:
+            care_contexts = hf_care_contexts[hf_id]
             GatewayService.link__carecontext(
                 {
                     "patient": patient,
                     "care_contexts": care_contexts,
                     "user": request.user,
+                    "hf_id": hf_id,
                 }
             )
 
