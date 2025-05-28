@@ -29,7 +29,10 @@ from abdm.models import (
     Transaction,
     TransactionType,
 )
-from abdm.service.helper import uuid
+from abdm.service.helper import (
+    uuid,
+    validate_and_format_date,
+)
 from abdm.service.v3.gateway import GatewayService
 from care.facility.api.serializers.patient import PatientTransferSerializer
 from care.facility.models import District, PatientRegistration, State
@@ -456,7 +459,7 @@ class HIPCallbackViewSet(GenericViewSet):
                     patient_data.get("gender"), None
                 ),
                 date_of_birth=datetime.strptime(
-                    f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth')}-{patient_data.get('dayOfBirth')}",
+                    f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
                     "%Y-%m-%d",
                 ),
                 phone_number=patient_data.get("phoneNumber"),
@@ -478,9 +481,10 @@ class HIPCallbackViewSet(GenericViewSet):
                 health_id=patient_data.get("abhaAddress"),
                 name=patient_data.get("name"),
                 gender=patient_data.get("gender"),
-                date_of_birth=datetime.strptime(
-                    f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth')}-{patient_data.get('dayOfBirth')}",
-                    "%Y-%m-%d",
+                date_of_birth=validate_and_format_date(
+                    patient_data.get("yearOfBirth"),
+                    patient_data.get("monthOfBirth"),
+                    patient_data.get("dayOfBirth"),
                 ),
                 address=patient_data.get("address").get("line"),
                 district=patient_data.get("address").get("district"),

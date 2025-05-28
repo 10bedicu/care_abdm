@@ -109,9 +109,9 @@ class GatewayService:
             "abhaAddress": abha_number.health_id,
             "name": abha_number.name,
             "gender": abha_number.gender,
-            "yearOfBirth": datetime.strptime(
-                abha_number.date_of_birth, "%Y-%m-%d"
-            ).year,
+            "yearOfBirth": abha_number.parsed_date_of_birth.split("-")[0]
+            if abha_number.parsed_date_of_birth
+            else None,
         }
 
         request_id = uuid()
@@ -699,9 +699,9 @@ class GatewayService:
                 "abhaAddress": abha_number.health_id,
                 "name": abha_number.name,
                 "gender": abha_number.gender,
-                "yearOfBirth": datetime.strptime(
-                    abha_number.date_of_birth, "%Y-%m-%d"
-                ).year,
+                "yearOfBirth": abha_number.parsed_date_of_birth.split("-")[0]
+                if abha_number.parsed_date_of_birth
+                else None,
             },
         }
 

@@ -23,7 +23,10 @@ from abdm.api.v3.serializers.health_id import (
     LinkAbhaNumberAndPatientSerializer,
 )
 from abdm.models import AbhaNumber, Transaction, TransactionType
-from abdm.service.helper import generate_care_contexts_for_existing_data
+from abdm.service.helper import (
+    generate_care_contexts_for_existing_data,
+    validate_and_format_date,
+)
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
@@ -161,12 +164,11 @@ class HealthIdViewSet(GenericViewSet):
                 "middle_name": abha_profile.get("middleName"),
                 "last_name": abha_profile.get("lastName"),
                 "gender": abha_profile.get("gender"),
-                "date_of_birth": str(
-                    datetime.strptime(  # noqa: DTZ007
-                        f"{abha_profile.get('yearOfBirth')}-{abha_profile.get('monthOfBirth')}-{abha_profile.get('dayOfBirth')}",
-                        "%Y-%m-%d",
-                    )
-                )[0:10],
+                "date_of_birth": validate_and_format_date(
+                    abha_profile.get("yearOfBirth"),
+                    abha_profile.get("monthOfBirth"),
+                    abha_profile.get("dayOfBirth"),
+                ),
                 "address": abha_profile.get("address"),
                 "district": abha_profile.get("districtName"),
                 "state": abha_profile.get("stateName"),
@@ -255,9 +257,11 @@ class HealthIdViewSet(GenericViewSet):
                 "middle_name": abha_profile.get("middleName"),
                 "last_name": abha_profile.get("lastName"),
                 "gender": abha_profile.get("gender"),
-                "date_of_birth": datetime.strptime(
-                    abha_profile.get("dob"), "%d-%m-%Y"
-                ).strftime("%Y-%m-%d"),
+                "date_of_birth": validate_and_format_date(
+                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").year,  # noqa DTZ007
+                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").month,  # noqa DTZ007
+                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").day,  # noqa DTZ007
+                ),
                 "address": abha_profile.get("address"),
                 "district": abha_profile.get("districtName"),
                 "state": abha_profile.get("stateName"),
@@ -388,12 +392,11 @@ class HealthIdViewSet(GenericViewSet):
                 "middle_name": profile_result.get("middleName"),
                 "last_name": profile_result.get("lastName"),
                 "gender": profile_result.get("gender"),
-                "date_of_birth": str(
-                    datetime.strptime(  # noqa: DTZ007
-                        f"{profile_result.get('yearOfBirth')}-{profile_result.get('monthOfBirth')}-{profile_result.get('dayOfBirth')}",
-                        "%Y-%m-%d",
-                    )
-                )[0:10],
+                "date_of_birth": validate_and_format_date(
+                    profile_result.get("yearOfBirth"),
+                    profile_result.get("monthOfBirth"),
+                    profile_result.get("dayOfBirth"),
+                ),
                 "address": profile_result.get("address"),
                 "district": profile_result.get("districtName"),
                 "state": profile_result.get("stateName"),
@@ -559,12 +562,11 @@ class HealthIdViewSet(GenericViewSet):
                 "middle_name": profile_result.get("middleName"),
                 "last_name": profile_result.get("lastName"),
                 "gender": profile_result.get("gender"),
-                "date_of_birth": str(
-                    datetime.strptime(
-                        f"{profile_result.get('yearOfBirth')}-{profile_result.get('monthOfBirth')}-{profile_result.get('dayOfBirth')}",
-                        "%Y-%m-%d",
-                    )
-                )[0:10],
+                "date_of_birth": validate_and_format_date(
+                    profile_result.get("yearOfBirth"),
+                    profile_result.get("monthOfBirth"),
+                    profile_result.get("dayOfBirth"),
+                ),
                 "address": profile_result.get("address"),
                 "district": profile_result.get("districtName"),
                 "state": profile_result.get("stateName"),

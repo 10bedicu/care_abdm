@@ -1,11 +1,8 @@
 import base64
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import wraps
-from typing import Literal, Optional, TypedDict
+from typing import Literal, TypedDict
 
-from abdm.models import HealthFacility
-from abdm.service.helper import uuid  # TODO: stop using random uuid
-from abdm.settings import plugin_settings as settings
 from fhir.resources.R4B.address import Address
 from fhir.resources.R4B.annotation import Annotation
 from fhir.resources.R4B.attachment import Attachment
@@ -38,6 +35,9 @@ from fhir.resources.R4B.quantity import Quantity
 from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
 
+from abdm.models import HealthFacility
+from abdm.service.helper import uuid  # TODO: stop using random uuid
+from abdm.settings import plugin_settings as settings
 from care.facility.models import (
     BaseModel,
     ConditionVerificationStatus,
@@ -118,7 +118,7 @@ class Fhir:
         id = str(patient.external_id)
         name = patient.name
         gender = patient.gender
-        dob = patient.abha_number.date_of_birth
+        dob = patient.abha_number.parsed_date_of_birth
 
         return Patient(
             id=id,
@@ -313,7 +313,7 @@ class Fhir:
             "activity": "Activity",
         }
 
-        id = f"{str(model.external_id)}{cache_key_suffix}"
+        id = f"{model.external_id!s}{cache_key_suffix}"
 
         return Observation(
             id=id,
@@ -765,11 +765,11 @@ class Fhir:
         )
 
     class ProcedureType(TypedDict):
-        time: Optional[str]
-        frequency: Optional[str]
+        time: str | None
+        frequency: str | None
         procedure: str
         repetitive: bool
-        notes: Optional[str]
+        notes: str | None
 
     @cache_profiles(Procedure.get_resource_type())
     def _procedure(
@@ -778,7 +778,7 @@ class Fhir:
         procedure: ProcedureType,
         cache_key_suffix: str = "",
     ):
-        id = f"{str(consultation.external_id)}{cache_key_suffix}"
+        id = f"{consultation.external_id!s}{cache_key_suffix}"
 
         return Procedure(
             id=id,
@@ -843,7 +843,7 @@ class Fhir:
                 ]
             ),
             title="Wellness Record",
-            date=datetime.now(timezone.utc).isoformat(),
+            date=datetime.now(UTC).isoformat(),
             section=list(
                 filter(
                     lambda section: section.entry and len(section.entry) > 0,
@@ -1002,7 +1002,7 @@ class Fhir:
                 ]
             ),
             title="Prescription",
-            date=datetime.now(timezone.utc).isoformat(),
+            date=datetime.now(UTC).isoformat(),
             section=[
                 CompositionSection(
                     title="Prescription record",
@@ -1053,7 +1053,7 @@ class Fhir:
                 ]
             ),
             title="Discharge Summary Document",
-            date=datetime.now(timezone.utc).isoformat(),
+            date=datetime.now(UTC).isoformat(),
             section=list(
                 filter(
                     lambda section: section.entry and len(section.entry) > 0,
@@ -1166,7 +1166,7 @@ class Fhir:
                 ]
             ),
             title="OP Consultation Document",
-            date=datetime.now(timezone.utc).isoformat(),
+            date=datetime.now(UTC).isoformat(),
             section=list(
                 filter(
                     lambda section: section.entry and len(section.entry) > 0,
@@ -1267,7 +1267,7 @@ class Fhir:
 
     def create_wellness_record(self, daily_round: DailyRound):
         id = uuid()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         last_updated = daily_round.modified_date.isoformat()
 
         return Bundle(
@@ -1291,7 +1291,7 @@ class Fhir:
 
     def create_diagnostic_report_record(self, investigation: InvestigationSession):
         id = uuid()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         last_updated = investigation.modified_date.isoformat()
 
         return Bundle(
@@ -1313,7 +1313,7 @@ class Fhir:
 
     def create_prescription_record(self, prescriptions: list[Prescription]):
         id = uuid()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         last_updated = now  # TODO: use the greatest modified date of the prescriptions
 
         return Bundle(
@@ -1335,7 +1335,7 @@ class Fhir:
 
     def create_discharge_summary_record(self, consultation: PatientConsultation):
         id = uuid()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         last_updated = consultation.modified_date.isoformat()
 
         return Bundle(
@@ -1357,7 +1357,7 @@ class Fhir:
 
     def create_op_consultation_record(self, consultation: PatientConsultation):
         id = uuid()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         last_updated = consultation.modified_date.isoformat()
 
         return Bundle(

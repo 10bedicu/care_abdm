@@ -1,7 +1,7 @@
 # ModelSerializer
-from abdm.models import AbhaNumber
 from rest_framework import serializers
 
+from abdm.models import AbhaNumber
 from care.facility.api.serializers.patient import PatientDetailSerializer
 from care.facility.models import PatientRegistration
 from care.utils.serializers.fields import ExternalIdSerializerField
@@ -14,6 +14,7 @@ class AbhaNumberSerializer(serializers.ModelSerializer):
     )
     patient_object = PatientDetailSerializer(source="patient", read_only=True)
     new = serializers.BooleanField(read_only=True)
+    date_of_birth = serializers.CharField(source="parsed_date_of_birth", read_only=True)
 
     class Meta:
         model = AbhaNumber
