@@ -87,7 +87,7 @@ def benefit_name():
     return settings.ABDM_BENEFIT_NAME
 
 
-def validate_and_format_date(year, month=0, day=0):
+def validate_and_format_date(year, month, day):
     if not year:
         raise ABDMAPIException(detail="Year is required")
 
@@ -97,7 +97,15 @@ def validate_and_format_date(year, month=0, day=0):
     if year < min_year or year > current_year:
         raise ABDMAPIException(detail="Year must be between 1800 and current year")
 
-    return f"{year}-{int(month):02d}-{int(day):02d}"
+    month = 0 if month is None else int(month)
+    day = 0 if day is None else int(day)
+
+    if not 0 <= month <= 12:
+        raise ABDMAPIException(detail="Month must be between 0 and 12")
+    if not 0 <= day <= 31:
+        raise ABDMAPIException(detail="Day must be between 0 and 31")
+
+    return f"{year}-{month:02d}-{day:02d}"
 
 
 def generate_care_contexts_for_existing_data(
