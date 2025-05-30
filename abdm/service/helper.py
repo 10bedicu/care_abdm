@@ -9,7 +9,8 @@ from django.db.models import Q
 from django.db.models.functions import TruncDate
 from rest_framework.exceptions import APIException
 
-from abdm.models import AbhaNumber, HealthInformationType
+from abdm.models.abha_number import AbhaNumber
+from abdm.models.base import HealthInformationType
 from abdm.service.request import Request
 from abdm.settings import plugin_settings as settings
 from care.emr.models.encounter import Encounter
