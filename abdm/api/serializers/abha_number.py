@@ -1,12 +1,10 @@
-# ModelSerializer
-
 from rest_framework import serializers
 
+from abdm.api.serializers.base import EMRPydanticModelField
 from abdm.models import AbhaNumber
 from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import PatientRetrieveSpec
 from care.utils.serializers.fields import ExternalIdSerializerField
-from abdm.api.serializers.base import EMRPydanticModelField
 
 
 class AbhaNumberSerializer(serializers.ModelSerializer):
@@ -20,6 +18,7 @@ class AbhaNumberSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     new = serializers.BooleanField(read_only=True)
+    date_of_birth = serializers.CharField(source="parsed_date_of_birth", read_only=True)
 
     class Meta:
         model = AbhaNumber

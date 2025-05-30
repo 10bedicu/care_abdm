@@ -1,12 +1,5 @@
 from datetime import datetime
 
-from abdm.models import (
-    AccessMode,
-    FrequencyUnit,
-    HealthInformationType,
-    Purpose,
-    Status,
-)
 from rest_framework.serializers import (
     CharField,
     ChoiceField,
@@ -17,6 +10,14 @@ from rest_framework.serializers import (
     Serializer,
     URLField,
     UUIDField,
+)
+
+from abdm.models import (
+    AccessMode,
+    FrequencyUnit,
+    HealthInformationType,
+    Purpose,
+    Status,
 )
 
 
@@ -56,8 +57,12 @@ class HipPatientCareContextDiscoverSerializer(Serializer):
         name = CharField(max_length=100, required=True)
         gender = ChoiceField(choices=["M", "F", "O"], required=True)
         yearOfBirth = IntegerField(required=True)
-        verifiedIdentifiers = IdentifierSerializer(many=True, required=True)
-        unverifiedIdentifiers = IdentifierSerializer(many=True, required=True)
+        verifiedIdentifiers = IdentifierSerializer(
+            many=True, required=False, allow_null=True
+        )
+        unverifiedIdentifiers = IdentifierSerializer(
+            many=True, required=False, allow_null=True
+        )
 
     transactionId = UUIDField(required=True)
     patient = PatientSerializer(required=True)

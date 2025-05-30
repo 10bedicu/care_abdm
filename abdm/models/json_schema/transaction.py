@@ -5,7 +5,12 @@ CREATE_OR_LINK_ABHA_NUMBER = {
         "abha_number": {"type": "string", "format": "uuid"},
         "method": {
             "type": "string",
-            "enum": ["create_via_aadhaar_otp", "link_via_otp", "scan_and_pull"],
+            "enum": [
+                "create_via_aadhaar_demographics",
+                "create_via_aadhaar_otp",
+                "link_via_otp",
+                "scan_and_pull",
+            ],
         },
     },
     "if": {"properties": {"method": {"const": "link_via_otp"}}},
@@ -58,6 +63,7 @@ LINK_CARE_CONTEXT = {
                 "type": "string",
             },
         },
+        "hf_id": {"type": "string"},
     },
     "additionalProperties": False,
     "required": ["abha_number", "care_contexts", "type"],

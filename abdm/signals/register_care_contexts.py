@@ -5,7 +5,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from abdm.models import HealthInformationType
-from abdm.service.helper import ABDMAPIException
+from abdm.service.helper import ABDMAPIException, hf_id_from_abha_id
 from abdm.service.v3.gateway import GatewayService
 from care.emr.models.medication_request import MedicationRequest
 
@@ -43,6 +43,7 @@ def create_care_context_on_medication_request_creation(
                         }
                     ],
                     "user": instance.created_by,
+                    "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
                 }
             )
         )
