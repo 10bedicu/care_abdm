@@ -5,18 +5,12 @@ from uuid import uuid4
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Hash import SHA1
 from Crypto.PublicKey import RSA
-from django.core.paginator import Paginator
-from django.db.models import F, Func, Q, Value
+from django.db.models import Q
 from django.db.models.functions import TruncDate
 from rest_framework.exceptions import APIException
 
-from abdm.models import (
-    AbhaNumber,
-    HealthInformationType,
-    Transaction,
-    TransactionStatus,
-    TransactionType,
-)
+from abdm.models.abha_number import AbhaNumber
+from abdm.models.base import HealthInformationType
 from abdm.service.request import Request
 from abdm.settings import plugin_settings as settings
 from care.facility.models import (
@@ -254,33 +248,3 @@ def care_context_dict_from_reference_id(reference_id: str):
         }
 
     return None
-
-
-def update_hf_id_in_transactions(
-    old_hf_id: str, new_hf_id: str, batch_size: int = 1000
-):
-    qs = Transaction.objects.filter(
-        type=TransactionType.LINK_CARE_CONTEXT,
-        meta_data__hf_id=old_hf_id,
-        status__in=[TransactionStatus.INITIATED, TransactionStatus.CANCELLED],
-    )
-
-    paginator = Paginator(qs, batch_size)
-    total_updated = 0
-
-    for page_num in paginator.page_range:
-        page = paginator.page(page_num)
-        transaction_ids = [tx.id for tx in page]
-
-        updated = Transaction.objects.filter(id__in=transaction_ids).update(
-            meta_data=Func(
-                F("meta_data"),
-                Value("{hf_id}"),
-                Value(f'"{new_hf_id}"'),
-                function="jsonb_set",
-            )
-        )
-
-        total_updated += updated
-
-    return total_updated
