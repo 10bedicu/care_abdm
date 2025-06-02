@@ -11,6 +11,9 @@ from abdm.service.v3.gateway import GatewayService
 logger = logging.getLogger(__name__)
 
 
+CARE_CONTEXT_BATCH_SIZE = 50
+
+
 @shared_task
 def retry_failed_care_contexts():
     filtered_transactions = Transaction.objects.filter(
@@ -59,19 +62,21 @@ def retry_failed_care_contexts():
         if len(care_contexts) == 0:
             continue
 
-        try:
-            GatewayService.link__carecontext(
-                {
-                    "patient": patient,
-                    "care_contexts": care_contexts,
-                    "user": transaction.created_by,
-                    "hf_id": transaction.meta_data.get("hf_id"),
-                }
-            )
-        except Exception as e:
-            logger.exception(
-                "Error while retrying care context linking for transaction %s with error %s",
-                transaction.id,
-                str(e),
-            )
-            continue
+        for i in range(0, len(care_contexts), CARE_CONTEXT_BATCH_SIZE):
+            batch = care_contexts[i : i + CARE_CONTEXT_BATCH_SIZE]
+            try:
+                GatewayService.link__carecontext(
+                    {
+                        "patient": patient,
+                        "care_contexts": batch,
+                        "user": transaction.created_by,
+                        "hf_id": transaction.meta_data.get("hf_id"),
+                    }
+                )
+            except Exception as e:
+                logger.exception(
+                    "Error while retrying care context linking for transaction %s with error %s",
+                    transaction.id,
+                    str(e),
+                )
+                continue

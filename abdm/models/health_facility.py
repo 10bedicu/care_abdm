@@ -21,7 +21,7 @@ class HealthFacility(BaseModel, HealthFacilityPermissions):
         qs = Transaction.objects.filter(
             type=TransactionType.LINK_CARE_CONTEXT,
             meta_data__hf_id=old_hf_id,
-            status__in=[TransactionStatus.INITIATED, TransactionStatus.CANCELLED],
+            status__in=[TransactionStatus.INITIATED, TransactionStatus.FAILED],
         )
 
         paginator = Paginator(qs, batch_size)
