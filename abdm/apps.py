@@ -9,4 +9,4 @@ class AbdmConfig(AppConfig):
     verbose_name = _("ABDM Integration")
 
     def ready(self):
-        import abdm.signals
+        import abdm.signals  # noqa F401

@@ -149,7 +149,7 @@ class Fhir:
                 ),
             ],
             gender=patient_spec.gender,
-            birthDate=patient.abha_number.date_of_birth,
+            birthDate=patient.abha_number.parsed_date_of_birth,
             address=[
                 Address(
                     line=[patient_spec.address],

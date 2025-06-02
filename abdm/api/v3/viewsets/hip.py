@@ -30,7 +30,10 @@ from abdm.models import (
     Transaction,
     TransactionType,
 )
-from abdm.service.helper import uuid
+from abdm.service.helper import (
+    uuid,
+    validate_and_format_date,
+)
 from abdm.service.v3.gateway import GatewayService
 from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import GenderChoices
@@ -129,7 +132,7 @@ class HIPCallbackViewSet(GenericViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         cache.set(
-            "abdm_link_token__" + abha_number.health_id,
+            f"abdm_link_token__{cached_data.get("hf_id")}__{abha_number.health_id}",
             validated_data.get("linkToken"),
             timeout=60 * 30,
         )
@@ -137,9 +140,11 @@ class HIPCallbackViewSet(GenericViewSet):
         if cached_data.get("purpose") == "LINK_CARECONTEXT":
             GatewayService.link__carecontext(
                 {
+                    "reference_id": cached_data.get("reference_id"),
                     "patient": abha_number.patient,
                     "care_contexts": cached_data.get("care_contexts", []),
                     "user": request.user,
+                    "hf_id": cached_data.get("hf_id"),
                 }
             )
 
@@ -161,10 +166,10 @@ class HIPCallbackViewSet(GenericViewSet):
     def hip__patient__care_context__discover(self, request):
         validated_data = self.validate_request(request)
 
-        patient_data = validated_data.get("patient")
+        patient_data = validated_data.get("patient", {})
         identifiers = [
-            *patient_data.get("verifiedIdentifiers"),
-            *patient_data.get("unverifiedIdentifiers"),
+            *patient_data.get("verifiedIdentifiers", []),
+            *patient_data.get("unverifiedIdentifiers", []),
         ]
 
         health_id_number = next(
@@ -210,6 +215,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "request_id": request.headers.get("REQUEST-ID"),
                 "patient": patient,
                 "matched_by": [matched_by],
+                "hf_id": request.headers.get("x-hip-id"),
             }
         )
 
@@ -289,6 +295,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "request_id": request.headers.get("REQUEST-ID"),
                 "patient": patient,
                 "care_contexts": cached_data.get("care_contexts"),
+                "hf_id": request.headers.get("x-hip-id"),
             }
         )
 
@@ -464,7 +471,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "+91" + patient_data.get("phoneNumber", "").replace(" ", "")[-10:]
             )
             date_of_birth = datetime.strptime(
-                f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth')}-{patient_data.get('dayOfBirth')}",
+                f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
                 "%Y-%m-%d",
             ).date()
             patient = Patient.objects.create(
@@ -489,7 +496,11 @@ class HIPCallbackViewSet(GenericViewSet):
                 health_id=patient_data.get("abhaAddress"),
                 name=patient_data.get("name"),
                 gender=patient_data.get("gender"),
-                date_of_birth=date_of_birth,
+                date_of_birth=validate_and_format_date(
+                    patient_data.get("yearOfBirth"),
+                    patient_data.get("monthOfBirth"),
+                    patient_data.get("dayOfBirth"),
+                ),
                 address=patient_data.get("address").get("line"),
                 district=patient_data.get("address").get("district"),
                 state=patient_data.get("address").get("state"),

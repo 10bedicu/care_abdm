@@ -39,3 +39,17 @@ class AbhaNumber(BaseModel):
 
     def __str__(self):
         return f"{self.pk} {self.abha_number}"
+
+    @property
+    def parsed_date_of_birth(self):
+        if not self.date_of_birth:
+            return None
+
+        try:
+            year, month, day = self.date_of_birth.split("-")
+            month = "01" if month == "00" else month
+            day = "01" if day == "00" else day
+
+            return f"{year}-{month}-{day}"
+        except (ValueError, AttributeError):
+            return None
