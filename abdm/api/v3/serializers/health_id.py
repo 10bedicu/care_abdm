@@ -1,3 +1,4 @@
+from rest_framework.exceptions import ValidationError
 from rest_framework.serializers import (
     CharField,
     ChoiceField,
@@ -167,3 +168,88 @@ class PhrAddressDetailsSerializer(Serializer):
 class PhrEnrollmentEnrolAbhaAddressSerializer(Serializer):
     phr_details = PhrAddressDetailsSerializer(required=True)
     transaction_id = UUIDField(required=True)
+
+
+class PhrLoginSendOtpSerializer(Serializer):
+    TYPE_CHOICES = [
+        ("mobile-number", "Mobile"),
+        ("abha-number", "ABHA Number"),
+        ("abha-address", "ABHA Address"),
+    ]
+
+    OTP_SYSTEM_CHOICES = [
+        ("aadhaar", "Aadhaar"),
+        ("abdm", "Abdm"),
+    ]
+
+    type = ChoiceField(choices=TYPE_CHOICES, required=True)
+    value = CharField(max_length=50, required=True)
+    otp_system = ChoiceField(choices=OTP_SYSTEM_CHOICES, required=True)
+
+
+class PhrLoginVerifySerializer(Serializer):
+    TYPE_CHOICES = [
+        ("mobile-number", "Mobile"),
+        ("abha-number", "ABHA Number"),
+        ("abha-address", "ABHA Address"),
+    ]
+
+    VERIFY_SYSTEM_CHOICES = [
+        ("aadhaar", "Aadhaar"),
+        ("abdm", "Abdm"),
+        ("password", "Password"),
+    ]
+
+    type = ChoiceField(choices=TYPE_CHOICES, required=True)
+    otp = CharField(max_length=6, min_length=6, required=False)
+    abha_address = CharField(max_length=50, min_length=3, required=False)
+    password = CharField(min_length=8, required=False)
+    verify_system = ChoiceField(choices=VERIFY_SYSTEM_CHOICES, required=True)
+    transaction_id = UUIDField(required=False)
+
+    def validate(self, attrs):
+        verify_system = attrs.get("verify_system")
+
+        if verify_system == "password":
+            if not attrs.get("abha_address"):
+                raise ValidationError(
+                    {
+                        "abha_address": "This field is required for password verification."
+                    }
+                )
+            if not attrs.get("password"):
+                raise ValidationError(
+                    {"password": "This field is required for password verification."}
+                )
+        else:
+            if not attrs.get("otp"):
+                raise ValidationError(
+                    {"otp": "This field is required for OTP verification."}
+                )
+            if not attrs.get("transaction_id"):
+                raise ValidationError(
+                    {
+                        "transaction_id": "This field is required for OTP-based verification."
+                    }
+                )
+
+        return attrs
+
+
+class PhrLoginVerifyUserSerializer(Serializer):
+    type = ChoiceField(
+        choices=[
+            ("mobile-number", "Mobile"),
+            ("abha-number", "ABHA Number"),
+        ],
+        required=True,
+    )
+    verify_system = ChoiceField(
+        choices=[
+            ("aadhaar", "Aadhaar"),
+            ("abdm", "Abdm"),
+        ],
+        required=True,
+    )
+    transaction_id = UUIDField(required=True)
+    abha_address = CharField(max_length=50, min_length=3, required=True)
