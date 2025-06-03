@@ -41,6 +41,61 @@ class PhrEnrollmentViewSet(GenericViewSet):
 
         return serializer.validated_data
 
+    def _build_scope(self, login_hint, otp_system, context):
+        if context == "enrollment" and login_hint != "abha-number":
+            return ["abha-address-enroll", "mobile-verify"]
+
+        base_scope = {
+            "abha-address": ["abha-address-login"],
+            "abha-number": ["abha-login"],
+            "mobile-number": ["abha-address-login"],
+        }.get(login_hint, [])
+
+        auth_scope = {
+            "aadhaar": ["aadhaar-verify"],
+            "abdm": ["mobile-verify"],
+            "password": ["password-verify"],
+        }.get(otp_system, [])
+
+        return base_scope + auth_scope
+
+    def _update_abha_from_profile(self, profile_data, **tokens):
+        date_of_birth = str(
+            datetime.strptime(
+                f"{profile_data.get('yearOfBirth')}-{profile_data.get('monthOfBirth')}-{profile_data.get('dayOfBirth')}",
+                "%Y-%m-%d",
+            )
+        )[0:10]
+
+        defaults = {
+            "abha_number": profile_data.get("abhaNumber"),
+            "health_id": profile_data.get("preferredAbhaAddress"),
+            "name": profile_data.get("fullName"),
+            "first_name": profile_data.get("firstName", ""),
+            "middle_name": profile_data.get("middleName", ""),
+            "last_name": profile_data.get("lastName", ""),
+            "gender": profile_data.get("gender"),
+            "date_of_birth": date_of_birth,
+            "address": profile_data.get("address"),
+            "pincode": profile_data.get("pinCode"),
+            "district": profile_data.get("districtName"),
+            "state": profile_data.get("stateName"),
+            "email": profile_data.get("email"),
+            "mobile": profile_data.get("mobile"),
+            "profile_photo": profile_data.get("profilePhoto"),
+            **tokens,
+        }
+
+        return AbhaNumber.objects.update_or_create(
+            abha_number=profile_data.get("abhaNumber"),
+            defaults=defaults,
+        )
+
+    def _normalize_abha_address(self, address):
+        if not address.endswith(f"@{settings.ABDM_CM_ID}"):
+            return f"{address}@{settings.ABDM_CM_ID}"
+        return address
+
     @action(detail=False, methods=["post"], url_path="create/send_otp")
     def phr_enrollment__send_otp(self, request):
         validated_data = self.validate_request(request)
