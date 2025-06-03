@@ -20,7 +20,7 @@ CREATE_OR_LINK_ABHA_NUMBER = {
                 "type": "string",
                 "enum": ["aadhaar", "mobile", "abha-number", "abha-address"],
             },
-            "system": {"type": "string", "enum": ["aadhaar", "abdm"]},
+            "system": {"type": "string", "enum": ["aadhaar", "abdm", "password"]},
         },
         "required": ["type", "system"],
     },
