@@ -463,10 +463,10 @@ class HealthIdService:
         data: PhrEnrollmentRequestOtpBody,
     ) -> PhrEnrollmentRequestOtpResponse:
         payload = {
-            "scope": data.get("scope", []),
-            "loginHint": data.get("type", ""),
-            "loginId": encrypt_message(data.get("value", "")),
-            "otpSystem": data.get("otp_system", ""),
+            "scope": data.get("scope"),
+            "loginHint": data.get("type"),
+            "loginId": encrypt_message(data.get("value")),
+            "otpSystem": data.get("otp_system"),
         }
 
         path = "/phr/app/enrollment/request/otp"
@@ -489,12 +489,12 @@ class HealthIdService:
         data: PhrEnrollmentVerifyOtpBody,
     ) -> PhrEnrollmentVerifyOtpResponse:
         payload = {
-            "scope": data.get("scope", []),
+            "scope": data.get("scope"),
             "authData": {
                 "authMethods": ["otp"],
                 "otp": {
-                    "txnId": data.get("transaction_id", ""),
-                    "otpValue": encrypt_message(data.get("otp", "")),
+                    "txnId": data.get("transaction_id"),
+                    "otpValue": encrypt_message(data.get("otp")),
                 },
             },
         }
@@ -519,12 +519,12 @@ class HealthIdService:
         data: PhrEnrollmentAbhaAddressSuggestionBody,
     ) -> PhrEnrollmentAbhaAddressSuggestionResponse:
         payload = {
-            "txnId": data.get("transaction_id", ""),
-            "firstName": data.get("first_name", ""),
-            "lastName": data.get("last_name", ""),
-            "yearOfBirth": data.get("year_of_birth", ""),
-            "monthOfBirth": data.get("month_of_birth", ""),
-            "dayOfBirth": data.get("day_of_birth", ""),
+            "txnId": data.get("transaction_id"),
+            "firstName": data.get("first_name"),
+            "lastName": data.get("last_name"),
+            "yearOfBirth": data.get("year_of_birth"),
+            "monthOfBirth": data.get("month_of_birth"),
+            "dayOfBirth": data.get("day_of_birth"),
         }
 
         path = "/phr/app/enrollment/suggestion"
@@ -549,7 +549,7 @@ class HealthIdService:
         path = "/phr/app/enrollment/isExists"
         response = HealthIdService.request.get(
             path,
-            params={"abhaAddress": data.get("abha_address", "")},
+            params={"abhaAddress": data.get("abha_address")},
             headers={
                 "REQUEST-ID": uuid(),
                 "TIMESTAMP": timestamp(),
@@ -566,30 +566,20 @@ class HealthIdService:
         data: PhrEnrollmentEnrolAbhaAddressBody,
     ) -> PhrEnrollmentEnrolAbhaAddressResponse:
         phr_details = data.get("phr_details", {})
+        encrypt_fields = {"email", "mobile", "password"}
+
+        phr_payload = {**phr_details}
+
+        for field in encrypt_fields:
+            phr_payload[field] = (
+                encrypt_message(phr_details.get(field, ""))
+                if phr_details.get(field)
+                else ""
+            )
+
         payload = {
-            "phrDetails": {
-                "abhaAddress": phr_details.get("abhaAddress", ""),
-                "address": phr_details.get("address", ""),
-                "dayOfBirth": phr_details.get("dayOfBirth", ""),
-                "districtCode": phr_details.get("districtCode", ""),
-                "districtName": phr_details.get("districtName", ""),
-                "email": encrypt_message(phr_details.get("email", ""))
-                if phr_details.get("email")
-                else "",
-                "profilePhoto": phr_details.get("profilePhoto", ""),
-                "firstName": phr_details.get("firstName", ""),
-                "gender": phr_details.get("gender", ""),
-                "lastName": phr_details.get("lastName", ""),
-                "middleName": phr_details.get("middleName", ""),
-                "mobile": encrypt_message(phr_details.get("mobile", "")),
-                "monthOfBirth": phr_details.get("monthOfBirth", ""),
-                "password": encrypt_message(phr_details.get("password", "")),
-                "pinCode": phr_details.get("pinCode", ""),
-                "stateCode": phr_details.get("stateCode", ""),
-                "stateName": phr_details.get("stateName", ""),
-                "yearOfBirth": phr_details.get("yearOfBirth", ""),
-            },
-            "txnId": data.get("transaction_id", ""),
+            "phrDetails": phr_payload,
+            "txnId": data.get("transaction_id"),
         }
 
         path = "/phr/app/enrollment/enrol"
