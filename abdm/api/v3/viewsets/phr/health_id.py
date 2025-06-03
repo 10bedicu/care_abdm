@@ -8,11 +8,15 @@ from rest_framework.viewsets import GenericViewSet
 
 from abdm.api.serializers.abha_number import AbhaNumberSerializer
 from abdm.api.v3.serializers.health_id import (
+    AbhaLoginCheckAuthMethodsSerializer,
     PhrEnrollmentAbhaAddressExistsSerializer,
     PhrEnrollmentAbhaAddressSuggestionSerializer,
     PhrEnrollmentEnrolAbhaAddressSerializer,
     PhrEnrollmentSendOtpSerializer,
     PhrEnrollmentVerifyOtpSerializer,
+    PhrLoginSendOtpSerializer,
+    PhrLoginVerifySerializer,
+    PhrLoginVerifyUserSerializer,
 )
 from abdm.models import AbhaNumber, Transaction, TransactionType
 from abdm.service.v3.health_id import HealthIdService
@@ -28,6 +32,10 @@ class PhrEnrollmentViewSet(GenericViewSet):
         "phr_enrollment__abha_address_suggestion": PhrEnrollmentAbhaAddressSuggestionSerializer,
         "phr_enrollment__abha_address_exists": PhrEnrollmentAbhaAddressExistsSerializer,
         "phr_enrollment__enrol_abha_address": PhrEnrollmentEnrolAbhaAddressSerializer,
+        "phr_login__send_otp": PhrLoginSendOtpSerializer,
+        "phr_login__verify": PhrLoginVerifySerializer,
+        "phr_login__verify__user": PhrLoginVerifyUserSerializer,
+        "phr_login__check_auth_methods": AbhaLoginCheckAuthMethodsSerializer,
     }
 
     def get_serializer_class(self):
@@ -455,8 +463,8 @@ class PhrEnrollmentViewSet(GenericViewSet):
             type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
             meta_data={
                 "abha_number": str(abha_number.external_id),
-                "method": "link_via_otp",
-                "type": login_hint,
+                "method": "link_via_otp",  # TODO : NEED TO CHANGE THIS FOR PASSWORD
+                "type": "abha-address",
                 "system": verify_system,
             },
         )
@@ -504,13 +512,15 @@ class PhrEnrollmentViewSet(GenericViewSet):
             refresh_token=result.get("refreshToken"),
         )
 
+        login_hint = validated_data.get("type")
+
         Transaction.objects.create(
             reference_id=str(validated_data.get("transaction_id")),
             type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
             meta_data={
                 "abha_number": str(abha_number.external_id),
                 "method": "link_via_otp",
-                "type": validated_data.get("type"),
+                "type": "abha-number" if login_hint == "abha-number" else "mobile",
                 "system": validated_data.get("verify_system"),
             },
         )

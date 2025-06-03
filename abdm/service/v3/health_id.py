@@ -609,10 +609,10 @@ class HealthIdService:
         data: PhrLoginRequestOtpBody,
     ) -> PhrLoginRequestOtpResponse:
         payload = {
-            "scope": data.get("scope", []),
-            "loginHint": data.get("type", ""),
-            "loginId": encrypt_message(data.get("value", "")),
-            "otpSystem": data.get("otp_system", ""),
+            "scope": data.get("scope"),
+            "loginHint": data.get("type"),
+            "loginId": encrypt_message(data.get("value")),
+            "otpSystem": data.get("otp_system"),
         }
 
         path = "/phr/app/login/request/otp"
@@ -635,12 +635,12 @@ class HealthIdService:
         data: PhrLoginVerifyOtpBody,
     ) -> PhrLoginVerifyOtpResponse:
         payload = {
-            "scope": data.get("scope", []),
+            "scope": data.get("scope"),
             "authData": {
                 "authMethods": ["otp"],
                 "otp": {
-                    "txnId": data.get("transaction_id", ""),
-                    "otpValue": encrypt_message(data.get("otp", "")),
+                    "txnId": data.get("transaction_id"),
+                    "otpValue": encrypt_message(data.get("otp")),
                 },
             },
         }
@@ -664,12 +664,12 @@ class HealthIdService:
         data: PhrLoginVerifyPasswordBody,
     ) -> PhrLoginVerifyPasswordResponse:
         payload = {
-            "scope": data.get("scope", []),
+            "scope": data.get("scope"),
             "authData": {
                 "authMethods": ["password"],
                 "password": {
-                    "abhaAddress": data.get("abha_address", ""),
-                    "password": encrypt_message(data.get("password", "")),
+                    "abhaAddress": data.get("abha_address"),
+                    "password": encrypt_message(data.get("password")),
                 },
             },
         }
@@ -693,8 +693,8 @@ class HealthIdService:
         data: PhrLoginVerifyUserBody,
     ) -> ProfileLoginVerifyUserResponse:
         payload = {
-            "abhaAddress": data.get("abha_address", ""),
-            "txnId": data.get("transaction_id", ""),
+            "abhaAddress": data.get("abha_address"),
+            "txnId": data.get("transaction_id"),
         }
 
         path = "/phr/app/login/verify/user"
@@ -718,7 +718,7 @@ class HealthIdService:
         data: PhrWebLoginAbhaSearchBody,
     ) -> PhrWebLoginAbhaSearchResponse:
         payload = {
-            "abhaAddress": data.get("abha_address", ""),
+            "abhaAddress": data.get("abha_address"),
         }
 
         path = "/phr/app/login/search"
