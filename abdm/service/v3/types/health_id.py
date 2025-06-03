@@ -344,10 +344,10 @@ class PhrEnrollmentVerifyOtpResponse(TypedDict):
 class PhrEnrollmentAbhaAddressSuggestionBody(TypedDict):
     transaction_id: str
     first_name: str
-    last_name: str | None
+    last_name: str
     year_of_birth: str
-    month_of_birth: str | None
-    day_of_birth: str | None
+    month_of_birth: str
+    day_of_birth: str
 
 
 class PhrEnrollmentAbhaAddressSuggestionResponse(TypedDict):
@@ -366,17 +366,17 @@ class PhrEnrollmentAbhaAddressExistsResponse(TypedDict):
 class PhrDetails(TypedDict):
     abhaAddress: str
     address: str
-    dayOfBirth: str | None
+    dayOfBirth: str
     districtCode: str
     districtName: str
-    email: str | None
-    profilePhoto: str | None
+    email: str
+    profilePhoto: str
     firstName: str
     gender: str
-    lastName: str | None
-    middleName: str | None
+    lastName: str
+    middleName: str
     mobile: str
-    monthOfBirth: str | None
+    monthOfBirth: str
     password: str
     pinCode: str
     stateCode: str
