@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -103,13 +104,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
         login_hint = validated_data.get("type")
         otp_system = validated_data.get("otp_system")
 
-        if login_hint == "abha-number":
-            scope = ["abha-login"]
-            scope.append(
-                "aadhaar-verify" if otp_system == "aadhaar" else "mobile-verify"
-            )
-        else:
-            scope = ["abha-address-enroll", "mobile-verify"]
+        scope = self._build_scope(login_hint, otp_system, "enrollment")
 
         result = HealthIdService.phr__enrollment__request__otp(
             {
@@ -135,13 +130,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
         login_hint = validated_data.get("type")
         otp_system = validated_data.get("otp_system")
 
-        if login_hint == "abha-number":
-            scope = ["abha-login"]
-            scope.append(
-                "aadhaar-verify" if otp_system == "aadhaar" else "mobile-verify"
-            )
-        else:
-            scope = ["abha-address-enroll", "mobile-verify"]
+        scope = self._build_scope(login_hint, otp_system, "enrollment")
 
         result = HealthIdService.phr__enrollment__verify__otp(
             {
@@ -149,6 +138,11 @@ class PhrEnrollmentViewSet(GenericViewSet):
                 "transaction_id": str(validated_data.get("transaction_id")),
                 "otp": validated_data.get("otp"),
             }
+        )
+        cache.set(
+            f"phr_verify_user_token:{result['txnId']}",
+            result["tokens"]["token"],
+            timeout=300,
         )
 
         accounts = result.get("accounts", [])
@@ -198,8 +192,8 @@ class PhrEnrollmentViewSet(GenericViewSet):
                 {
                     "transaction_id": result.get("txnId"),
                     "detail": result.get("message"),
-                    "abha_number": AbhaNumberSerializer(abha_number).data,
                     "users": result.get("users"),
+                    "abha_number": AbhaNumberSerializer(abha_number).data,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -236,14 +230,13 @@ class PhrEnrollmentViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["get"], url_path="create/abha_address_exists")
+    @action(detail=False, methods=["post"], url_path="create/abha_address_exists")
     def phr_enrollment__abha_address_exists(self, request):
         validated_data = self.validate_request(request)
 
-        abha_address = validated_data.get("abha_address")
-
-        if not abha_address.endswith(f"@{settings.ABDM_CM_ID}"):
-            abha_address = f"{abha_address}@{settings.ABDM_CM_ID}"
+        abha_address = self._normalize_abha_address(
+            validated_data.get("abha_address"),
+        )
 
         exists = HealthIdService.phr__enrollment__abha_address__exists(
             {
@@ -252,7 +245,9 @@ class PhrEnrollmentViewSet(GenericViewSet):
         )
 
         return Response(
-            exists,
+            {
+                "exists": exists,
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -261,6 +256,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
         validated_data = self.validate_request(request)
 
         phr_details = validated_data.get("phr_details")
+
         phr_details_camel = {
             "abhaAddress": phr_details.get("abha_address"),
             "address": phr_details.get("address"),
@@ -276,7 +272,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
             "mobile": phr_details.get("mobile"),
             "monthOfBirth": phr_details.get("month_of_birth", ""),
             "password": phr_details.get("password"),
-            "pinCode": phr_details.get("pin_code"),
+            "pinCode": phr_details.get("pincode"),
             "stateCode": phr_details.get("state_code"),
             "stateName": phr_details.get("state_name"),
             "yearOfBirth": phr_details.get("year_of_birth"),
@@ -301,34 +297,13 @@ class PhrEnrollmentViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = HealthIdService.profile__account(
+        profile_result = HealthIdService.phr__profile(
             {"x_token": abha_number.access_token}
         )
-
-        (abha_number, _) = AbhaNumber.objects.update_or_create(
-            abha_number=profile_result.get("ABHANumber"),
-            defaults={
-                "abha_number": profile_result.get("ABHANumber"),
-                "health_id": profile_result.get("preferredAbhaAddress"),
-                "name": profile_result.get("name"),
-                "first_name": profile_result.get("firstName"),
-                "middle_name": profile_result.get("middleName"),
-                "last_name": profile_result.get("lastName"),
-                "gender": profile_result.get("gender"),
-                "date_of_birth": str(
-                    datetime.strptime(
-                        f"{profile_result.get('yearOfBirth')}-{profile_result.get('monthOfBirth')}-{profile_result.get('dayOfBirth')}",
-                        "%Y-%m-%d",
-                    )
-                )[0:10],
-                "address": profile_result.get("address"),
-                "district": profile_result.get("districtName"),
-                "state": profile_result.get("stateName"),
-                "pincode": profile_result.get("pincode"),
-                "email": profile_result.get("email"),
-                "mobile": profile_result.get("mobile"),
-                "profile_photo": profile_result.get("profilePhoto"),
-            },
+        abha_number, _ = self._update_abha_from_profile(
+            profile_result,
+            access_token=result.get("tokens", {}).get("token"),
+            refresh_token=result.get("tokens", {}).get("refreshToken"),
         )
 
         Transaction.objects.create(
@@ -341,9 +316,6 @@ class PhrEnrollmentViewSet(GenericViewSet):
 
         return Response(
             {
-                "transaction_id": result.get("txnId"),
-                "health_id": profile_result.get("ABHANumber"),
-                "preferred_abha_address": profile_result.get("preferredAbhaAddress"),
                 "abha_number": AbhaNumberSerializer(abha_number).data,
             },
             status=status.HTTP_200_OK,
