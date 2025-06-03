@@ -394,3 +394,62 @@ class PhrEnrollmentEnrolAbhaAddressResponse(TypedDict):
     phrDetails: dict
     tokens: Token
     txnId: str
+
+
+class PhrLoginRequestOtpBody(TypedDict):
+    scope: list[
+        Literal[
+            "abha-login",
+            "abha-address-login",
+            "aadhaar-verify",
+            "mobile-verify",
+        ]
+    ]
+    type: Literal["abha-address", "abha-number", "mobile-number"]
+    value: str
+    otp_system: Literal["aadhaar", "abdm"]
+
+
+class PhrLoginRequestOtpResponse(TypedDict):
+    txnId: str
+    message: str
+
+
+class PhrLoginVerifyOtpBody(TypedDict):
+    scope: list[
+        Literal[
+            "abha-login",
+            "abha-address-login",
+            "aadhaar-verify",
+            "mobile-verify",
+        ]
+    ]
+    transaction_id: str
+    otp: str
+
+
+class PhrLoginVerifyOtpResponse(TypedDict):
+    message: str
+    authResult: Literal["success", "failure"]
+    txnId: str
+    users: list[User]
+    tokens: Token
+
+
+class PhrLoginVerifyPasswordBody(TypedDict):
+    scope: list[Literal["abha-address-login", "password-verify"]]
+    abha_address: str
+    password: str
+
+
+class PhrLoginVerifyPasswordResponse(TypedDict):
+    message: str
+    authResult: Literal["success", "failure"]
+    tokens: Token
+    users: list[User]
+
+
+class PhrLoginVerifyUserBody(TypedDict):
+    abha_address: str
+    transaction_id: str
+    t_token: str
