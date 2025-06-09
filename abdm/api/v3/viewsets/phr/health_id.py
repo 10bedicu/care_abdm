@@ -77,20 +77,21 @@ class PhrEnrollmentViewSet(GenericViewSet):
         )[:10]
 
         defaults = {
-            "abha_number": data.get(abha_key, ""),
-            "health_id": data.get("preferredAbhaAddress", ""),
+            "abha_number": data.get(abha_key),
+            "health_id": data.get("preferredAbhaAddress"),
             "name": data.get("name") or data.get("fullName"),
             "first_name": data.get("firstName"),
-            "middle_name": data.get("middleName", ""),
-            "last_name": data.get("lastName", ""),
+            "middle_name": data.get("middleName"),
+            "last_name": data.get("lastName"),
             "gender": data.get("gender"),
+            "email": data.get("email"),
             "date_of_birth": date_of_birth,
             "address": data.get("address"),
             "district": data.get("districtName"),
             "state": data.get("stateName"),
             "pincode": data.get("pinCode") or data.get("pincode"),
             "mobile": data.get("mobile"),
-            "profile_photo": data.get("profilePhoto", ""),
+            "profile_photo": data.get("profilePhoto"),
             **tokens,
         }
 
