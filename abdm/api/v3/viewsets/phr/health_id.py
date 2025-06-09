@@ -68,35 +68,34 @@ class PhrEnrollmentViewSet(GenericViewSet):
 
         return base_scope + auth_scope
 
-    def _update_abha_from_profile(self, profile_data, **tokens):
+    def _update_abha_from_profile(self, data, abha_key="abhaNumber", **tokens):
         date_of_birth = str(
             datetime.strptime(
-                f"{profile_data.get('yearOfBirth')}-{profile_data.get('monthOfBirth')}-{profile_data.get('dayOfBirth')}",
+                f"{data.get('yearOfBirth')}-{data.get('monthOfBirth') or '01'}-{data.get('dayOfBirth') or '01'}",
                 "%Y-%m-%d",
             )
-        )[0:10]
+        )[:10]
 
         defaults = {
-            "abha_number": profile_data.get("abhaNumber"),
-            "health_id": profile_data.get("preferredAbhaAddress"),
-            "name": profile_data.get("fullName"),
-            "first_name": profile_data.get("firstName", ""),
-            "middle_name": profile_data.get("middleName", ""),
-            "last_name": profile_data.get("lastName", ""),
-            "gender": profile_data.get("gender"),
+            "abha_number": data.get(abha_key, ""),
+            "health_id": data.get("preferredAbhaAddress", ""),
+            "name": data.get("name") or data.get("fullName"),
+            "first_name": data.get("firstName"),
+            "middle_name": data.get("middleName", ""),
+            "last_name": data.get("lastName", ""),
+            "gender": data.get("gender"),
             "date_of_birth": date_of_birth,
-            "address": profile_data.get("address"),
-            "pincode": profile_data.get("pinCode"),
-            "district": profile_data.get("districtName"),
-            "state": profile_data.get("stateName"),
-            "email": profile_data.get("email"),
-            "mobile": profile_data.get("mobile"),
-            "profile_photo": profile_data.get("profilePhoto"),
+            "address": data.get("address"),
+            "district": data.get("districtName"),
+            "state": data.get("stateName"),
+            "pincode": data.get("pinCode") or data.get("pincode"),
+            "mobile": data.get("mobile"),
+            "profile_photo": data.get("profilePhoto", ""),
             **tokens,
         }
 
         return AbhaNumber.objects.update_or_create(
-            abha_number=profile_data.get("abhaNumber"),
+            abha_number=data.get(abha_key),
             defaults=defaults,
         )
 
@@ -158,31 +157,11 @@ class PhrEnrollmentViewSet(GenericViewSet):
             account = accounts[0]
             token = result.get("tokens", {})
 
-            (abha_number, _) = AbhaNumber.objects.update_or_create(
-                abha_number=account.get("ABHANumber"),
-                defaults={
-                    "abha_number": account.get("ABHANumber"),
-                    "health_id": account.get("preferredAbhaAddress"),
-                    "name": account.get("name"),
-                    "first_name": account.get("firstName", ""),
-                    "middle_name": account.get("middleName", ""),
-                    "last_name": account.get("lastName", ""),
-                    "gender": account.get("gender"),
-                    "date_of_birth": str(
-                        datetime.strptime(
-                            f"{account.get('yearOfBirth')}-{account.get('monthOfBirth')}-{account.get('dayOfBirth')}",
-                            "%Y-%m-%d",
-                        )
-                    )[0:10],
-                    "address": account.get("address"),
-                    "district": account.get("districtName"),
-                    "state": account.get("stateName"),
-                    "pincode": account.get("pincode"),
-                    "mobile": account.get("mobile"),
-                    "profile_photo": account.get("profilePhoto"),
-                    "access_token": token.get("token"),
-                    "refresh_token": token.get("refreshToken"),
-                },
+            (abha_number, _) = self._update_abha_from_profile(
+                account,
+                abha_key="ABHANumber",
+                access_token=token.get("token"),
+                refresh_token=token.get("refreshToken"),
             )
 
             Transaction.objects.create(
