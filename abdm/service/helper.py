@@ -16,6 +16,7 @@ from abdm.settings import plugin_settings as settings
 from care.emr.models.encounter import Encounter
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.patient import Patient
+from care.emr.resources.encounter.constants import ClassChoices
 
 
 class ABDMAPIException(APIException):
@@ -121,6 +122,22 @@ def generate_care_contexts_for_existing_data(
 
     for encounter in encounters:
         encounter_care_contexts = []
+
+        is_admission = encounter.encounter_class in [
+            ClassChoices.imp,
+            ClassChoices.emer,
+            ClassChoices.obsenc,
+        ]
+
+        encounter_care_contexts.append(
+            {
+                "reference": f"v2::encounter::{encounter.id}",
+                "display": f"Encounter on {encounter.created_date.date()}",
+                "hi_type": HealthInformationType.DISCHARGE_SUMMARY
+                if is_admission
+                else HealthInformationType.OP_CONSULTATION,
+            }
+        )
 
         medication_requests = (
             MedicationRequest.objects.filter(

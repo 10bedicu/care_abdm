@@ -53,6 +53,7 @@ from abdm.service.v3.types.gateway import (
 from abdm.settings import plugin_settings as settings
 from abdm.utils.cipher import Cipher
 from abdm.utils.fhir import Fhir
+from care.emr.models.encounter import Encounter
 from care.emr.models.medication_request import MedicationRequest
 
 
@@ -525,6 +526,34 @@ class GatewayService:
                     continue
 
                 fhir_data = Fhir().create_prescription_record(list(medication_requests))
+
+            if (
+                model == "encounter"
+                and HealthInformationType.OP_CONSULTATION in consent.hi_types
+            ):
+                encounter = Encounter.objects.filter(
+                    external_id=param,
+                    patient__external_id=patient_reference,
+                ).first()
+
+                if not encounter:
+                    continue
+
+                fhir_data = Fhir().create_op_consult_record(encounter)
+
+            if (
+                model == "encounter"
+                and HealthInformationType.DISCHARGE_SUMMARY in consent.hi_types
+            ):
+                encounter = Encounter.objects.filter(
+                    external_id=param,
+                    patient__external_id=patient_reference,
+                ).first()
+
+                if not encounter:
+                    continue
+
+                fhir_data = Fhir().create_discharge_summary_record(encounter)
 
             else:
                 continue

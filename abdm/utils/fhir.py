@@ -620,13 +620,13 @@ class Fhir:
             type=CodeableConcept(
                 coding=[
                     Coding(
-                        system="https://projecteka.in/sct",
+                        system="http://snomed.info/sct",
                         code="440545006",
                         display="Prescription record",
                     )
                 ]
             ),
-            title="Prescription",
+            title="Prescription Records",
             date=datetime.now(UTC).isoformat(),
             section=[
                 CompositionSection(
@@ -661,13 +661,145 @@ class Fhir:
             type=CodeableConcept(
                 coding=[
                     Coding(
-                        system="https://projecteka.in/sct",
+                        system="http://snomed.info/sct",
                         code="371530004",
                         display="Clinical consultation report",
                     )
                 ]
             ),
-            title="Medications",
+            title="Consultation Report",
+            date=datetime.now(UTC).isoformat(),
+            section=list(
+                filter(
+                    lambda section: section.entry and len(section.entry) > 0,
+                    [
+                        CompositionSection(
+                            title="Chief Complaints",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="422843007",
+                                        display="Chief complaint section",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                self._reference(self._condition(condition))
+                                for condition in ConditionModel.objects.filter(
+                                    encounter=encounter
+                                )
+                            ],
+                        ),
+                        CompositionSection(
+                            title="Physical Examination",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="425044008",
+                                        display="Physical exam section",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                self._reference(self._observation(observation))
+                                for observation in ObservationModel.objects.filter(
+                                    encounter=encounter
+                                ).exclude(Q(main_code__isnull=True) | Q(main_code={}))
+                            ],
+                        ),
+                        CompositionSection(
+                            title="Allergies",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="722446000",
+                                        display="Allergy record",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                self._reference(self._allergy_intolerance(allergy))
+                                for allergy in AllergyIntoleranceModel.objects.filter(
+                                    encounter=encounter
+                                )
+                            ],
+                        ),
+                        CompositionSection(
+                            title="Medications",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="721912009",
+                                        display="Medication summary document",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                *[
+                                    self._reference(self._medication_request(request))
+                                    for request in MedicationRequestModel.objects.filter(
+                                        encounter=encounter
+                                    )
+                                ],
+                                *[
+                                    self._reference(
+                                        self._medication_statement(statement)
+                                    )
+                                    for statement in MedicationStatementModel.objects.filter(
+                                        encounter=encounter
+                                    )
+                                ],
+                            ],
+                        ),
+                        CompositionSection(
+                            title="Document Reference",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="371530004",
+                                        display="Clinical consultation report",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                self._reference(self._document_reference(file))
+                                for file in FileUploadModel.objects.filter(
+                                    associating_id=encounter.external_id
+                                )
+                            ],
+                        ),
+                    ],
+                )
+            ),
+            subject=self._reference(self._patient(encounter.patient)),
+            encounter=self._reference(
+                self._encounter(encounter, include_diagnosis=True)
+            ),
+            author=[self._reference(self._organization(encounter.facility))],
+        )
+
+    def _discharge_summary_composition(
+        self, encounter: EncounterModel, care_context_id: str
+    ):
+        return Composition(
+            id=care_context_id,
+            identifier=Identifier(value=care_context_id),
+            status="final",
+            type=CodeableConcept(
+                coding=[
+                    Coding(
+                        system="http://snomed.info/sct",
+                        code="373942005",
+                        display="Discharge summary",
+                    )
+                ]
+            ),
+            title="Discharge Summary",
             date=datetime.now(UTC).isoformat(),
             section=list(
                 filter(
@@ -819,6 +951,24 @@ class Fhir:
             entry=[
                 self._bundle_entry(
                     self._op_consult_composition(encounter, care_context_id)
+                ),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
+        )
+
+    def create_discharge_summary_record(
+        self, encounter: EncounterModel, care_context_id: str = uuid()
+    ):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(
+                    self._discharge_summary_composition(encounter, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
