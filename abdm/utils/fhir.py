@@ -37,7 +37,7 @@ from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.timing import Timing, TimingRepeat
 
 from abdm.models.health_facility import HealthFacility as HealthFacilityModel
-from abdm.service.helper import uuid
+from abdm.service.helper import ABDMAPIException, uuid
 from abdm.settings import plugin_settings as settings
 from care.emr.models.allergy_intolerance import (
     AllergyIntolerance as AllergyIntoleranceModel,
@@ -59,6 +59,7 @@ from care.emr.resources.common.coding import Coding as CodingSpec
 from care.emr.resources.condition.spec import ConditionReadSpec
 from care.emr.resources.encounter.spec import EncounterRetrieveSpec
 from care.emr.resources.facility.spec import FacilityRetrieveSpec
+from care.emr.resources.file_upload.spec import FileTypeChoices
 from care.emr.resources.medication.request.spec import (
     DosageInstruction as DosageInstructionSpec,
 )
@@ -915,6 +916,61 @@ class Fhir:
             author=[self._reference(self._organization(encounter.facility))],
         )
 
+    def _health_document_composition(self, file: FileUploadModel, care_context_id: str):
+        if file.file_type not in (FileTypeChoices.patient, FileTypeChoices.encounter):
+            raise ABDMAPIException(
+                "File type must be either patient or encounter to create health document composition"
+            )
+
+        patient = PatientModel.objects.filter(
+            Q(external_id=file.associating_id)
+            | Q(encounter__external_id=file.associating_id)
+        ).first()
+
+        if not patient:
+            raise ABDMAPIException(
+                "Patient not found for the given file associating_id"
+            )
+
+        encounter = EncounterModel.objects.filter(
+            external_id=file.associating_id
+        ).first()
+
+        return Composition(
+            id=care_context_id,
+            identifier=Identifier(value=care_context_id),
+            status="final",
+            type=CodeableConcept(
+                coding=[
+                    Coding(
+                        system="http://snomed.info/sct",
+                        code="419891008",
+                        display="Record artifact",
+                    )
+                ]
+            ),
+            title="Health Document",
+            date=datetime.now(UTC).isoformat(),
+            section=list(
+                filter(
+                    lambda section: section.entry and len(section.entry) > 0,
+                    [
+                        CompositionSection(
+                            title=file.name,
+                            entry=[self._reference(self._document_reference(file))],
+                        ),
+                    ],
+                )
+            ),
+            subject=self._reference(self._patient(patient)),
+            encounter=self._reference(
+                self._encounter(encounter, include_diagnosis=True)
+            )
+            if encounter
+            else None,
+            author=[self._reference(self._practitioner(file.created_by))],
+        )
+
     def _bundle_entry(self, resource: Resource):
         return BundleEntry(fullUrl=self._reference_url(resource), resource=resource)
 
@@ -969,6 +1025,24 @@ class Fhir:
             entry=[
                 self._bundle_entry(
                     self._discharge_summary_composition(encounter, care_context_id)
+                ),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
+        )
+
+    def create_health_document_record(
+        self, file: FileUploadModel, care_context_id: str = uuid()
+    ):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(
+                    self._health_document_composition(file, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],

@@ -14,9 +14,11 @@ from abdm.models.base import HealthInformationType
 from abdm.service.request import Request
 from abdm.settings import plugin_settings as settings
 from care.emr.models.encounter import Encounter
+from care.emr.models.file_upload import FileUpload
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.patient import Patient
 from care.emr.resources.encounter.constants import ClassChoices
+from care.emr.resources.file_upload.spec import FileTypeChoices
 
 
 class ABDMAPIException(APIException):
@@ -156,6 +158,20 @@ def generate_care_contexts_for_existing_data(
                 }
             )
 
+        files = FileUpload.objects.filter(
+            associating_id=encounter.id,
+            file_type=FileTypeChoices.encounter,
+            upload_completed=True,
+        )
+        for file in files:
+            encounter_care_contexts.append(
+                {
+                    "reference": f"v2::file_upload::{file.id}",
+                    "display": f"File Uploaded on {file.created_date.date()}",
+                    "hi_type": HealthInformationType.RECORD_ARTIFACT,
+                }
+            )
+
         facility = encounter.facility
         if not hasattr(facility, "healthfacility"):
             # TODO: create transaction to log failed transaction for care_context
@@ -188,5 +204,9 @@ def care_context_dict_from_reference_id(reference_id: str):
             "display": f"Medication Prescribed on {medication_request.created_date.date()}",
             "hi_type": HealthInformationType.PRESCRIPTION,
         }
+
+    # FIXME: handle encounter
+
+    # FIXME: handle file upload
 
     return None
