@@ -1,4 +1,5 @@
-from rest_framework.exceptions import ValidationError
+from django.core.cache import cache
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.serializers import (
     CharField,
     ChoiceField,
@@ -6,6 +7,9 @@ from rest_framework.serializers import (
     Serializer,
     UUIDField,
 )
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from care_abdm.abdm.authentication import PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX
 
 
 class AbhaCreateVerifyAadhaarDemographicsSerializer(Serializer):
@@ -253,3 +257,37 @@ class PhrLoginVerifyUserSerializer(Serializer):
     )
     transaction_id = UUIDField(required=True)
     abha_address = CharField(max_length=50, min_length=3, required=True)
+
+
+class PhrTokenRefreshSerializer(Serializer):
+    refresh = CharField()
+    access = CharField(read_only=True)
+
+    def validate(self, attrs):
+        refresh_token_str = attrs["refresh"]
+
+        old_refresh_token = RefreshToken(refresh_token_str)
+
+        cache_key_for_old_token = (
+            f"{PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX}{refresh_token_str}"
+        )
+        if cache.get(cache_key_for_old_token):
+            raise PermissionDenied(
+                "This refresh token has been invalidated. Please log in again."
+            )
+        if "abha_address" not in old_refresh_token.payload:
+            raise ValidationError(
+                {"refresh": "Token is missing the required 'abha_address' claim."}
+            )
+
+        cache.set(cache_key_for_old_token, "invalidated_after_rotation", timeout=1800)
+        new_rotated_refresh_token = RefreshToken()
+
+        new_rotated_refresh_token["abha_address"] = old_refresh_token.payload[
+            "abha_address"
+        ]
+
+        return {
+            "access_token": str(new_rotated_refresh_token.access_token),
+            "refresh_token": str(new_rotated_refresh_token),
+        }

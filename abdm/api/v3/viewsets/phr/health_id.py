@@ -5,6 +5,7 @@ from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from abdm.api.serializers.abha_number import AbhaNumberSerializer
@@ -18,6 +19,7 @@ from abdm.api.v3.serializers.health_id import (
     PhrLoginSendOtpSerializer,
     PhrLoginVerifySerializer,
     PhrLoginVerifyUserSerializer,
+    PhrTokenRefreshSerializer,
 )
 from abdm.models import AbhaNumber, Transaction, TransactionType
 from abdm.service.v3.health_id import HealthIdService
@@ -25,12 +27,12 @@ from abdm.settings import plugin_settings as settings
 
 PHR_ACCESS_TOKEN_PREFIX = "phr_access_token:"
 PHR_REFRESH_TOKEN_PREFIX = "phr_refresh_token:"
-ABDM_ACCESS_TOKEN_CACHE_TIMEOUT = 1800
-ABDM_REFRESH_TOKEN_CACHE_TIMEOUT = 129600
+PHR_ACCESS_TOKEN_CACHE_TIMEOUT = 1800
+PHR_REFRESH_TOKEN_CACHE_TIMEOUT = 1296000
 VERIFY_USER_TOKEN_TIMEOUT = 300
 
 
-class PhrEnrollmentViewSet(GenericViewSet):
+class PhrAuthViewSet(GenericViewSet):
     permission_classes = []
 
     serializer_action_classes = {
@@ -43,6 +45,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
         "phr_login__verify": PhrLoginVerifySerializer,
         "phr_login__verify__user": PhrLoginVerifyUserSerializer,
         "phr_login__check_auth_methods": AbhaLoginCheckAuthMethodsSerializer,
+        "phr_refresh_token": PhrTokenRefreshSerializer,
     }
 
     def get_serializer_class(self):
@@ -80,7 +83,7 @@ class PhrEnrollmentViewSet(GenericViewSet):
             datetime.strptime(
                 f"{data.get('yearOfBirth')}-{data.get('monthOfBirth') or '01'}-{data.get('dayOfBirth') or '01'}",
                 "%Y-%m-%d",
-            )
+            ).replace(tzinfo=datetime.timezone.utc)
         )[:10]
 
         defaults = {
@@ -125,13 +128,13 @@ class PhrEnrollmentViewSet(GenericViewSet):
         cache.set(
             f"{PHR_ACCESS_TOKEN_PREFIX}{normalized_health_id}",
             access_token,
-            timeout=ABDM_ACCESS_TOKEN_CACHE_TIMEOUT,
+            timeout=PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
         )
 
         cache.set(
             f"{PHR_REFRESH_TOKEN_PREFIX}{normalized_health_id}",
             refresh_token,
-            timeout=ABDM_REFRESH_TOKEN_CACHE_TIMEOUT,
+            timeout=PHR_REFRESH_TOKEN_CACHE_TIMEOUT,
         )
 
     @action(detail=False, methods=["post"], url_path="create/send_otp")
@@ -590,3 +593,13 @@ class PhrEnrollmentViewSet(GenericViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["post"], url_path="refresh_token")
+    def phr_refresh_token(self, request):
+        serializer = self.get_serializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0]) from e
+
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)
