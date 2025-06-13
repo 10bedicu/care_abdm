@@ -13,14 +13,20 @@ from care.users.models import User
 
 logger = logging.getLogger(__name__)
 
+PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX = "PHR_ACCESS_TOKEN_INVALIDATE:"
+PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX = "PHR_REFRESH_TOKEN_INVALIDATE:"
+
 
 class ABDMAuthentication(JWTAuthentication):
     def open_id_authenticate(self, url, token):
-        public_key = requests.get(url, headers={
-            "REQUEST-ID": uuid(),
-            "TIMESTAMP": timestamp(),
-            "X-CM-ID": cm_id()
-        })
+        public_key = requests.get(
+            url,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-CM-ID": cm_id(),
+            },
+        )
         jwk = public_key.json()["keys"][0]
         public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
         return jwt.decode(
