@@ -145,9 +145,10 @@ def create_care_context_on_questionnaire_response_creation(
     )
 
     if (
-        not patient
+        not created
+        or not patient
         or getattr(patient, "abha_number", None) is None
-        or len(observations) > 1
+        or len(observations) != 1
     ):
         return
 
@@ -157,7 +158,9 @@ def create_care_context_on_questionnaire_response_creation(
                 {
                     "patient": patient,
                     "care_contexts": [
-                        create_questionnaire_response_care_context(instance)
+                        create_questionnaire_response_care_context(
+                            instance.questionnaire_response
+                        )
                     ],
                     "user": instance.created_by,
                     "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
