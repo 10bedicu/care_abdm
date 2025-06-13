@@ -16,7 +16,9 @@ from abdm.settings import plugin_settings as settings
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.medication_request import MedicationRequest
+from care.emr.models.observation import Observation
 from care.emr.models.patient import Patient
+from care.emr.models.questionnaire import QuestionnaireResponse
 from care.emr.resources.encounter.constants import ClassChoices
 from care.emr.resources.file_upload.spec import FileTypeChoices
 
@@ -125,21 +127,7 @@ def generate_care_contexts_for_existing_data(
     for encounter in encounters:
         encounter_care_contexts = []
 
-        is_admission = encounter.encounter_class in [
-            ClassChoices.imp,
-            ClassChoices.emer,
-            ClassChoices.obsenc,
-        ]
-
-        encounter_care_contexts.append(
-            {
-                "reference": f"v2::encounter::{encounter.id}",
-                "display": f"Encounter on {encounter.created_date.date()}",
-                "hi_type": HealthInformationType.DISCHARGE_SUMMARY
-                if is_admission
-                else HealthInformationType.OP_CONSULTATION,
-            }
-        )
+        encounter_care_contexts.append(create_encounter_care_context(encounter))
 
         medication_requests = (
             MedicationRequest.objects.filter(
@@ -151,26 +139,33 @@ def generate_care_contexts_for_existing_data(
         )
         for request in medication_requests:
             encounter_care_contexts.append(
-                {
-                    "reference": f"v2::medication_request::{request.created_date.date()}",
-                    "display": f"Medication Prescribed on {request.created_date.date()}",
-                    "hi_type": HealthInformationType.PRESCRIPTION,
-                }
+                create_medication_request_care_context(request)
             )
 
         files = FileUpload.objects.filter(
-            associating_id=encounter.id,
+            associating_id=encounter.external_id,
             file_type=FileTypeChoices.encounter,
             upload_completed=True,
         )
         for file in files:
-            encounter_care_contexts.append(
-                {
-                    "reference": f"v2::file_upload::{file.id}",
-                    "display": f"File Uploaded on {file.created_date.date()}",
-                    "hi_type": HealthInformationType.RECORD_ARTIFACT,
-                }
+            encounter_care_contexts.append(create_file_upload_care_context(file))
+
+        questionnaire_responses = QuestionnaireResponse.objects.filter(
+            encounter=encounter,
+            patient=patient,
+        )
+        for response in questionnaire_responses:
+            observations = Observation.objects.filter(
+                questionnaire_response=response
+            ).filter(
+                Q(main_code__isnull=False) & ~Q(main_code={})
+                | Q(alternate_coding__isnull=False) & ~Q(alternate_coding=[])
             )
+
+            if observations.exists():
+                encounter_care_contexts.append(
+                    create_questionnaire_response_care_context(response)
+                )
 
         facility = encounter.facility
         if not hasattr(facility, "healthfacility"):
@@ -186,7 +181,7 @@ def generate_care_contexts_for_existing_data(
     return care_contexts
 
 
-def care_context_dict_from_reference_id(reference_id: str):
+def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911
     [version, model, param] = reference_id.split("::")
 
     if version != "v2":
@@ -196,17 +191,78 @@ def care_context_dict_from_reference_id(reference_id: str):
         medication_request = MedicationRequest.objects.filter(
             created_date__date=param
         ).first()
+
         if not medication_request:
             return None
 
-        return {
-            "reference": f"v2::prescription::{medication_request.created_date.date()}",
-            "display": f"Medication Prescribed on {medication_request.created_date.date()}",
-            "hi_type": HealthInformationType.PRESCRIPTION,
-        }
+        return create_medication_request_care_context(medication_request)
 
-    # FIXME: handle encounter
+    if model == "encounter":
+        encounter = Encounter.objects.filter(external_id=param).first()
 
-    # FIXME: handle file upload
+        if not encounter:
+            return None
+
+        return create_encounter_care_context(encounter)
+
+    if model == "file_upload":
+        file_upload = FileUpload.objects.filter(external_id=param).first()
+
+        if not file_upload:
+            return None
+
+        return create_file_upload_care_context(file_upload)
+
+    if model == "questionnaire_response":
+        questionnaire_response = QuestionnaireResponse.objects.filter(
+            external_id=param
+        ).first()
+
+        if not questionnaire_response:
+            return None
+
+        return create_questionnaire_response_care_context(questionnaire_response)
 
     return None
+
+
+def create_medication_request_care_context(medication_request: MedicationRequest):
+    return {
+        "reference": f"v2::prescription::{medication_request.created_date.date()}",
+        "display": f"Medication Prescribed on {medication_request.created_date.date()}",
+        "hi_type": HealthInformationType.PRESCRIPTION,
+    }
+
+
+def create_encounter_care_context(encounter: Encounter):
+    is_admission = encounter.encounter_class in [
+        ClassChoices.imp,
+        ClassChoices.emer,
+        ClassChoices.obsenc,
+    ]
+
+    return {
+        "reference": f"v2::encounter::{encounter.external_id}",
+        "display": f"Encounter on {encounter.created_date}",
+        "hi_type": HealthInformationType.DISCHARGE_SUMMARY
+        if is_admission
+        else HealthInformationType.OP_CONSULTATION,
+    }
+
+
+def create_file_upload_care_context(file_upload: FileUpload):
+    return {
+        "reference": f"v2::file_upload::{file_upload.external_id}",
+        "display": f"File Uploaded on {file_upload.created_date}",
+        "hi_type": HealthInformationType.RECORD_ARTIFACT,
+    }
+
+
+def create_questionnaire_response_care_context(
+    questionnaire_response: QuestionnaireResponse,
+):
+    return {
+        "reference": f"v2::questionnaire_response::{questionnaire_response.external_id}",
+        "display": f"Observations Added on {questionnaire_response.created_date}",
+        "hi_type": HealthInformationType.WELLNESS_RECORD,
+    }

@@ -54,6 +54,9 @@ from care.emr.models.medication_statement import (
 )
 from care.emr.models.observation import Observation as ObservationModel
 from care.emr.models.patient import Patient as PatientModel
+from care.emr.models.questionnaire import (
+    QuestionnaireResponse as QuestionnaireResponseModel,
+)
 from care.emr.resources.allergy_intolerance.spec import AllergyIntoleranceReadSpec
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.emr.resources.condition.spec import ConditionReadSpec
@@ -971,6 +974,55 @@ class Fhir:
             author=[self._reference(self._practitioner(file.created_by))],
         )
 
+    def _wellness_composition(
+        self, questionnaire_response: QuestionnaireResponseModel, care_context_id: str
+    ):
+        observations = ObservationModel.objects.filter(
+            questionnaire_response=questionnaire_response,
+        ).filter(
+            Q(main_code__isnull=False) & ~Q(main_code={})
+            | Q(alternate_coding__isnull=False) & ~Q(alternate_coding=[])
+        )
+
+        if not observations:
+            raise ABDMAPIException(
+                "No observations found for the given questionnaire response"
+            )
+
+        return Composition(
+            id=care_context_id,
+            identifier=Identifier(value=care_context_id),
+            status="final",
+            type=CodeableConcept(text="Wellness Record"),
+            title="Wellness Record",
+            date=datetime.now(UTC).isoformat(),
+            section=list(
+                filter(
+                    lambda section: section.entry and len(section.entry) > 0,
+                    [
+                        CompositionSection(
+                            title="Other Observations",
+                            entry=[
+                                self._reference(self._observation(observation))
+                                for observation in observations
+                            ],
+                        ),
+                    ],
+                )
+            ),
+            subject=self._reference(self._patient(questionnaire_response.patient)),
+            encounter=self._reference(
+                self._encounter(
+                    questionnaire_response.encounter, include_diagnosis=True
+                )
+            )
+            if questionnaire_response.encounter
+            else None,
+            author=[
+                self._reference(self._practitioner(questionnaire_response.created_by))
+            ],
+        )
+
     def _bundle_entry(self, resource: Resource):
         return BundleEntry(fullUrl=self._reference_url(resource), resource=resource)
 
@@ -1043,6 +1095,26 @@ class Fhir:
             entry=[
                 self._bundle_entry(
                     self._health_document_composition(file, care_context_id)
+                ),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
+        )
+
+    def create_wellness_record(
+        self,
+        questionnaire_response: QuestionnaireResponseModel,
+        care_context_id: str = uuid(),
+    ):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(
+                    self._wellness_composition(questionnaire_response, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],

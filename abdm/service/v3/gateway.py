@@ -56,6 +56,7 @@ from abdm.utils.fhir import Fhir
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.medication_request import MedicationRequest
+from care.emr.models.questionnaire import QuestionnaireResponse
 
 
 class GatewayService:
@@ -568,6 +569,19 @@ class GatewayService:
                     continue
 
                 fhir_data = Fhir().create_health_document_record(file_upload)
+
+            if (
+                model == "questionnaire_response"
+                and HealthInformationType.WELLNESS_RECORD in consent.hi_types
+            ):
+                questionnaire_response = QuestionnaireResponse.objects.filter(
+                    external_id=param,
+                ).first()
+
+                if not questionnaire_response:
+                    continue
+
+                fhir_data = Fhir().create_wellness_record(questionnaire_response)
 
             else:
                 continue
