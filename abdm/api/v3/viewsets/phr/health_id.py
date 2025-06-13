@@ -5,6 +5,7 @@ from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from abdm.api.serializers.abha_number import AbhaNumberSerializer
 from abdm.api.v3.serializers.health_id import (
@@ -21,6 +22,9 @@ from abdm.api.v3.serializers.health_id import (
 from abdm.models import AbhaNumber, Transaction, TransactionType
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
+
+PHR_ACCESS_TOKEN_PREFIX = "phr_access_token:"
+PHR_REFRESH_TOKEN_PREFIX = "phr_refresh_token:"
 
 
 class PhrEnrollmentViewSet(GenericViewSet):
@@ -104,6 +108,14 @@ class PhrEnrollmentViewSet(GenericViewSet):
         if not address.endswith(f"@{settings.ABDM_CM_ID}"):
             return f"{address}@{settings.ABDM_CM_ID}"
         return address
+
+    def get_tokens(self, abha_address):
+        refresh_token = RefreshToken()
+        refresh_token["abha_address"] = self._normalize_abha_address(abha_address)
+        return {
+            "refresh_token": str(refresh_token),
+            "access_token": str(refresh_token.access_token),
+        }
 
     @action(detail=False, methods=["post"], url_path="create/send_otp")
     def phr_enrollment__send_otp(self, request):
@@ -246,7 +258,9 @@ class PhrEnrollmentViewSet(GenericViewSet):
         phr_details = validated_data.get("phr_details")
 
         phr_details_camel = {
-            "abhaAddress": phr_details.get("abha_address"),
+            "abhaAddress": self._normalize_abha_address(
+                phr_details.get("abha_address", "")
+            ),
             "address": phr_details.get("address"),
             "dayOfBirth": phr_details.get("day_of_birth", ""),
             "districtCode": phr_details.get("district_code"),
@@ -302,9 +316,24 @@ class PhrEnrollmentViewSet(GenericViewSet):
             },
         )
 
+        cache.set(
+            f"{PHR_ACCESS_TOKEN_PREFIX}{self._normalize_abha_address(abha_number.health_id)}",
+            result.get("tokens", {}).get("token"),
+            timeout=1800,
+        )
+        cache.set(
+            f"{PHR_REFRESH_TOKEN_PREFIX}{self._normalize_abha_address(abha_number.health_id)}",
+            result.get("tokens", {}).get("refreshToken"),
+            timeout=129600,
+        )
+
         return Response(
             {
                 "abha_number": AbhaNumberSerializer(abha_number).data,
+                "switchProfileEnabled": result.get("tokens", {}).get(
+                    "switchProfileEnabled", True
+                ),
+                **self.get_tokens(abha_address=abha_number.health_id),
             },
             status=status.HTTP_200_OK,
         )
@@ -449,8 +478,23 @@ class PhrEnrollmentViewSet(GenericViewSet):
             },
         )
 
+        cache.set(
+            f"{PHR_ACCESS_TOKEN_PREFIX}{self._normalize_abha_address(abha_number.health_id)}",
+            token.get("access_token"),
+            timeout=1800,
+        )
+        cache.set(
+            f"{PHR_REFRESH_TOKEN_PREFIX}{self._normalize_abha_address(abha_number.health_id)}",
+            token.get("refresh_token"),
+            timeout=129600,
+        )
+
         return Response(
-            {"abha_number": AbhaNumberSerializer(abha_number).data},
+            {
+                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "switchProfileEnabled": token.get("switchProfileEnabled", False),
+                **self.get_tokens(abha_address=abha_number.health_id),
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -505,8 +549,23 @@ class PhrEnrollmentViewSet(GenericViewSet):
             },
         )
 
+        cache.set(
+            f"{PHR_ACCESS_TOKEN_PREFIX}{self._normalize_abha_address(abha_number.health_id)}",
+            result.get("token"),
+            timeout=1800,
+        )
+        cache.set(
+            f"{PHR_REFRESH_TOKEN_PREFIX}{self._normalize_abha_address(abha_number.health_id)}",
+            result.get("refreshToken"),
+            timeout=129600,
+        )
+
         return Response(
-            {"abha_number": AbhaNumberSerializer(abha_number).data},
+            {
+                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "switchProfileEnabled": result.get("switchProfileEnabled", True),
+                **self.get_tokens(abha_address=abha_number.health_id),
+            },
             status=status.HTTP_200_OK,
         )
 
