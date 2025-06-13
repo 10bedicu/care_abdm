@@ -6,6 +6,7 @@ import requests
 from django.core.cache import cache
 
 from abdm.models import HealthInformationType, Purpose, Transaction, TransactionType
+from abdm.models.transaction import TransactionStatus
 from abdm.service.helper import (
     ABDMAPIException,
     cm_id,
@@ -52,7 +53,10 @@ from abdm.service.v3.types.gateway import (
 from abdm.settings import plugin_settings as settings
 from abdm.utils.cipher import Cipher
 from abdm.utils.fhir import Fhir
+from care.emr.models.encounter import Encounter
+from care.emr.models.file_upload import FileUpload
 from care.emr.models.medication_request import MedicationRequest
+from care.emr.models.questionnaire import QuestionnaireResponse
 
 
 class GatewayService:
@@ -87,18 +91,24 @@ class GatewayService:
         data: TokenGenerateTokenBody,
     ) -> TokenGenerateTokenResponse:
         abha_number = data.get("abha_number")
+        hf_id = data.get("hf_id", None)
 
         if not abha_number:
             raise ABDMAPIException(detail="Provide an ABHA number to generate token")
+
+        if not hf_id:
+            raise ABDMAPIException(
+                detail="Provide a health facility id to generate token"
+            )
 
         payload = {
             "abhaNumber": abha_number.abha_number.replace("-", ""),
             "abhaAddress": abha_number.health_id,
             "name": abha_number.name,
             "gender": abha_number.gender,
-            "yearOfBirth": datetime.strptime(
-                abha_number.date_of_birth, "%Y-%m-%d"
-            ).year,
+            "yearOfBirth": abha_number.parsed_date_of_birth.split("-")[0]
+            if abha_number.parsed_date_of_birth
+            else None,
         }
 
         request_id = uuid()
@@ -108,6 +118,8 @@ class GatewayService:
                 "abha_number": abha_number.abha_number,
                 "purpose": data.get("purpose"),
                 "care_contexts": data.get("care_contexts"),
+                "reference_id": data.get("reference_id"),
+                "hf_id": hf_id,
             },
             timeout=60 * 5,
         )
@@ -119,7 +131,7 @@ class GatewayService:
             headers={
                 "REQUEST-ID": request_id,
                 "TIMESTAMP": timestamp(),
-                "X-HIP-ID": hf_id_from_abha_id(abha_number.abha_number),
+                "X-HIP-ID": hf_id,
                 "X-CM-ID": cm_id(),
             },
         )
@@ -145,7 +157,29 @@ class GatewayService:
         if len(care_contexts) == 0:
             raise ABDMAPIException(detail="Provide at least 1 care contexts to link")
 
-        link_token = cache.get("abdm_link_token__" + abha_number.health_id)
+        hf_id = data.get("hf_id", None)
+        if not hf_id:
+            raise ABDMAPIException(
+                detail="Provide a health facility id to link care context"
+            )
+
+        reference_id = data.get("reference_id", uuid())
+        Transaction.objects.update_or_create(
+            reference_id=reference_id,
+            defaults={
+                "type": TransactionType.LINK_CARE_CONTEXT,
+                "status": TransactionStatus.INITIATED,
+                "meta_data": {
+                    "abha_number": str(abha_number.external_id),
+                    "type": "hip_initiated_linking",
+                    "care_contexts": list(map(lambda x: x["reference"], care_contexts)),
+                    "hf_id": hf_id,
+                },
+                "created_by": data.get("user"),
+            },
+        )
+
+        link_token = cache.get(f"abdm_link_token__{hf_id}__{abha_number.health_id}")
 
         if not link_token:
             GatewayService.token__generate_token(
@@ -153,6 +187,8 @@ class GatewayService:
                     "abha_number": abha_number,
                     "purpose": "LINK_CARECONTEXT",
                     "care_contexts": care_contexts,
+                    "hf_id": hf_id,
+                    "reference_id": reference_id,
                 }
             )
             return {}
@@ -186,16 +222,15 @@ class GatewayService:
             ),
         }
 
-        request_id = uuid()
         path = "/hip/v3/link/carecontext"
         response = GatewayService.request.post(
             path,
             payload,
             headers={
-                "REQUEST-ID": request_id,
+                "REQUEST-ID": reference_id,
                 "TIMESTAMP": timestamp(),
                 "X-CM-ID": cm_id(),
-                "X-HIP-ID": hf_id_from_abha_id(abha_number.abha_number),
+                "X-HIP-ID": hf_id,
                 "X-LINK-TOKEN": link_token,
             },
         )
@@ -203,15 +238,8 @@ class GatewayService:
         if response.status_code != 202:
             raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
 
-        Transaction.objects.create(
-            reference_id=request_id,
-            type=TransactionType.LINK_CARE_CONTEXT,
-            meta_data={
-                "abha_number": str(abha_number.external_id),
-                "type": "hip_initiated_linking",
-                "care_contexts": list(map(lambda x: x["reference"], care_contexts)),
-            },
-            created_by=data.get("user"),
+        Transaction.objects.filter(reference_id=reference_id).update(
+            status=TransactionStatus.COMPLETED
         )
 
         return {}
@@ -220,6 +248,13 @@ class GatewayService:
     def user_initiated_linking__patient__care_context__on_discover(
         data: UserInitiatedLinkingPatientCareContextOnDiscoverBody,
     ) -> UserInitiatedLinkingPatientCareContextOnDiscoverResponse:
+        hf_id = data.get("hf_id", None)
+
+        if not hf_id:
+            raise ABDMAPIException(
+                detail="Provide a health facility id to discover care context"
+            )
+
         payload: dict = {
             "transactionId": data.get("transaction_id"),
             "response": {
@@ -229,10 +264,10 @@ class GatewayService:
 
         patient = data.get("patient")
         if patient:
-            care_contexts = generate_care_contexts_for_existing_data(patient)
+            hf_care_contexts = generate_care_contexts_for_existing_data(patient, hf_id)
 
             grouped_care_contexts = defaultdict(list)
-            for care_context in care_contexts:
+            for care_context in hf_care_contexts[hf_id]:
                 grouped_care_contexts[care_context["hi_type"]].append(care_context)
 
             payload["patient"] = list(
@@ -320,6 +355,13 @@ class GatewayService:
     def user_initiated_linking__link__care_context__on_confirm(
         data: UserInitiatedLinkingLinkCareContextOnConfirmBody,
     ) -> UserInitiatedLinkingLinkCareContextOnConfirmResponse:
+        hf_id = data.get("hf_id", None)
+
+        if not hf_id:
+            raise ABDMAPIException(
+                detail="Provide a health facility id to confirm care context"
+            )
+
         payload: dict = {
             "response": {
                 "requestId": data.get("request_id"),
@@ -329,10 +371,10 @@ class GatewayService:
         patient = data.get("patient")
         care_context_ids = data.get("care_contexts", [])
         if len(care_context_ids) > 0 and patient:
-            care_contexts = generate_care_contexts_for_existing_data(patient)
+            hf_care_contexts = generate_care_contexts_for_existing_data(patient, hf_id)
 
             grouped_care_contexts = defaultdict(list)
-            for care_context in care_contexts:
+            for care_context in hf_care_contexts[hf_id]:
                 if care_context["reference"] not in care_context_ids:
                     continue
 
@@ -487,6 +529,60 @@ class GatewayService:
 
                 fhir_data = Fhir().create_prescription_record(list(medication_requests))
 
+            if (
+                model == "encounter"
+                and HealthInformationType.OP_CONSULTATION in consent.hi_types
+            ):
+                encounter = Encounter.objects.filter(
+                    external_id=param,
+                    patient__external_id=patient_reference,
+                ).first()
+
+                if not encounter:
+                    continue
+
+                fhir_data = Fhir().create_op_consult_record(encounter)
+
+            if (
+                model == "encounter"
+                and HealthInformationType.DISCHARGE_SUMMARY in consent.hi_types
+            ):
+                encounter = Encounter.objects.filter(
+                    external_id=param,
+                    patient__external_id=patient_reference,
+                ).first()
+
+                if not encounter:
+                    continue
+
+                fhir_data = Fhir().create_discharge_summary_record(encounter)
+
+            if (
+                model == "file_upload"
+                and HealthInformationType.RECORD_ARTIFACT in consent.hi_types
+            ):
+                file_upload = FileUpload.objects.filter(
+                    external_id=param,
+                ).first()
+
+                if not file_upload:
+                    continue
+
+                fhir_data = Fhir().create_health_document_record(file_upload)
+
+            if (
+                model == "questionnaire_response"
+                and HealthInformationType.WELLNESS_RECORD in consent.hi_types
+            ):
+                questionnaire_response = QuestionnaireResponse.objects.filter(
+                    external_id=param,
+                ).first()
+
+                if not questionnaire_response:
+                    continue
+
+                fhir_data = Fhir().create_wellness_record(questionnaire_response)
+
             else:
                 continue
 
@@ -620,9 +716,9 @@ class GatewayService:
                 "abhaAddress": abha_number.health_id,
                 "name": abha_number.name,
                 "gender": abha_number.gender,
-                "yearOfBirth": datetime.strptime(
-                    abha_number.date_of_birth, "%Y-%m-%d"
-                ).year,
+                "yearOfBirth": abha_number.parsed_date_of_birth.split("-")[0]
+                if abha_number.parsed_date_of_birth
+                else None,
             },
         }
 

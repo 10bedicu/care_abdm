@@ -18,8 +18,10 @@ class CareContext(TypedDict):
 
 class TokenGenerateTokenBody(TypedDict):
     abha_number: AbhaNumber
+    hf_id: str
     purpose: Literal["LINK_CARECONTEXT"] | None
     care_contexts: list[CareContext] | None
+    reference_id: str | None
 
 
 class TokenGenerateTokenResponse(TypedDict):
@@ -29,7 +31,9 @@ class TokenGenerateTokenResponse(TypedDict):
 class LinkCarecontextBody(TypedDict):
     patient: Patient
     care_contexts: list[CareContext]
+    hf_id: str
     user: User
+    reference_id: str | None
 
 
 class LinkCarecontextResponse(TypedDict):
@@ -41,6 +45,7 @@ class UserInitiatedLinkingPatientCareContextOnDiscoverBody(TypedDict):
     request_id: str
     patient: Patient
     matched_by: list[Literal["MOBILE", "ABHA_NUMBER", "MR"]]
+    hf_id: str
 
 
 class UserInitiatedLinkingPatientCareContextOnDiscoverResponse(TypedDict):
@@ -61,6 +66,7 @@ class UserInitiatedLinkingLinkCareContextOnConfirmBody(TypedDict):
     request_id: str
     patient: Patient
     care_contexts: list[str]
+    hf_id: str
 
 
 class UserInitiatedLinkingLinkCareContextOnConfirmResponse(TypedDict):

@@ -15,6 +15,7 @@ from abdm.api.v3.serializers.health_id import (
     AbhaCreateEnrolAbhaAddressSerializer,
     AbhaCreateLinkMobileNumberSerializer,
     AbhaCreateSendAadhaarOtpSerializer,
+    AbhaCreateVerifyAadhaarDemographicsSerializer,
     AbhaCreateVerifyAadhaarOtpSerializer,
     AbhaCreateVerifyMobileOtpSerializer,
     AbhaLoginCheckAuthMethodsSerializer,
@@ -23,7 +24,10 @@ from abdm.api.v3.serializers.health_id import (
     LinkAbhaNumberAndPatientSerializer,
 )
 from abdm.models import AbhaNumber, Transaction, TransactionType
-from abdm.service.helper import generate_care_contexts_for_existing_data
+from abdm.service.helper import (
+    generate_care_contexts_for_existing_data,
+    validate_and_format_date,
+)
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
@@ -36,6 +40,7 @@ class HealthIdViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
 
     serializer_action_classes = {
+        "abha_create__verify_aadhaar_demographics": AbhaCreateVerifyAadhaarDemographicsSerializer,
         "abha_create__send_aadhaar_otp": AbhaCreateSendAadhaarOtpSerializer,
         "abha_create__verify_aadhaar_otp": AbhaCreateVerifyAadhaarOtpSerializer,
         "abha_create__link_mobile_number": AbhaCreateLinkMobileNumberSerializer,
@@ -109,18 +114,96 @@ class HealthIdViewSet(GenericViewSet):
         abha_number.patient = patient
         abha_number.save()
 
-        care_contexts = generate_care_contexts_for_existing_data(patient)
-        if len(care_contexts) > 0:
-            GatewayService.link__carecontext(
-                {
-                    "patient": patient,
-                    "care_contexts": care_contexts,
-                    "user": request.user,
-                }
-            )
+        hf_care_contexts = generate_care_contexts_for_existing_data(patient)
+
+        for hf_id in hf_care_contexts:
+            care_contexts = hf_care_contexts.get(hf_id, [])
+
+            if len(care_contexts) > 0:
+                GatewayService.link__carecontext(
+                    {
+                        "patient": patient,
+                        "care_contexts": care_contexts,
+                        "user": request.user,
+                        "hf_id": hf_id,
+                    }
+                )
 
         return Response(
             AbhaNumberSerializer(abha_number).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False, methods=["post"], url_path="create/verify_aadhaar_demographics"
+    )
+    def abha_create__verify_aadhaar_demographics(self, request):
+        validated_data = self.validate_request(request)
+
+        result = HealthIdService.enrollment__enrol__byAadhaar__via_demographics(
+            {
+                "transaction_id": str(validated_data.get("transaction_id")),
+                "aadhaar_number": validated_data.get("aadhaar"),
+                "name": validated_data.get("name"),
+                "gender": validated_data.get("gender"),
+                "date_of_birth": validated_data.get("date_of_birth").strftime(
+                    "%d-%m-%Y"
+                ),
+                "state_code": validated_data.get("state_code"),
+                "district_code": validated_data.get("district_code"),
+                "address": validated_data.get("address"),
+                "pin_code": validated_data.get("pin_code"),
+                "mobile": validated_data.get("mobile"),
+                "profile_photo": validated_data.get("profile_photo"),
+            }
+        )
+
+        abha_profile = result
+        token = result.get("jwtResponse")
+        (abha_number, created) = AbhaNumber.objects.update_or_create(
+            abha_number=abha_profile.get("healthIdNumber"),
+            defaults={
+                "abha_number": abha_profile.get("healthIdNumber"),
+                "health_id": abha_profile.get("healthId"),
+                "name": abha_profile.get("name"),
+                "first_name": abha_profile.get("firstName"),
+                "middle_name": abha_profile.get("middleName"),
+                "last_name": abha_profile.get("lastName"),
+                "gender": abha_profile.get("gender"),
+                "date_of_birth": validate_and_format_date(
+                    abha_profile.get("yearOfBirth"),
+                    abha_profile.get("monthOfBirth"),
+                    abha_profile.get("dayOfBirth"),
+                ),
+                "address": abha_profile.get("address"),
+                "district": abha_profile.get("districtName"),
+                "state": abha_profile.get("stateName"),
+                "pincode": abha_profile.get("pincode"),
+                "email": abha_profile.get("email"),
+                "mobile": abha_profile.get("mobile"),
+                "profile_photo": abha_profile.get("profilePhoto"),
+                "new": result.get("new"),
+                "access_token": token.get("token"),
+                "refresh_token": token.get("refreshToken"),
+            },
+        )
+
+        Transaction.objects.create(
+            reference_id=str(validated_data.get("transaction_id")),
+            type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
+            meta_data={
+                "abha_number": str(abha_number.external_id),
+                "method": "create_via_aadhaar_demographics",
+            },
+            created_by=request.user,
+        )
+
+        return Response(
+            {
+                "transaction_id": result.get("txnId"),
+                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "created": created,
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -149,7 +232,7 @@ class HealthIdViewSet(GenericViewSet):
     def abha_create__verify_aadhaar_otp(self, request):
         validated_data = self.validate_request(request)
 
-        result = HealthIdService.enrollment__enrol__byAadhaar(
+        result = HealthIdService.enrollment__enrol__byAadhaar__via_otp(
             {
                 "transaction_id": str(validated_data.get("transaction_id")),
                 "otp": validated_data.get("otp"),
@@ -180,9 +263,11 @@ class HealthIdViewSet(GenericViewSet):
                 "middle_name": abha_profile.get("middleName"),
                 "last_name": abha_profile.get("lastName"),
                 "gender": abha_profile.get("gender"),
-                "date_of_birth": datetime.strptime(
-                    abha_profile.get("dob"), "%d-%m-%Y"
-                ).strftime("%Y-%m-%d"),
+                "date_of_birth": validate_and_format_date(
+                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").year,  # noqa DTZ007
+                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").month,  # noqa DTZ007
+                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").day,  # noqa DTZ007
+                ),
                 "address": abha_profile.get("address"),
                 "district": abha_profile.get("districtName"),
                 "state": abha_profile.get("stateName"),
@@ -313,12 +398,11 @@ class HealthIdViewSet(GenericViewSet):
                 "middle_name": profile_result.get("middleName"),
                 "last_name": profile_result.get("lastName"),
                 "gender": profile_result.get("gender"),
-                "date_of_birth": str(
-                    datetime.strptime(
-                        f"{profile_result.get('yearOfBirth')}-{profile_result.get('monthOfBirth')}-{profile_result.get('dayOfBirth')}",
-                        "%Y-%m-%d",
-                    )
-                )[0:10],
+                "date_of_birth": validate_and_format_date(
+                    profile_result.get("yearOfBirth"),
+                    profile_result.get("monthOfBirth"),
+                    profile_result.get("dayOfBirth"),
+                ),
                 "address": profile_result.get("address"),
                 "district": profile_result.get("districtName"),
                 "state": profile_result.get("stateName"),
@@ -484,12 +568,11 @@ class HealthIdViewSet(GenericViewSet):
                 "middle_name": profile_result.get("middleName"),
                 "last_name": profile_result.get("lastName"),
                 "gender": profile_result.get("gender"),
-                "date_of_birth": str(
-                    datetime.strptime(
-                        f"{profile_result.get('yearOfBirth')}-{profile_result.get('monthOfBirth')}-{profile_result.get('dayOfBirth')}",
-                        "%Y-%m-%d",
-                    )
-                )[0:10],
+                "date_of_birth": validate_and_format_date(
+                    profile_result.get("yearOfBirth"),
+                    profile_result.get("monthOfBirth"),
+                    profile_result.get("dayOfBirth"),
+                ),
                 "address": profile_result.get("address"),
                 "district": profile_result.get("districtName"),
                 "state": profile_result.get("stateName"),

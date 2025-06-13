@@ -1,12 +1,13 @@
 from typing import Any
 
 import environ
-from abdm.apps import PLUGIN_NAME
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
 from django.dispatch import receiver
 from rest_framework.settings import perform_import
+
+from abdm.apps import PLUGIN_NAME
 
 env = environ.Env()
 
@@ -110,6 +111,7 @@ REQUIRED_SETTINGS = {
 DEFAULTS = {
     "ABDM_CLIENT_ID": "SBX_001",
     "ABDM_CLIENT_SECRET": "xxxx",
+    "ABDM_AUTH_URL": "",
     "ABDM_GATEWAY_URL": "https://dev.abdm.gov.in/api/hiecm",
     "ABDM_ABHA_URL": "https://abhasbx.abdm.gov.in/abha/api",
     "ABDM_FACILITY_URL": "https://facilitysbx.abdm.gov.in",
@@ -117,6 +119,8 @@ DEFAULTS = {
     "ABDM_HIP_NAME_SUFFIX": "",
     "ABDM_USERNAME": "abdm_user_internal",
     "ABDM_CM_ID": "sbx",
+    "ABDM_BENEFIT_NAME": "",
+    "ABDM_REQUEST_TIMEOUT": 30,
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
