@@ -24,16 +24,19 @@ from abdm.api.v3.serializers.health_id import (
 from abdm.models import AbhaNumber, Transaction, TransactionType
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
+from care_abdm.abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
 
 PHR_ACCESS_TOKEN_PREFIX = "phr_access_token:"
 PHR_REFRESH_TOKEN_PREFIX = "phr_refresh_token:"
 PHR_ACCESS_TOKEN_CACHE_TIMEOUT = 1800
 PHR_REFRESH_TOKEN_CACHE_TIMEOUT = 1296000
-VERIFY_USER_TOKEN_TIMEOUT = 300
+PHR_VERIFY_USER_TOKEN_PREFIX = "phr_verify_user_token:"
+PHR_VERIFY_USER_TOKEN_TIMEOUT = 300
 
 
 class PhrAuthViewSet(GenericViewSet):
-    permission_classes = []
+    permission_classes = [IsPhrAuthenticated]
+    authentication_classes = [PhrCustomAuthentication]
 
     serializer_action_classes = {
         "phr_enrollment__send_otp": PhrEnrollmentSendOtpSerializer,
@@ -83,12 +86,12 @@ class PhrAuthViewSet(GenericViewSet):
             datetime.strptime(
                 f"{data.get('yearOfBirth')}-{data.get('monthOfBirth') or '01'}-{data.get('dayOfBirth') or '01'}",
                 "%Y-%m-%d",
-            ).replace(tzinfo=datetime.timezone.utc)
+            )
         )[:10]
 
         defaults = {
             "abha_number": data.get(abha_key),
-            "health_id": data.get("preferredAbhaAddress"),
+            "health_id": data.get("abhaAddress"),
             "name": data.get("name") or data.get("fullName"),
             "first_name": data.get("firstName"),
             "middle_name": data.get("middleName"),
@@ -115,9 +118,10 @@ class PhrAuthViewSet(GenericViewSet):
             return f"{address}@{settings.ABDM_CM_ID}"
         return address
 
-    def _get_tokens(self, abha_address):
+    def _get_tokens(self, abha_address, id):
         refresh_token = RefreshToken()
         refresh_token["abha_address"] = self._normalize_abha_address(abha_address)
+        refresh_token["id"] = id
         return {
             "refresh_token": str(refresh_token),
             "access_token": str(refresh_token.access_token),
@@ -179,10 +183,11 @@ class PhrAuthViewSet(GenericViewSet):
                 "otp": validated_data.get("otp"),
             }
         )
+
         cache.set(
-            f"phr_verify_user_token:{result['txnId']}",
+            f"{PHR_VERIFY_USER_TOKEN_PREFIX}{result['txnId']}",
             result["tokens"]["token"],
-            timeout=VERIFY_USER_TOKEN_TIMEOUT,
+            timeout=PHR_VERIFY_USER_TOKEN_TIMEOUT,
         )
 
         accounts = result.get("accounts", [])
@@ -348,7 +353,9 @@ class PhrAuthViewSet(GenericViewSet):
                 "switchProfileEnabled": result.get("tokens", {}).get(
                     "switchProfileEnabled", True
                 ),
-                **self._get_tokens(abha_address=abha_number.health_id),
+                **self._get_tokens(
+                    abha_address=abha_number.health_id, id=abha_number.id
+                ),
             },
             status=status.HTTP_200_OK,
         )
@@ -440,9 +447,9 @@ class PhrAuthViewSet(GenericViewSet):
 
             if login_hint != "abha-address":
                 cache.set(
-                    f"phr_verify_user_token:{result['txnId']}",
+                    f"{PHR_VERIFY_USER_TOKEN_PREFIX}{result['txnId']}",
                     result["tokens"]["token"],
-                    timeout=VERIFY_USER_TOKEN_TIMEOUT,
+                    timeout=PHR_VERIFY_USER_TOKEN_TIMEOUT,
                 )
 
                 return Response(
@@ -503,7 +510,9 @@ class PhrAuthViewSet(GenericViewSet):
             {
                 "abha_number": AbhaNumberSerializer(abha_number).data,
                 "switchProfileEnabled": token.get("switchProfileEnabled", False),
-                **self._get_tokens(abha_address=abha_number.health_id),
+                **self._get_tokens(
+                    abha_address=abha_number.health_id, id=abha_number.id
+                ),
             },
             status=status.HTTP_200_OK,
         )
@@ -513,12 +522,12 @@ class PhrAuthViewSet(GenericViewSet):
         validated_data = self.validate_request(request)
 
         t_token = cache.get(
-            f"phr_verify_user_token:{validated_data.get('transaction_id')}"
+            f"{PHR_VERIFY_USER_TOKEN_PREFIX}{validated_data.get('transaction_id')}"
         )
 
         if not t_token:
             return Response(
-                {"detail": "Token expired or not found."},
+                {"detail": "Session expired, please try again."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -569,7 +578,9 @@ class PhrAuthViewSet(GenericViewSet):
             {
                 "abha_number": AbhaNumberSerializer(abha_number).data,
                 "switchProfileEnabled": result.get("switchProfileEnabled", True),
-                **self._get_tokens(abha_address=abha_number.health_id),
+                **self._get_tokens(
+                    abha_address=abha_number.health_id, id=abha_number.id
+                ),
             },
             status=status.HTTP_200_OK,
         )
