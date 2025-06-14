@@ -9,7 +9,7 @@ from rest_framework.serializers import (
 )
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from care_abdm.abdm.authentication import PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX
+from care_abdm.abdm.authentication import PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX
 
 
 class AbhaCreateVerifyAadhaarDemographicsSerializer(Serializer):
@@ -269,15 +269,18 @@ class PhrTokenRefreshSerializer(Serializer):
         old_refresh_token = RefreshToken(refresh_token_str)
 
         cache_key_for_old_token = (
-            f"{PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX}{refresh_token_str}"
+            f"{PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX}{refresh_token_str}"
         )
         if cache.get(cache_key_for_old_token):
             raise PermissionDenied(
                 "This refresh token has been invalidated. Please log in again."
             )
-        if "abha_address" not in old_refresh_token.payload:
+        if (
+            "abha_address" not in old_refresh_token.payload
+            or "id" not in old_refresh_token.payload
+        ):
             raise ValidationError(
-                {"refresh": "Token is missing the required 'abha_address' claim."}
+                {"refresh": "Invalid refresh token format. Missing required fields."}
             )
 
         cache.set(cache_key_for_old_token, "invalidated_after_rotation", timeout=1800)

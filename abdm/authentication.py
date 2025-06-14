@@ -4,8 +4,11 @@ from datetime import datetime
 
 import jwt
 import requests
+from django.core.cache import cache
+from rest_framework.permissions import BasePermission
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.tokens import AccessToken
 
 from abdm.service.helper import cm_id, timestamp, uuid
 from abdm.settings import plugin_settings as settings
@@ -73,3 +76,57 @@ class ABDMAuthentication(JWTAuthentication):
             )
             user.save()
         return user
+
+
+class AbdmSessionPrincipal:
+    is_authenticated = True
+    is_anonymous = False
+
+    def __init__(self, abha_address: str, record_id: int):
+        if not isinstance(abha_address, str):
+            raise ValueError("abha_address must be a string.")
+        self.abha_address = abha_address
+        self.id = record_id
+
+    def __str__(self):
+        return f"AbdmSessionPrincipal(abha_address={self.abha_address}, id={self.id})"
+
+
+class PhrCustomAuthentication(JWTAuthentication):
+    def get_validated_token(self, raw_token):
+        raw_token_str = raw_token.decode()
+
+        if cache.get(f"{PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX}{raw_token_str}"):
+            raise InvalidToken("Access token has been invalidated.")
+
+        try:
+            validated_token = AccessToken(raw_token)
+            if "abha_address" not in validated_token or "id" not in validated_token:
+                raise TokenError("Token is missing the required claims.")
+            return validated_token
+
+        except TokenError as e:
+            raise InvalidToken(
+                {
+                    "detail": "Given token is not valid or is missing required information.",
+                    "messages": [str(e)],
+                },
+            ) from e
+
+        except Exception as e:
+            raise InvalidToken(
+                {
+                    "detail": "An unexpected error occurred while validating the token.",
+                },
+            ) from e
+
+    def get_user(self, validated_token):
+        abha_address = validated_token["abha_address"]
+        return AbdmSessionPrincipal(
+            abha_address=abha_address, record_id=validated_token["id"]
+        )
+
+
+class IsPhrAuthenticated(BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and isinstance(request.user, AbdmSessionPrincipal))
