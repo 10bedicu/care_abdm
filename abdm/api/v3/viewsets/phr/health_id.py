@@ -27,7 +27,6 @@ from abdm.models import AbhaNumber, Transaction, TransactionType
 from abdm.service.v3.phr.health_id import PhrHealthIdService
 from abdm.service.v3.phr.profile import PhrProfileService
 from abdm.settings import plugin_settings as settings
-from care_abdm.abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
 
 PHR_ACCESS_TOKEN_PREFIX = "phr_access_token:"
 PHR_REFRESH_TOKEN_PREFIX = "phr_refresh_token:"
@@ -38,8 +37,8 @@ PHR_VERIFY_USER_TOKEN_TIMEOUT = 300
 
 
 class PhrAuthViewSet(GenericViewSet):
-    permission_classes = [IsPhrAuthenticated]
-    authentication_classes = [PhrCustomAuthentication]
+    permission_classes = []
+    # authentication_classes = [PhrCustomAuthentication]
 
     serializer_action_classes = {
         "phr_enrollment__send_otp": PhrEnrollmentSendOtpSerializer,
@@ -612,10 +611,8 @@ class PhrAuthViewSet(GenericViewSet):
 
     @action(detail=False, methods=["post"], url_path="refresh_token")
     def phr_refresh_token(self, request):
-        serializer = self.get_serializer(data=request.data)
         try:
-            serializer.is_valid(raise_exception=True)
+            validated_data = self.validate_request(request)
+            return Response(validated_data, status=status.HTTP_200_OK)
         except TokenError as e:
             raise InvalidToken(e.args[0]) from e
-
-        return Response(serializer.validated_data, status=status.HTTP_200_OK)

@@ -78,7 +78,7 @@ class ABDMAuthentication(JWTAuthentication):
         return user
 
 
-class AbdmSessionPrincipal:
+class PhrSessionUser:
     is_authenticated = True
     is_anonymous = False
 
@@ -89,7 +89,7 @@ class AbdmSessionPrincipal:
         self.id = record_id
 
     def __str__(self):
-        return f"AbdmSessionPrincipal(abha_address={self.abha_address}, id={self.id})"
+        return f"PhrSessionUser(abha_address={self.abha_address}, id={self.id})"
 
 
 class PhrCustomAuthentication(JWTAuthentication):
@@ -101,32 +101,37 @@ class PhrCustomAuthentication(JWTAuthentication):
 
         try:
             validated_token = AccessToken(raw_token)
-            if "abha_address" not in validated_token or "id" not in validated_token:
-                raise TokenError("Token is missing the required claims.")
+            missing_claims = [
+                k for k in ("abha_address", "id") if k not in validated_token
+            ]
+            if missing_claims:
+                raise TokenError(
+                    f"Token is missing required claims: {', '.join(missing_claims)}"
+                )
             return validated_token
 
         except TokenError as e:
             raise InvalidToken(
                 {
-                    "detail": "Given token is not valid or is missing required information.",
+                    "detail": "Token validation failed.",
                     "messages": [str(e)],
-                },
+                }
             ) from e
 
         except Exception as e:
             raise InvalidToken(
                 {
-                    "detail": "An unexpected error occurred while validating the token.",
-                },
+                    "detail": "Unexpected error during token validation.",
+                }
             ) from e
 
     def get_user(self, validated_token):
         abha_address = validated_token["abha_address"]
-        return AbdmSessionPrincipal(
+        return PhrSessionUser(
             abha_address=abha_address, record_id=validated_token["id"]
         )
 
 
 class IsPhrAuthenticated(BasePermission):
     def has_permission(self, request, view):
-        return bool(request.user and isinstance(request.user, AbdmSessionPrincipal))
+        return bool(request.user and isinstance(request.user, PhrSessionUser))
