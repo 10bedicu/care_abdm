@@ -9,6 +9,7 @@ from abdm.api.viewsets.consent import ConsentViewSet
 from abdm.api.viewsets.health_facility import HealthFacilityViewSet
 from abdm.api.viewsets.health_information import HealthInformationViewSet
 from care_abdm.abdm.api.v3.viewsets.phr.health_id import PhrAuthViewSet
+from care_abdm.abdm.api.v3.viewsets.phr.profile import PhrProfileViewSet
 
 
 class OptionalSlashRouter(SimpleRouter):
@@ -38,6 +39,7 @@ router.register("v3/hiu", HIUViewSet, basename="abdm__v3__hiu")
 
 ## PHR Routes
 router.register("v3/phr/health_id", PhrAuthViewSet, basename="abdm__v3__phr_health_id")
+router.register("v3/phr/profile", PhrProfileViewSet, basename="abdm__v3__phr_profile")
 
 
 ## Utility Routes
