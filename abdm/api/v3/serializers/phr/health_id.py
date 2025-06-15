@@ -174,32 +174,29 @@ class PhrTokenRefreshSerializer(Serializer):
 
     def validate(self, attrs):
         refresh_token_str = attrs["refresh"]
+        cache_key = f"{PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX}{refresh_token_str}"
 
-        old_refresh_token = RefreshToken(refresh_token_str)
-
-        cache_key_for_old_token = (
-            f"{PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX}{refresh_token_str}"
-        )
-        if cache.get(cache_key_for_old_token):
+        if cache.get(cache_key):
             raise PermissionDenied(
                 "This refresh token has been invalidated. Please log in again."
             )
-        if (
-            "abha_address" not in old_refresh_token.payload
-            or "id" not in old_refresh_token.payload
-        ):
+
+        old_refresh_token = RefreshToken(refresh_token_str)
+
+        required_claims = ("abha_address", "id")
+        missing = [k for k in required_claims if k not in old_refresh_token.payload]
+        if missing:
             raise ValidationError(
-                {"refresh": "Invalid refresh token format. Missing required fields."}
+                {"refresh": f"Missing required fields: {', '.join(missing)}"}
             )
 
-        cache.set(cache_key_for_old_token, "invalidated_after_rotation", timeout=1800)
-        new_rotated_refresh_token = RefreshToken()
+        cache.set(cache_key, "invalidated_after_rotation", timeout=1800)
 
-        new_rotated_refresh_token["abha_address"] = old_refresh_token.payload[
-            "abha_address"
-        ]
+        new_refresh_token = RefreshToken()
+        for k in required_claims:
+            new_refresh_token[k] = old_refresh_token.payload[k]
 
         return {
-            "access_token": str(new_rotated_refresh_token.access_token),
-            "refresh_token": str(new_rotated_refresh_token),
+            "access_token": str(new_refresh_token.access_token),
+            "refresh_token": str(new_refresh_token),
         }
