@@ -22,15 +22,15 @@ from abdm.api.v3.serializers.health_id import (
     PhrTokenRefreshSerializer,
 )
 from abdm.models import AbhaNumber, Transaction, TransactionType
-from abdm.service.v3.health_id import HealthIdService
+from abdm.service.v3.phr.health_id import PhrHealthIdService
 from abdm.settings import plugin_settings as settings
 from care_abdm.abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
 
 PHR_ACCESS_TOKEN_PREFIX = "phr_access_token:"
 PHR_REFRESH_TOKEN_PREFIX = "phr_refresh_token:"
+PHR_VERIFY_USER_TOKEN_PREFIX = "phr_verify_user_token:"
 PHR_ACCESS_TOKEN_CACHE_TIMEOUT = 1800
 PHR_REFRESH_TOKEN_CACHE_TIMEOUT = 1296000
-PHR_VERIFY_USER_TOKEN_PREFIX = "phr_verify_user_token:"
 PHR_VERIFY_USER_TOKEN_TIMEOUT = 300
 
 
@@ -150,7 +150,7 @@ class PhrAuthViewSet(GenericViewSet):
 
         scope = self._build_scope(login_hint, otp_system, "enrollment")
 
-        result = HealthIdService.phr__enrollment__request__otp(
+        result = PhrHealthIdService.phr__enrollment__request__otp(
             {
                 "scope": scope,
                 "type": validated_data.get("type"),
@@ -176,7 +176,7 @@ class PhrAuthViewSet(GenericViewSet):
 
         scope = self._build_scope(login_hint, otp_system, "enrollment")
 
-        result = HealthIdService.phr__enrollment__verify__otp(
+        result = PhrHealthIdService.phr__enrollment__verify__otp(
             {
                 "scope": scope,
                 "transaction_id": str(validated_data.get("transaction_id")),
@@ -236,7 +236,7 @@ class PhrAuthViewSet(GenericViewSet):
     def phr_enrollment__abha_address_suggestion(self, request):
         validated_data = self.validate_request(request)
 
-        result = HealthIdService.phr__enrollment__abha_address__suggestion(
+        result = PhrHealthIdService.phr__enrollment__abha_address__suggestion(
             {
                 "transaction_id": str(validated_data.get("transaction_id")),
                 "first_name": validated_data.get("first_name"),
@@ -263,7 +263,7 @@ class PhrAuthViewSet(GenericViewSet):
             validated_data.get("abha_address"),
         )
 
-        exists = HealthIdService.phr__enrollment__abha_address__exists(
+        exists = PhrHealthIdService.phr__enrollment__abha_address__exists(
             {
                 "abha_address": abha_address,
             }
@@ -305,7 +305,7 @@ class PhrAuthViewSet(GenericViewSet):
             "yearOfBirth": phr_details.get("year_of_birth"),
         }
 
-        result = HealthIdService.phr__enrollment__enrol__abha_address(
+        result = PhrHealthIdService.phr__enrollment__enrol__abha_address(
             {
                 "phr_details": phr_details_camel,
                 "transaction_id": str(validated_data.get("transaction_id")),
@@ -324,7 +324,7 @@ class PhrAuthViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = HealthIdService.phr__profile(
+        profile_result = PhrHealthIdService.phr__profile(
             {"x_token": abha_number.access_token}
         )
         abha_number, _ = self._update_abha_from_profile(
@@ -373,7 +373,7 @@ class PhrAuthViewSet(GenericViewSet):
         if login_hint == "abha-address":
             value = self._normalize_abha_address(value)
 
-        result = HealthIdService.phr__login__request__otp(
+        result = PhrHealthIdService.phr__login__request__otp(
             {
                 "scope": scope,
                 "type": validated_data.get("type"),
@@ -400,7 +400,7 @@ class PhrAuthViewSet(GenericViewSet):
         token = None
 
         if verify_system == "password":
-            result = HealthIdService.phr__login__verify__password(
+            result = PhrHealthIdService.phr__login__verify__password(
                 {
                     "scope": scope,
                     "abha_address": self._normalize_abha_address(
@@ -428,7 +428,7 @@ class PhrAuthViewSet(GenericViewSet):
             }
 
         else:
-            result = HealthIdService.phr__login__verify__otp(
+            result = PhrHealthIdService.phr__login__verify__otp(
                 {
                     "scope": scope,
                     "transaction_id": str(validated_data.get("transaction_id")),
@@ -478,7 +478,7 @@ class PhrAuthViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = HealthIdService.phr__profile(
+        profile_result = PhrHealthIdService.phr__profile(
             {"x_token": token.get("access_token")}
         )
 
@@ -531,7 +531,7 @@ class PhrAuthViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        result = HealthIdService.phr__login__verify__user(
+        result = PhrHealthIdService.phr__login__verify__user(
             {
                 "t_token": t_token,
                 "abha_address": self._normalize_abha_address(
@@ -547,7 +547,9 @@ class PhrAuthViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = HealthIdService.phr__profile({"x_token": result.get("token")})
+        profile_result = PhrHealthIdService.phr__profile(
+            {"x_token": result.get("token")}
+        )
 
         abha_number, _ = self._update_abha_from_profile(
             profile_result,
@@ -589,7 +591,7 @@ class PhrAuthViewSet(GenericViewSet):
     def phr_login__check_auth_methods(self, request):
         validated_data = self.validate_request(request)
 
-        result = HealthIdService.phr__login_search_auth_methods(
+        result = PhrHealthIdService.phr__login_search_auth_methods(
             {
                 "abha_address": self._normalize_abha_address(
                     validated_data.get("abha_address")
