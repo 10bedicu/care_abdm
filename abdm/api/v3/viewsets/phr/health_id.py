@@ -11,6 +11,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from abdm.api.serializers.abha_number import AbhaNumberSerializer
 from abdm.api.v3.serializers.health_id import (
     AbhaLoginCheckAuthMethodsSerializer,
+)
+from abdm.api.v3.serializers.phr.health_id import (
     PhrEnrollmentAbhaAddressExistsSerializer,
     PhrEnrollmentAbhaAddressSuggestionSerializer,
     PhrEnrollmentEnrolAbhaAddressSerializer,
@@ -23,6 +25,7 @@ from abdm.api.v3.serializers.health_id import (
 )
 from abdm.models import AbhaNumber, Transaction, TransactionType
 from abdm.service.v3.phr.health_id import PhrHealthIdService
+from abdm.service.v3.phr.profile import PhrProfileService
 from abdm.settings import plugin_settings as settings
 from care_abdm.abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
 
@@ -324,7 +327,7 @@ class PhrAuthViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = PhrHealthIdService.phr__profile(
+        profile_result = PhrProfileService.phr__profile(
             {"x_token": abha_number.access_token}
         )
         abha_number, _ = self._update_abha_from_profile(
@@ -478,7 +481,7 @@ class PhrAuthViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = PhrHealthIdService.phr__profile(
+        profile_result = PhrProfileService.phr__profile(
             {"x_token": token.get("access_token")}
         )
 
@@ -547,7 +550,7 @@ class PhrAuthViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = PhrHealthIdService.phr__profile(
+        profile_result = PhrProfileService.phr__profile(
             {"x_token": result.get("token")}
         )
 

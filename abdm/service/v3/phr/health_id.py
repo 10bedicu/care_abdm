@@ -10,8 +10,6 @@ from abdm.service.request import Request
 from abdm.service.v3.types.health_id import (
     PhrWebLoginAbhaSearchBody,
     PhrWebLoginAbhaSearchResponse,
-    ProfileAccountBody,
-    ProfileAccountResponse,
     ProfileLoginVerifyUserResponse,
 )
 from abdm.service.v3.types.phr.health_id import (
@@ -343,25 +341,6 @@ class PhrHealthIdService:
             headers={
                 "REQUEST-ID": uuid(),
                 "TIMESTAMP": timestamp(),
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
-            )
-
-        return response.json()
-
-    @staticmethod
-    def phr__profile(data: ProfileAccountBody) -> ProfileAccountResponse:
-        path = "/phr/app/login/profile"
-        response = PhrHealthIdService.request.get(
-            path,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
             },
         )
 
