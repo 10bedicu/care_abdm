@@ -4,8 +4,11 @@ from datetime import datetime
 
 import jwt
 import requests
+from django.core.cache import cache
+from rest_framework.permissions import BasePermission
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.tokens import AccessToken
 
 from abdm.service.helper import cm_id, timestamp, uuid
 from abdm.settings import plugin_settings as settings
@@ -13,14 +16,20 @@ from care.users.models import User
 
 logger = logging.getLogger(__name__)
 
+PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX = "PHR_ACCESS_TOKEN_INVALIDATE:"
+PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX = "PHR_REFRESH_TOKEN_INVALIDATE:"
+
 
 class ABDMAuthentication(JWTAuthentication):
     def open_id_authenticate(self, url, token):
-        public_key = requests.get(url, headers={
-            "REQUEST-ID": uuid(),
-            "TIMESTAMP": timestamp(),
-            "X-CM-ID": cm_id()
-        })
+        public_key = requests.get(
+            url,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-CM-ID": cm_id(),
+            },
+        )
         jwk = public_key.json()["keys"][0]
         public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
         return jwt.decode(
@@ -67,3 +76,62 @@ class ABDMAuthentication(JWTAuthentication):
             )
             user.save()
         return user
+
+
+class PhrSessionUser:
+    is_authenticated = True
+    is_anonymous = False
+
+    def __init__(self, abha_address: str, record_id: int):
+        if not isinstance(abha_address, str):
+            raise ValueError("abha_address must be a string.")
+        self.abha_address = abha_address
+        self.id = record_id
+
+    def __str__(self):
+        return f"PhrSessionUser(abha_address={self.abha_address}, id={self.id})"
+
+
+class PhrCustomAuthentication(JWTAuthentication):
+    def get_validated_token(self, raw_token):
+        raw_token_str = raw_token.decode()
+
+        if cache.get(f"{PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX}{raw_token_str}"):
+            raise InvalidToken("Access token has been invalidated.")
+
+        try:
+            validated_token = AccessToken(raw_token)
+            missing_claims = [
+                k for k in ("abha_address", "id") if k not in validated_token
+            ]
+            if missing_claims:
+                raise TokenError(
+                    f"Token is missing required claims: {', '.join(missing_claims)}"
+                )
+            return validated_token
+
+        except TokenError as e:
+            raise InvalidToken(
+                {
+                    "detail": "Token validation failed.",
+                    "messages": [str(e)],
+                }
+            ) from e
+
+        except Exception as e:
+            raise InvalidToken(
+                {
+                    "detail": "Unexpected error during token validation.",
+                }
+            ) from e
+
+    def get_user(self, validated_token):
+        abha_address = validated_token["abha_address"]
+        return PhrSessionUser(
+            abha_address=abha_address, record_id=validated_token["id"]
+        )
+
+
+class IsPhrAuthenticated(BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and isinstance(request.user, PhrSessionUser))
