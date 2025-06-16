@@ -29,10 +29,7 @@ from abdm.models import (
     Transaction,
     TransactionType,
 )
-from abdm.service.helper import (
-    uuid,
-    validate_and_format_date,
-)
+from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.gateway import GatewayService
 from care.facility.api.serializers.patient import PatientTransferSerializer
 from care.facility.models import District, PatientRegistration, State
@@ -105,45 +102,43 @@ class HIPCallbackViewSet(GenericViewSet):
     def hip__token__on_generate_token(self, request):
         validated_data = self.validate_request(request)
 
-        cached_data = cache.get(
-            "abdm_link_care_context__"
-            + str(validated_data.get("response").get("requestId"))
-        )
+        hf_id = request.headers.get("X-HIP-ID")
+        health_id = validated_data.get("abhaAddress")
 
-        if not cached_data:
-            logger.warning(
-                f"Request ID: {validated_data.get('response').get('requestId')!s} not found in cache"
-            )
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        abha_number = AbhaNumber.objects.filter(
-            abha_number=cached_data.get("abha_number")
-        ).first()
+        abha_number = AbhaNumber.objects.filter(health_id=health_id).first()
 
         if not abha_number:
             logger.warning(
-                f"ABHA Number: {cached_data.get('abha_number')} not found in the database"
+                f"ON_GENERATE_TOKEN :: {health_id} not found in the database"
             )
 
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         cache.set(
-            f"abdm_link_token__{cached_data.get("hf_id")}__{abha_number.health_id}",
+            f"abdm_link_token__{hf_id}__{health_id}",
             validated_data.get("linkToken"),
             timeout=60 * 30,
         )
 
-        if cached_data.get("purpose") == "LINK_CARECONTEXT":
-            GatewayService.link__carecontext(
-                {
-                    "reference_id": cached_data.get("reference_id"),
-                    "patient": abha_number.patient,
-                    "care_contexts": cached_data.get("care_contexts", []),
-                    "user": request.user,
-                    "hf_id": cached_data.get("hf_id"),
-                }
-            )
+        link_care_context_request_cache_keys = cache.keys(
+            f"abdm_link_care_context__{hf_id}__{health_id}__*"
+        )
+
+        for request_cache_key in link_care_context_request_cache_keys:
+            cached_data = cache.get(request_cache_key)
+
+            if cached_data.get("purpose") == "LINK_CARECONTEXT":
+                GatewayService.link__carecontext(
+                    {
+                        "reference_id": cached_data.get("reference_id"),
+                        "patient": abha_number.patient,
+                        "care_contexts": cached_data.get("care_contexts", []),
+                        "user": request.user,
+                        "hf_id": cached_data.get("hf_id"),
+                    }
+                )
+
+                cache.delete(request_cache_key)
 
         return Response(status=status.HTTP_202_ACCEPTED)
 
