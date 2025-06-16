@@ -1,7 +1,7 @@
 import logging
 
 from django.db import transaction
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from abdm.models import HealthInformationType
@@ -14,6 +14,7 @@ from care.facility.models import (
     Prescription,
     SuggestionChoices,
 )
+from care.facility.models.file_upload import FileUpload
 
 logger = logging.getLogger(__name__)
 
@@ -183,4 +184,62 @@ def create_care_context_on_prescription_creation(
     except Exception as e:
         logger.exception(
             f"Failed to link care context for prescription {instance.external_id} with patient {patient.external_id}, {e!s}"
+        )
+
+
+@receiver(pre_save, sender=FileUpload)
+def create_care_context_on_file_upload_creation(sender, instance: FileUpload, **kwargs):
+    if not instance.pk:
+        return
+
+    try:
+        old_instance = sender.objects.get(pk=instance.pk)
+    except sender.DoesNotExist:
+        return
+
+    if (
+        old_instance.upload_completed is True
+        or instance.upload_completed is False
+        or instance.file_type != FileUpload.FileType.CONSULTATION
+    ):
+        return
+
+    try:
+        associating_id = int(instance.associating_id)
+        consultation = PatientConsultation.objects.filter(id=associating_id).first()
+    except ValueError:
+        consultation = PatientConsultation.objects.filter(
+            external_id=instance.associating_id
+        ).first()
+
+    patient = getattr(consultation, "patient", None)
+
+    if not patient or getattr(patient, "abha_number", None) is None:
+        return
+
+    try:
+        transaction.on_commit(
+            lambda: GatewayService.link__carecontext(
+                {
+                    "patient": patient,
+                    "care_contexts": [
+                        {
+                            "reference": f"v1::file_upload::{instance.external_id}",
+                            "display": f"File Uploaded on {instance.created_date.date()}",
+                            "hi_type": HealthInformationType.RECORD_ARTIFACT,
+                        }
+                    ],
+                    "user": instance.uploaded_by,
+                    "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
+                }
+            )
+        )
+    except ABDMAPIException as e:
+        logger.warning(
+            f"Failed to link care context for file_upload {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
+        )
+
+    except Exception as e:
+        logger.exception(
+            f"Failed to link care context for file_upload {instance.external_id} with patient {patient.external_id}, {e!s}"
         )

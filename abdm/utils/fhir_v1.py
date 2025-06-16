@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from functools import wraps
 from typing import Literal, TypedDict
 
+from django.db.models import Q
 from fhir.resources.R4B.address import Address
 from fhir.resources.R4B.annotation import Annotation
 from fhir.resources.R4B.attachment import Attachment
@@ -36,7 +37,7 @@ from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
 
 from abdm.models import HealthFacility
-from abdm.service.helper import uuid  # TODO: stop using random uuid
+from abdm.service.helper import ABDMAPIException, uuid  # TODO: stop using random uuid
 from abdm.settings import plugin_settings as settings
 from care.facility.models import (
     BaseModel,
@@ -985,6 +986,75 @@ class Fhir:
             author=[self._reference(self._practitioner(investigation.created_by))],
         )
 
+    def _health_document_composition(self, file: FileUpload):
+        if file.file_type not in (
+            FileUpload.FileType.CONSULTATION,
+            FileUpload.FileType.PATIENT,
+        ):
+            raise ABDMAPIException(
+                "File type must be either patient or encounter to create health document composition"
+            )
+
+        try:
+            associating_id = int(file.associating_id)
+            patient = PatientRegistration.objects.filter(
+                Q(id=associating_id) | Q(consultations__id=associating_id)
+            ).first()
+        except ValueError:
+            patient = PatientRegistration.objects.filter(
+                Q(external_id=file.associating_id)
+                | Q(consultations__external_id=file.associating_id)
+            ).first()
+
+        if not patient:
+            raise ABDMAPIException(
+                "Patient not found for the given file associating_id"
+            )
+
+        try:
+            associating_id = int(file.associating_id)
+            consultation = PatientConsultation.objects.filter(id=associating_id).first()
+        except ValueError:
+            consultation = PatientConsultation.objects.filter(
+                external_id=file.associating_id
+            ).first()
+
+        id = str(file.external_id)
+        date = file.created_date.isoformat()
+
+        return Composition(
+            id=id,
+            identifier=Identifier(value=id),
+            status="final",
+            type=CodeableConcept(
+                coding=[
+                    Coding(
+                        system="http://snomed.info/sct",
+                        code="419891008",
+                        display="Record artifact",
+                    )
+                ]
+            ),
+            title="Health Document",
+            date=date,
+            section=list(
+                filter(
+                    lambda section: section.entry and len(section.entry) > 0,
+                    [
+                        CompositionSection(
+                            title=file.name,
+                            entry=[self._reference(self._document_reference(file))],
+                        ),
+                    ],
+                )
+            ),
+            subject=self._reference(self._patient(patient)),
+            encounter=self._reference(self._encounter(consultation))
+            if consultation
+            else None,
+            author=[self._reference(self._practitioner(file.uploaded_by))],
+        )
+
     def _prescription_composition(self, prescriptions: list[Prescription]):
         id = f"prescriptions-on-{prescriptions[0].created_date.date().isoformat()}"
 
@@ -1368,6 +1438,28 @@ class Fhir:
             meta=Meta(lastUpdated=last_updated),
             entry=[
                 self._bundle_entry(self._discharge_summary_composition(consultation)),
+                *list(
+                    map(
+                        lambda profile: self._bundle_entry(profile),
+                        self.cached_profiles(),
+                    )
+                ),
+            ],
+        )
+
+    def create_health_document_record(self, file_upload: FileUpload):
+        id = uuid()
+        now = datetime.now(UTC).isoformat()
+        last_updated = file_upload.modified_date.isoformat()
+
+        return Bundle(
+            id=id,
+            identifier=Identifier(value=id, system=f"{care_identifier}/bundle"),
+            type="document",
+            timestamp=now,
+            meta=Meta(lastUpdated=last_updated),
+            entry=[
+                self._bundle_entry(self._health_document_composition(file_upload)),
                 *list(
                     map(
                         lambda profile: self._bundle_entry(profile),

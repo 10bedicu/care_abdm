@@ -21,6 +21,7 @@ from care.facility.models import (
     Prescription,
     SuggestionChoices,
 )
+from care.facility.models.file_upload import FileUpload
 
 
 class ABDMAPIException(APIException):
@@ -175,6 +176,20 @@ def generate_care_contexts_for_existing_data(
                 }
             )
 
+        files = FileUpload.objects.filter(
+            associating_id=consultation.external_id,
+            file_type=FileUpload.FileType.CONSULTATION,
+            upload_completed=True,
+        )
+        for file in files:
+            consultation_care_contexts.append(
+                {
+                    "reference": f"v1::file_upload::{file.external_id}",
+                    "display": f"File Uploaded on {file.created_date.date()}",
+                    "hi_type": HealthInformationType.RECORD_ARTIFACT,
+                }
+            )
+
         facility = consultation.facility
         if not hasattr(facility, "healthfacility"):
             # TODO: create transaction to log failed transaction for care_context
@@ -245,6 +260,18 @@ def care_context_dict_from_reference_id(reference_id: str):
             "reference": f"v1::prescription::{prescription.created_date.date()}",
             "display": f"Medication Prescribed on {prescription.created_date.date()}",
             "hi_type": HealthInformationType.PRESCRIPTION,
+        }
+
+    if model == "file_upload":
+        file_upload = FileUpload.objects.filter(external_id=param).first()
+
+        if not file_upload:
+            return None
+
+        return {
+            "reference": f"v1::file_upload::{file_upload.external_id}",
+            "display": f"File Uploaded on {file_upload.created_date.date()}",
+            "hi_type": HealthInformationType.RECORD_ARTIFACT,
         }
 
     return None

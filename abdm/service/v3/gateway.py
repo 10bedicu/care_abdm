@@ -60,6 +60,7 @@ from care.facility.models import (
     Prescription,
     SuggestionChoices,
 )
+from care.facility.models.file_upload import FileUpload
 
 
 class GatewayService:
@@ -566,6 +567,19 @@ class GatewayService:
                     continue
 
                 fhir_data = Fhir().create_wellness_record(daily_round)
+
+            elif (
+                model == "file_upload"
+                and HealthInformationType.RECORD_ARTIFACT in consent.hi_types
+            ):
+                file_upload = FileUpload.objects.filter(
+                    external_id=param,
+                ).first()
+
+                if not file_upload:
+                    continue
+
+                fhir_data = Fhir().create_health_document_record(file_upload)
 
             else:
                 continue
