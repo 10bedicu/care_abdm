@@ -177,7 +177,8 @@ def generate_care_contexts_for_existing_data(
             )
 
         files = FileUpload.objects.filter(
-            associating_id=consultation.external_id,
+            Q(associating_id=consultation.external_id)
+            | Q(associating_id=consultation.id),
             file_type=FileUpload.FileType.CONSULTATION,
             upload_completed=True,
         )
