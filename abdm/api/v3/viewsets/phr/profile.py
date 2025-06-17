@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from abdm.api.v3.serializers.phr.profile import (
     PhrProfileRequestOtpSerializer,
@@ -14,14 +15,16 @@ from abdm.api.v3.serializers.phr.profile import (
     PhrProfileVerifyOtpSerializer,
     PhrRequestTokenSerializer,
 )
-from abdm.api.v3.viewsets.phr.health_id import (
+from abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
+from abdm.models import AbhaNumber
+from abdm.service.helper import (
     PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
     PHR_ACCESS_TOKEN_PREFIX,
     PHR_REFRESH_TOKEN_CACHE_TIMEOUT,
     PHR_REFRESH_TOKEN_PREFIX,
+    cache_phr_tokens,
+    remove_cached_phr_tokens,
 )
-from abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
-from abdm.models import AbhaNumber
 from abdm.service.v3.phr.profile import PhrProfileService
 from abdm.settings import plugin_settings as settings
 
@@ -130,19 +133,14 @@ class PhrProfileViewSet(GenericViewSet):
 
         return base_scope + auth_scope
 
-    def _cache_abdm_tokens(self, abha_health_id, access_token, refresh_token):
-        normalized_health_id = self._normalize_abha_address(abha_health_id)
-        cache.set(
-            f"{PHR_ACCESS_TOKEN_PREFIX}{normalized_health_id}",
-            access_token,
-            timeout=PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
-        )
-
-        cache.set(
-            f"{PHR_REFRESH_TOKEN_PREFIX}{normalized_health_id}",
-            refresh_token,
-            timeout=PHR_REFRESH_TOKEN_CACHE_TIMEOUT,
-        )
+    def _get_tokens(self, abha_address, id):
+        refresh_token = RefreshToken()
+        refresh_token["abha_address"] = self._normalize_abha_address(abha_address)
+        refresh_token["id"] = id
+        return {
+            "refresh_token": str(refresh_token),
+            "access_token": str(refresh_token.access_token),
+        }
 
     # TEMPORARY ACTIONS FOR PHR PROFILE
     @action(detail=False, methods=["get"], url_path="request_token")
@@ -167,10 +165,6 @@ class PhrProfileViewSet(GenericViewSet):
     @action(detail=False, methods=["get"], url_path="get_profile")
     def phr_profile(self, request):
         x_token = self._get_x_token(request)
-
-        logger.info(
-            f"Fetching PHR profile for user: {request.user.abha_address} ----- {x_token}"
-        )
 
         profile = PhrProfileService.phr__profile({"x_token": x_token})
 
@@ -208,7 +202,7 @@ class PhrProfileViewSet(GenericViewSet):
     @action(detail=False, methods=["post"], url_path="switch/verify_user")
     def phr_profile__switch__verify_user(self, request):
         validated_data = self.validate_request(request)
-
+        abha_address = self._normalize_abha_address(validated_data.get("abha_address"))
         t_token = cache.get(
             f"{PHR_PROFILE_SWITCH_VERIFY_TOKEN_CACHE_KEY}:{validated_data.get('transaction_id')}"
         )
@@ -222,9 +216,7 @@ class PhrProfileViewSet(GenericViewSet):
         result = PhrProfileService.phr__profile__switch__verify_user(
             {
                 "t_token": t_token,
-                "abha_address": self._normalize_abha_address(
-                    validated_data.get("abha_address", "")
-                ),
+                "abha_address": abha_address,
                 "transaction_id": str(validated_data.get("transaction_id")),
             }
         )
@@ -245,13 +237,20 @@ class PhrProfileViewSet(GenericViewSet):
             refresh_token=result.get("refreshToken"),
         )
 
-        self._cache_abdm_tokens(
+        remove_cached_phr_tokens(abha_health_id=request.user.abha_address)
+        cache_phr_tokens(
             abha_health_id=abha_number.health_id,
             access_token=result.get("token"),
             refresh_token=result.get("refreshToken"),
         )
 
         return Response(
+            {
+                **self._get_tokens(
+                    abha_address=abha_number.health_id,
+                    id=abha_number.id,
+                ),
+            },
             status=status.HTTP_200_OK,
         )
 
