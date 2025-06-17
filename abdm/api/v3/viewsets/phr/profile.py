@@ -142,7 +142,7 @@ class PhrProfileViewSet(GenericViewSet):
             "access_token": str(refresh_token.access_token),
         }
 
-    # TEMPORARY ACTIONS FOR PHR PROFILE
+    # TEMPORARY ACTION FOR PHR PROFILE
     @action(detail=False, methods=["get"], url_path="request_token")
     def phr__request__token(self, request):
         validated_data = self.validate_request(request)
