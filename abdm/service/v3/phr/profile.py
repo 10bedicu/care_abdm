@@ -63,25 +63,6 @@ class PhrProfileService:
         return "Unknown error occurred at ABDM's end while processing the request. Please try again later."
 
     @staticmethod
-    def phr__profile(data: ProfileAccountBody) -> ProfileAccountResponse:
-        path = "/phr/app/login/profile"
-        response = PhrProfileService.request.get(
-            path,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
-
-        return response.json()
-
-    @staticmethod
     def phr__request__token(
         data: PhrRequestTokenBody,
     ) -> PhrRequestTokenResponse:
@@ -147,8 +128,8 @@ class PhrProfileService:
         data: PhrProfileSwitchVerifyUserBody,
     ) -> PhrProfileSwitchVerifyUserResponse:
         payload = {
-            "abhaAddress": data.get("abha_address", ""),
-            "txnId": data.get("transaction_id", ""),
+            "abhaAddress": data.get("abha_address"),
+            "txnId": data.get("transaction_id"),
         }
 
         path = "/phr/app/login/profile/verify/switch-profile/user"
@@ -193,10 +174,10 @@ class PhrProfileService:
         data: PhrProfileRequestOtpBody,
     ) -> PhrProfileRequestOtpResponse:
         payload = {
-            "scope": data.get("scope", []),
-            "loginHint": data.get("type", ""),
-            "loginId": encrypt_message(data.get("value", "")),
-            "otpSystem": data.get("otp_system", ""),
+            "scope": data.get("scope"),
+            "loginHint": data.get("type"),
+            "loginId": encrypt_message(data.get("value")),
+            "otpSystem": data.get("otp_system"),
         }
 
         path = "/phr/app/login/profile/request/otp"
@@ -222,7 +203,7 @@ class PhrProfileService:
         data: PhrProfileVerifyOtpBody,
     ) -> PhrProfileVerifyOtpResponse:
         payload = {
-            "scope": data.get("scope", []),
+            "scope": data.get("scope"),
             "authData": {
                 "authMethods": ["otp"],
                 "otp": {
@@ -264,8 +245,6 @@ class PhrProfileService:
         else:
             path = "/phr/app/login/profile/de-link"
 
-        logger.info(f"Linking/Delinking action: {path}, Transaction ID: {payload}")
-
         response = PhrProfileService.request.post(
             path,
             payload,
@@ -288,12 +267,33 @@ class PhrProfileService:
         data: PhrSelectPreferredAbhaBody,
     ) -> PhrSelectPreferredAbhaResponse:
         payload = {
-            "transactionId": data.get("transaction_id", ""),
+            "transactionId": data.get("transaction_id"),
         }
         path = "/phr/app/login/profile/set-preffered/abha-address"
         response = PhrProfileService.request.post(
             path,
             payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-token": f"Bearer {data.get('x_token', '')}",
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(
+                detail=PhrProfileService.handle_error(response.json())
+            )
+
+        return response.json()
+
+    @staticmethod
+    def phr__profile__logout(
+        data: ProfileAccountBody,
+    ) -> ProfileAccountResponse:
+        path = "/phr/app/login/profile/request/logout"
+        response = PhrProfileService.request.get(
+            path,
             headers={
                 "REQUEST-ID": uuid(),
                 "TIMESTAMP": timestamp(),

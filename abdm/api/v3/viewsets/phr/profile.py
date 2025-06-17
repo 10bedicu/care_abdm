@@ -1,4 +1,5 @@
 from datetime import datetime
+from logging import getLogger
 
 from django.core.cache import cache
 from django.http import HttpResponse
@@ -13,13 +14,25 @@ from abdm.api.v3.serializers.phr.profile import (
     PhrProfileVerifyOtpSerializer,
     PhrRequestTokenSerializer,
 )
+from abdm.api.v3.viewsets.phr.health_id import (
+    PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
+    PHR_ACCESS_TOKEN_PREFIX,
+    PHR_REFRESH_TOKEN_CACHE_TIMEOUT,
+    PHR_REFRESH_TOKEN_PREFIX,
+)
+from abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
 from abdm.models import AbhaNumber
-from abdm.service.v3.health_id import HealthIdService
+from abdm.service.v3.phr.profile import PhrProfileService
 from abdm.settings import plugin_settings as settings
+
+PHR_PROFILE_SWITCH_VERIFY_TOKEN_CACHE_KEY = "phr__profile__switch__token"
+
+logger = getLogger(__name__)
 
 
 class PhrProfileViewSet(GenericViewSet):
-    permission_classes = []
+    permission_classes = [IsPhrAuthenticated]
+    authentication_classes = [PhrCustomAuthentication]
 
     serializer_action_classes = {
         "phr_profile__switch__verify_user": PhrProfileSwitchVerifySerializer,
@@ -40,35 +53,59 @@ class PhrProfileViewSet(GenericViewSet):
 
         return serializer.validated_data
 
-    def _update_abha_from_profile(self, profile_data, **tokens):
+    def _get_x_token(self, request):
+        abha_address = self._normalize_abha_address(request.user.abha_address)
+        access_key = f"{PHR_ACCESS_TOKEN_PREFIX}{abha_address}"
+        refresh_key = f"{PHR_REFRESH_TOKEN_PREFIX}{abha_address}"
+
+        x_token = cache.get(access_key)
+        if x_token:
+            return x_token
+
+        refresh_token = cache.get(refresh_key)
+
+        result = PhrProfileService.phr__request__token({"r_token": refresh_token})
+        tokens = result.get("tokens") or {}
+
+        access_token = tokens.get("token")
+        new_refresh_token = tokens.get("refreshToken")
+
+        cache.set(access_key, access_token, timeout=PHR_ACCESS_TOKEN_CACHE_TIMEOUT)
+        cache.set(
+            refresh_key, new_refresh_token, timeout=PHR_REFRESH_TOKEN_CACHE_TIMEOUT
+        )
+
+        return access_token
+
+    def _update_abha_from_profile(self, data, abha_key="abhaNumber", **tokens):
         date_of_birth = str(
             datetime.strptime(
-                f"{profile_data.get('yearOfBirth')}-{profile_data.get('monthOfBirth')}-{profile_data.get('dayOfBirth')}",
+                f"{data.get('yearOfBirth')}-{data.get('monthOfBirth') or '01'}-{data.get('dayOfBirth') or '01'}",
                 "%Y-%m-%d",
             )
-        )[0:10]
+        )[:10]
 
         defaults = {
-            "abha_number": profile_data.get("abhaNumber"),
-            "health_id": profile_data.get("preferredAbhaAddress"),
-            "name": profile_data.get("fullName"),
-            "first_name": profile_data.get("firstName", ""),
-            "middle_name": profile_data.get("middleName", ""),
-            "last_name": profile_data.get("lastName", ""),
-            "gender": profile_data.get("gender"),
+            "abha_number": data.get(abha_key),
+            "health_id": data.get("abhaAddress"),
+            "name": data.get("name") or data.get("fullName"),
+            "first_name": data.get("firstName"),
+            "middle_name": data.get("middleName"),
+            "last_name": data.get("lastName"),
+            "gender": data.get("gender"),
+            "email": data.get("email"),
             "date_of_birth": date_of_birth,
-            "address": profile_data.get("address"),
-            "pincode": profile_data.get("pinCode"),
-            "district": profile_data.get("districtName"),
-            "state": profile_data.get("stateName"),
-            "email": profile_data.get("email"),
-            "mobile": profile_data.get("mobile"),
-            "profile_photo": profile_data.get("profilePhoto"),
+            "address": data.get("address"),
+            "district": data.get("districtName"),
+            "state": data.get("stateName"),
+            "pincode": data.get("pinCode") or data.get("pincode"),
+            "mobile": data.get("mobile"),
+            "profile_photo": data.get("profilePhoto"),
             **tokens,
         }
 
         return AbhaNumber.objects.update_or_create(
-            abha_number=profile_data.get("abhaNumber"),
+            abha_number=data.get(abha_key),
             defaults=defaults,
         )
 
@@ -77,7 +114,7 @@ class PhrProfileViewSet(GenericViewSet):
             return f"{address}@{settings.ABDM_CM_ID}"
         return address
 
-    def _build_profile_scope(self, login_hint, otp_system):
+    def _build_scope(self, login_hint, otp_system):
         base_scope = {
             "abha-number": ["abha-login"],
             "mobile-number": ["abha-address-profile"],
@@ -93,11 +130,26 @@ class PhrProfileViewSet(GenericViewSet):
 
         return base_scope + auth_scope
 
-    @action(detail=False, methods=["get"], url_path="profile/request_token")
+    def _cache_abdm_tokens(self, abha_health_id, access_token, refresh_token):
+        normalized_health_id = self._normalize_abha_address(abha_health_id)
+        cache.set(
+            f"{PHR_ACCESS_TOKEN_PREFIX}{normalized_health_id}",
+            access_token,
+            timeout=PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
+        )
+
+        cache.set(
+            f"{PHR_REFRESH_TOKEN_PREFIX}{normalized_health_id}",
+            refresh_token,
+            timeout=PHR_REFRESH_TOKEN_CACHE_TIMEOUT,
+        )
+
+    # TEMPORARY ACTIONS FOR PHR PROFILE
+    @action(detail=False, methods=["get"], url_path="request_token")
     def phr__request__token(self, request):
         validated_data = self.validate_request(request)
 
-        result = HealthIdService.phr__request__token(
+        result = PhrProfileService.phr__request__token(
             {"r_token": validated_data.get("refresh_token")}
         )
 
@@ -112,47 +164,35 @@ class PhrProfileViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["get"], url_path="profile")
+    @action(detail=False, methods=["get"], url_path="get_profile")
     def phr_profile(self, request):
-        # TODO : Implement proper authentication and authorization checks here
-        x_token = cache.get("phr__access__token")
-        if not x_token:
-            return Response(
-                {"detail": "Invalid Token. Please login again."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # END TODO
+        x_token = self._get_x_token(request)
 
-        result = HealthIdService.phr__profile({"x_token": x_token})
+        logger.info(
+            f"Fetching PHR profile for user: {request.user.abha_address} ----- {x_token}"
+        )
 
-        self._update_abha_from_profile(result)
+        profile = PhrProfileService.phr__profile({"x_token": x_token})
+
+        self._update_abha_from_profile(profile)
 
         return Response(
-            {
-                "profile": result,
-            },
+            profile,
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["get"], url_path="profile/switch")
+    @action(detail=False, methods=["get"], url_path="switch")
     def phr_profile__switch(self, request):
-        # TODO : Implement proper authentication and authorization checks here
-        x_token = cache.get("phr__access__token")
-        if not x_token:
-            return Response(
-                {"detail": "Access token not found. Please request a token first."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # END TODO
+        x_token = self._get_x_token(request)
 
-        result = HealthIdService.phr__profile__switch(
+        result = PhrProfileService.phr__profile__switch(
             {
                 "x_token": x_token,
             }
         )
 
         cache.set(
-            f"phr__profile__switch__token:{result.get('txnId')}",
+            f"{PHR_PROFILE_SWITCH_VERIFY_TOKEN_CACHE_KEY}:{result.get('txnId')}",
             result.get("tokens", {}).get("token"),
             timeout=300,
         )
@@ -165,12 +205,12 @@ class PhrProfileViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["post"], url_path="profile/switch/verify_user")
+    @action(detail=False, methods=["post"], url_path="switch/verify_user")
     def phr_profile__switch__verify_user(self, request):
         validated_data = self.validate_request(request)
 
         t_token = cache.get(
-            f"phr__profile__switch__token:{validated_data.get('transaction_id')}"
+            f"{PHR_PROFILE_SWITCH_VERIFY_TOKEN_CACHE_KEY}:{validated_data.get('transaction_id')}"
         )
 
         if not t_token:
@@ -179,7 +219,7 @@ class PhrProfileViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        result = HealthIdService.phr__profile__switch__verify_user(
+        result = PhrProfileService.phr__profile__switch__verify_user(
             {
                 "t_token": t_token,
                 "abha_address": self._normalize_abha_address(
@@ -195,34 +235,31 @@ class PhrProfileViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = HealthIdService.phr__profile({"x_token": result.get("token")})
+        profile_result = PhrProfileService.phr__profile(
+            {"x_token": result.get("token")}
+        )
 
-        self._update_abha_from_profile(
+        abha_number, _ = self._update_abha_from_profile(
             profile_result,
             access_token=result.get("token"),
             refresh_token=result.get("refreshToken"),
         )
 
+        self._cache_abdm_tokens(
+            abha_health_id=abha_number.health_id,
+            access_token=result.get("token"),
+            refresh_token=result.get("refreshToken"),
+        )
+
         return Response(
-            {
-                "token": result.get("token"),
-                "refresh_token": result.get("refreshToken"),
-            },
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["get"], url_path="profile/phr_card")
+    @action(detail=False, methods=["get"], url_path="phr_card")
     def phr_profile__card(self, request):
-        # TODO : Implement proper authentication and authorization checks here
-        x_token = cache.get("phr__access__token")
-        if not x_token:
-            return Response(
-                {"detail": "Invalid Token. Please login again."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # END TODO
+        x_token = self._get_x_token(request)
 
-        phr_card = HealthIdService.phr_profile__card({"x_token": x_token})
+        phr_card = PhrProfileService.phr_profile__card({"x_token": x_token})
 
         return HttpResponse(
             phr_card,
@@ -230,25 +267,18 @@ class PhrProfileViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["post"], url_path="profile/request_otp")
+    @action(detail=False, methods=["post"], url_path="request_otp")
     def phr_profile__request_otp(self, request):
         validated_data = self.validate_request(request)
-        # TODO : Implement proper authentication and authorization checks here
-        x_token = cache.get("phr__access__token")
-        if not x_token:
-            return Response(
-                {"detail": "Access token not found. Please request a token first."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # END TODO
+        x_token = self._get_x_token(request)
 
         login_hint = validated_data.get("type")
         otp_system = validated_data.get("otp_system")
         value = validated_data.get("value")
 
-        scope = self._build_profile_scope(login_hint, otp_system)
+        scope = self._build_scope(login_hint, otp_system)
 
-        result = HealthIdService.phr__profile__request__otp(
+        result = PhrProfileService.phr__profile__request__otp(
             {
                 "scope": scope,
                 "type": validated_data.get("type"),
@@ -265,25 +295,18 @@ class PhrProfileViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["post"], url_path="profile/verify_otp")
+    @action(detail=False, methods=["post"], url_path="verify_otp")
     def phr_profile__verify_otp(self, request):
         validated_data = self.validate_request(request)
-        # TODO : Implement proper authentication and authorization checks here
-        x_token = cache.get("phr__access__token")
-        if not x_token:
-            return Response(
-                {"detail": "Access token not found. Please request a token first."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # END TODO
+        x_token = self._get_x_token(request)
 
         login_hint = validated_data.get("type")
         otp_system = validated_data.get("otp_system")
         action = validated_data.get("action")
 
-        scope = self._build_profile_scope(login_hint, otp_system)
+        scope = self._build_scope(login_hint, otp_system)
 
-        result = HealthIdService.phr__profile__verify__otp(
+        result = PhrProfileService.phr__profile__verify__otp(
             {
                 "scope": scope,
                 "otp": validated_data.get("otp"),
@@ -302,7 +325,7 @@ class PhrProfileViewSet(GenericViewSet):
             )
 
         if action in ("LINK", "DE_LINK"):
-            result = HealthIdService.phr__profile__link__delink(
+            result = PhrProfileService.phr__profile__link__delink(
                 {
                     "action": action,
                     "transaction_id": str(result.get("txnId")),
@@ -318,7 +341,7 @@ class PhrProfileViewSet(GenericViewSet):
             )
 
         if action == "SELECT_PREFERRED_ABHA":
-            result = HealthIdService.phr__profile__select__preferred__abha(
+            result = PhrProfileService.phr__profile__select__preferred__abha(
                 {
                     "transaction_id": str(result.get("txnId")),
                     "x_token": x_token,
@@ -340,21 +363,14 @@ class PhrProfileViewSet(GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["post"], url_path="profile/update")
+    @action(detail=False, methods=["post"], url_path="update")
     def phr_profile__update(self, request):
         validated_data = self.validate_request(request)
-        # TODO : Implement proper authentication and authorization checks here
-        x_token = cache.get("phr__access__token")
-        if not x_token:
-            return Response(
-                {"detail": "Access token not found. Please request a token first."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # END TODO
+        x_token = self._get_x_token(request)
 
         profile_data = validated_data.get("profile_data")
 
-        result = HealthIdService.phr__profile__update(
+        result = PhrProfileService.phr__profile__update(
             {
                 "x_token": x_token,
                 "profile_data": profile_data,
@@ -364,6 +380,19 @@ class PhrProfileViewSet(GenericViewSet):
         return Response(
             {
                 "profile": result,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="logout")
+    def phr_profile__logout(self, request):
+        x_token = self._get_x_token(request)
+
+        result = PhrProfileService.phr__profile__logout({"x_token": x_token})
+
+        return Response(
+            {
+                "result": result,
             },
             status=status.HTTP_200_OK,
         )

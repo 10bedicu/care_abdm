@@ -101,3 +101,8 @@ class PhrSelectPreferredAbhaBody(TypedDict):
 class PhrSelectPreferredAbhaResponse(TypedDict):
     abhaAddress: str
     status: Literal["ACTIVE"]
+
+
+class PhrProfileLogoutResponse(TypedDict):
+    message: str
+    timestamp: str
