@@ -3,6 +3,7 @@ from datetime import datetime
 from django.core.cache import cache
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
@@ -24,21 +25,17 @@ from abdm.api.v3.serializers.phr.health_id import (
     PhrTokenRefreshSerializer,
 )
 from abdm.models import AbhaNumber, Transaction, TransactionType
+from abdm.service.helper import cache_phr_tokens, remove_cached_phr_tokens
 from abdm.service.v3.phr.health_id import PhrHealthIdService
 from abdm.service.v3.phr.profile import PhrProfileService
 from abdm.settings import plugin_settings as settings
 
-PHR_ACCESS_TOKEN_PREFIX = "phr_access_token:"
-PHR_REFRESH_TOKEN_PREFIX = "phr_refresh_token:"
 PHR_VERIFY_USER_TOKEN_PREFIX = "phr_verify_user_token:"
-PHR_ACCESS_TOKEN_CACHE_TIMEOUT = 1800
-PHR_REFRESH_TOKEN_CACHE_TIMEOUT = 1296000
 PHR_VERIFY_USER_TOKEN_TIMEOUT = 300
 
 
 class PhrAuthViewSet(GenericViewSet):
     permission_classes = []
-    # authentication_classes = [PhrCustomAuthentication]
 
     serializer_action_classes = {
         "phr_enrollment__send_otp": PhrEnrollmentSendOtpSerializer,
@@ -128,20 +125,6 @@ class PhrAuthViewSet(GenericViewSet):
             "refresh_token": str(refresh_token),
             "access_token": str(refresh_token.access_token),
         }
-
-    def _cache_abdm_tokens(self, abha_health_id, access_token, refresh_token):
-        normalized_health_id = self._normalize_abha_address(abha_health_id)
-        cache.set(
-            f"{PHR_ACCESS_TOKEN_PREFIX}{normalized_health_id}",
-            access_token,
-            timeout=PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
-        )
-
-        cache.set(
-            f"{PHR_REFRESH_TOKEN_PREFIX}{normalized_health_id}",
-            refresh_token,
-            timeout=PHR_REFRESH_TOKEN_CACHE_TIMEOUT,
-        )
 
     @action(detail=False, methods=["post"], url_path="create/send_otp")
     def phr_enrollment__send_otp(self, request):
@@ -343,7 +326,7 @@ class PhrAuthViewSet(GenericViewSet):
             },
         )
 
-        self._cache_abdm_tokens(
+        cache_phr_tokens(
             abha_health_id=abha_number.health_id,
             access_token=result.get("tokens", {}).get("token"),
             refresh_token=result.get("tokens", {}).get("refreshToken"),
@@ -502,7 +485,7 @@ class PhrAuthViewSet(GenericViewSet):
             },
         )
 
-        self._cache_abdm_tokens(
+        cache_phr_tokens(
             abha_health_id=abha_number.health_id,
             access_token=token.get("access_token"),
             refresh_token=token.get("refresh_token"),
@@ -572,7 +555,7 @@ class PhrAuthViewSet(GenericViewSet):
             },
         )
 
-        self._cache_abdm_tokens(
+        cache_phr_tokens(
             abha_health_id=abha_number.health_id,
             access_token=result.get("token"),
             refresh_token=result.get("refreshToken"),
@@ -611,8 +594,17 @@ class PhrAuthViewSet(GenericViewSet):
 
     @action(detail=False, methods=["post"], url_path="refresh_token")
     def phr_refresh_token(self, request):
+        abha_address = request.data.get("abha_address", "")
+
         try:
             validated_data = self.validate_request(request)
             return Response(validated_data, status=status.HTTP_200_OK)
-        except TokenError as e:
+
+        except (PermissionDenied, ValidationError, TokenError) as e:
+            if abha_address:
+                remove_cached_phr_tokens(abha_health_id=abha_address)
+
+            if isinstance(e, (PermissionDenied, ValidationError)):
+                raise e
+
             raise InvalidToken(e.args[0]) from e
