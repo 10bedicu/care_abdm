@@ -5,6 +5,7 @@ from uuid import uuid4
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Hash import SHA1
 from Crypto.PublicKey import RSA
+from django.core.cache import cache
 from django.db.models import Q
 from django.db.models.functions import TruncDate
 from rest_framework.exceptions import APIException
@@ -278,3 +279,28 @@ def create_questionnaire_response_care_context(
         "display": f"Observations Added on {questionnaire_response.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
         "hi_type": HealthInformationType.WELLNESS_RECORD,
     }
+
+
+PHR_ACCESS_TOKEN_PREFIX = "phr_access_token:"
+PHR_REFRESH_TOKEN_PREFIX = "phr_refresh_token:"
+PHR_ACCESS_TOKEN_CACHE_TIMEOUT = 1800
+PHR_REFRESH_TOKEN_CACHE_TIMEOUT = 129600
+
+
+def cache_phr_tokens(self, abha_health_id, access_token, refresh_token):
+    cache.set(
+        f"{PHR_ACCESS_TOKEN_PREFIX}{abha_health_id}",
+        access_token,
+        timeout=PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
+    )
+
+    cache.set(
+        f"{PHR_REFRESH_TOKEN_PREFIX}{abha_health_id}",
+        refresh_token,
+        timeout=PHR_REFRESH_TOKEN_CACHE_TIMEOUT,
+    )
+
+
+def remove_cached_phr_tokens(self, abha_health_id):
+    cache.delete(f"{PHR_ACCESS_TOKEN_PREFIX}{abha_health_id}")
+    cache.delete(f"{PHR_REFRESH_TOKEN_PREFIX}{abha_health_id}")
