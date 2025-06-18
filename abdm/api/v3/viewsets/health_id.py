@@ -74,7 +74,7 @@ class HealthIdViewSet(GenericViewSet):
         ).first()
 
         if not AuthorizationController.call(
-            "can_write_patient_obj", self.request.user, patient
+            "can_create_patient", self.request.user, patient
         ):
             return Response(
                 {
