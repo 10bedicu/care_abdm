@@ -11,7 +11,7 @@ from abdm.service.v3.gateway import GatewayService
 logger = logging.getLogger(__name__)
 
 
-CARE_CONTEXT_BATCH_SIZE = 50
+CARE_CONTEXT_BATCH_SIZE = 20
 
 
 @shared_task

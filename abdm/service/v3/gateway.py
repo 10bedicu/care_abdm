@@ -111,9 +111,15 @@ class GatewayService:
             else None,
         }
 
+        base_cache_key = f"abdm_link_care_context__{hf_id}__{abha_number.health_id}"
+
+        previous_requests_cache_keys = cache.keys(
+            f"{base_cache_key}__*",
+        )
+
         request_id = uuid()
         cache.set(
-            "abdm_link_care_context__" + request_id,
+            f"{base_cache_key}__{request_id}",
             {
                 "abha_number": abha_number.abha_number,
                 "purpose": data.get("purpose"),
@@ -123,6 +129,9 @@ class GatewayService:
             },
             timeout=60 * 5,
         )
+
+        if len(previous_requests_cache_keys) > 0:
+            return {}
 
         path = "/v3/token/generate-token"
         response = GatewayService.request.post(
@@ -582,6 +591,19 @@ class GatewayService:
                     continue
 
                 fhir_data = Fhir().create_wellness_record(questionnaire_response)
+
+            elif (
+                model == "file_upload"
+                and HealthInformationType.RECORD_ARTIFACT in consent.hi_types
+            ):
+                file_upload = FileUpload.objects.filter(
+                    external_id=param,
+                ).first()
+
+                if not file_upload:
+                    continue
+
+                fhir_data = Fhir().create_health_document_record(file_upload)
 
             else:
                 continue
