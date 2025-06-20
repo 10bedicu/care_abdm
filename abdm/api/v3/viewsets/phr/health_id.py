@@ -283,7 +283,7 @@ class PhrAuthViewSet(GenericViewSet):
             "middleName": phr_details.get("middle_name", ""),
             "mobile": phr_details.get("mobile"),
             "monthOfBirth": phr_details.get("month_of_birth", ""),
-            "password": phr_details.get("password"),
+            "password": phr_details.get("password", ""),
             "pinCode": phr_details.get("pincode"),
             "stateCode": phr_details.get("state_code"),
             "stateName": phr_details.get("state_name"),

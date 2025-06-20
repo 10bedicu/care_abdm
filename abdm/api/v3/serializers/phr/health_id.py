@@ -71,7 +71,7 @@ class PhrAddressDetailsSerializer(Serializer):
     middle_name = CharField(max_length=100, required=False, allow_blank=True)
     mobile = CharField(max_length=10, required=True)
     month_of_birth = CharField(max_length=2, required=False, allow_blank=True)
-    password = CharField(write_only=True, required=True)
+    password = CharField(write_only=True, min_length=8, required=False)
     pincode = CharField(max_length=6, required=True)
     state_code = CharField(max_length=2, min_length=2, required=True)
     state_name = CharField(max_length=100, required=True)
@@ -116,7 +116,7 @@ class PhrLoginVerifySerializer(Serializer):
     type = ChoiceField(choices=TYPE_CHOICES, required=True)
     otp = CharField(max_length=6, min_length=6, required=False)
     abha_address = CharField(max_length=50, min_length=3, required=False)
-    password = CharField(min_length=8, required=False)
+    password = CharField(min_length=8, required=False, write_only=True)
     verify_system = ChoiceField(choices=VERIFY_SYSTEM_CHOICES, required=True)
     transaction_id = UUIDField(required=False)
 
