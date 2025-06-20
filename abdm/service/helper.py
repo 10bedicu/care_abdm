@@ -62,6 +62,16 @@ def encrypt_message(message: str):
 
     return b64encode(encrypted_message).decode()
 
+def hf_id_from_encounter(encounter: Encounter):
+    if not encounter or not hasattr(encounter, "facility"):
+        return None
+
+    facility = encounter.facility
+
+    if not hasattr(facility, "healthfacility"):
+        return None
+
+    return facility.healthfacility.hf_id
 
 def hf_id_from_abha_id(health_id: str):
     abha_number = AbhaNumber.objects.filter(
@@ -151,12 +161,12 @@ def generate_care_contexts_for_existing_data(
             encounter_care_contexts.append(create_file_upload_care_context(file))
 
         questionnaire_responses = QuestionnaireResponse.objects.filter(
-            encounter=encounter,
-            patient=patient,
+            encounter_id=encounter.id,
+            patient_id=patient.id,
         )
         for response in questionnaire_responses:
             observations = Observation.objects.filter(
-                questionnaire_response=response
+                questionnaire_response_id=response.id
             ).filter(
                 Q(main_code__isnull=False) & ~Q(main_code={})
                 | Q(alternate_coding__isnull=False) & ~Q(alternate_coding=[])

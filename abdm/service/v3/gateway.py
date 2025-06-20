@@ -111,9 +111,11 @@ class GatewayService:
             else None,
         }
 
+        base_cache_key = f"abdm_link_care_context__{hf_id}__{abha_number.health_id}"
+
         request_id = uuid()
         cache.set(
-            "abdm_link_care_context__" + request_id,
+            f"{base_cache_key}__{request_id}",
             {
                 "abha_number": abha_number.abha_number,
                 "purpose": data.get("purpose"),
@@ -121,7 +123,20 @@ class GatewayService:
                 "reference_id": data.get("reference_id"),
                 "hf_id": hf_id,
             },
-            timeout=60 * 5,
+            timeout=60 * 60,
+        )
+
+        last_generate_token_request = cache.get(
+            f"abdm_generate_token__{hf_id}__{abha_number.health_id}"
+        )
+
+        if last_generate_token_request:
+            return {}
+
+        cache.set(
+            f"abdm_generate_token__{hf_id}__{abha_number.health_id}",
+            timestamp(),
+            timeout=60 * 30,
         )
 
         path = "/v3/token/generate-token"
@@ -582,6 +597,19 @@ class GatewayService:
                     continue
 
                 fhir_data = Fhir().create_wellness_record(questionnaire_response)
+
+            elif (
+                model == "file_upload"
+                and HealthInformationType.RECORD_ARTIFACT in consent.hi_types
+            ):
+                file_upload = FileUpload.objects.filter(
+                    external_id=param,
+                ).first()
+
+                if not file_upload:
+                    continue
+
+                fhir_data = Fhir().create_health_document_record(file_upload)
 
             else:
                 continue
