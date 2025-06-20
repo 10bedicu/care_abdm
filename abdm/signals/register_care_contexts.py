@@ -11,7 +11,7 @@ from abdm.service.helper import (
     create_file_upload_care_context,
     create_medication_request_care_context,
     create_questionnaire_response_care_context,
-    hf_id_from_abha_id,
+    hf_id_from_encounter,
 )
 from abdm.service.v3.gateway import GatewayService
 from care.emr.models.encounter import Encounter
@@ -28,9 +28,11 @@ def create_care_context_on_medication_request_creation(
     sender, instance: MedicationRequest, created: bool, **kwargs
 ):
     patient = instance.patient
+    hf_id = hf_id_from_encounter(instance.encounter)
 
     if (
         not created
+        or not hf_id
         or not patient
         or getattr(patient, "abha_number", None) is None
         or MedicationRequest.objects.filter(
@@ -48,7 +50,7 @@ def create_care_context_on_medication_request_creation(
                     "patient": patient,
                     "care_contexts": [create_medication_request_care_context(instance)],
                     "user": instance.created_by,
-                    "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
+                    "hf_id": hf_id,
                 }
             )
         )
@@ -66,8 +68,14 @@ def create_care_context_on_encounter_creation(
     sender, instance: Encounter, created: bool, **kwargs
 ):
     patient = instance.patient
+    hf_id = hf_id_from_encounter(instance)
 
-    if not created or not patient or getattr(patient, "abha_number", None) is None:
+    if (
+        not created
+        or not hf_id
+        or not patient
+        or getattr(patient, "abha_number", None) is None
+    ):
         return
 
     try:
@@ -77,6 +85,7 @@ def create_care_context_on_encounter_creation(
                     "patient": patient,
                     "care_contexts": [create_encounter_care_context(instance)],
                     "user": instance.created_by,
+                    "hf_id": hf_id,
                 }
             )
         )
@@ -108,8 +117,9 @@ def create_care_context_on_file_upload_creation(sender, instance: FileUpload, **
 
     encounter = Encounter.objects.filter(external_id=instance.associating_id).first()
     patient = getattr(encounter, "patient", None)
+    hf_id = hf_id_from_encounter(encounter)
 
-    if not patient or getattr(patient, "abha_number", None) is None:
+    if not patient or not hf_id or getattr(patient, "abha_number", None) is None:
         return
 
     try:
@@ -119,7 +129,7 @@ def create_care_context_on_file_upload_creation(sender, instance: FileUpload, **
                     "patient": patient,
                     "care_contexts": [create_file_upload_care_context(instance)],
                     "user": instance.created_by,
-                    "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
+                    "hf_id": hf_id,
                 }
             )
         )
@@ -143,9 +153,11 @@ def create_care_context_on_questionnaire_response_creation(
         Q(main_code__isnull=False) & ~Q(main_code={})
         | Q(alternate_coding__isnull=False) & ~Q(alternate_coding=[])
     )
+    hf_id = hf_id_from_encounter(instance.encounter)
 
     if (
         not created
+        or not hf_id
         or not patient
         or getattr(patient, "abha_number", None) is None
         or len(observations) != 1
@@ -163,7 +175,7 @@ def create_care_context_on_questionnaire_response_creation(
                         )
                     ],
                     "user": instance.created_by,
-                    "hf_id": hf_id_from_abha_id(patient.abha_number.abha_number),
+                    "hf_id": hf_id,
                 }
             )
         )

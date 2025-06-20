@@ -113,10 +113,6 @@ class GatewayService:
 
         base_cache_key = f"abdm_link_care_context__{hf_id}__{abha_number.health_id}"
 
-        previous_requests_cache_keys = cache.keys(
-            f"{base_cache_key}__*",
-        )
-
         request_id = uuid()
         cache.set(
             f"{base_cache_key}__{request_id}",
@@ -127,11 +123,21 @@ class GatewayService:
                 "reference_id": data.get("reference_id"),
                 "hf_id": hf_id,
             },
-            timeout=60 * 5,
+            timeout=60 * 60,
         )
 
-        if len(previous_requests_cache_keys) > 0:
+        last_generate_token_request = cache.get(
+            f"abdm_generate_token__{hf_id}__{abha_number.health_id}"
+        )
+
+        if last_generate_token_request:
             return {}
+
+        cache.set(
+            f"abdm_generate_token__{hf_id}__{abha_number.health_id}",
+            timestamp(),
+            timeout=60 * 30,
+        )
 
         path = "/v3/token/generate-token"
         response = GatewayService.request.post(

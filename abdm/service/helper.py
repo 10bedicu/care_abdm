@@ -62,6 +62,16 @@ def encrypt_message(message: str):
 
     return b64encode(encrypted_message).decode()
 
+def hf_id_from_encounter(encounter: Encounter):
+    if not encounter or not hasattr(encounter, "facility"):
+        return None
+
+    facility = encounter.facility
+
+    if not hasattr(facility, "healthfacility"):
+        return None
+
+    return facility.healthfacility.hf_id
 
 def hf_id_from_abha_id(health_id: str):
     abha_number = AbhaNumber.objects.filter(
