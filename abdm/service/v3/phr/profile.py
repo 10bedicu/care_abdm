@@ -19,10 +19,14 @@ from abdm.service.v3.types.phr.profile import (
     PhrProfileLinkDelinkResponse,
     PhrProfileRequestOtpBody,
     PhrProfileRequestOtpResponse,
+    PhrProfileResetPasswordBody,
+    PhrProfileResetPasswordResponse,
     PhrProfileSwitchBody,
     PhrProfileSwitchResponse,
     PhrProfileSwitchVerifyUserBody,
     PhrProfileSwitchVerifyUserResponse,
+    PhrProfileUpdateBody,
+    PhrProfileUpdateResponse,
     PhrProfileVerifyOtpBody,
     PhrProfileVerifyOtpResponse,
     PhrRequestTokenBody,
@@ -270,6 +274,62 @@ class PhrProfileService:
             "transactionId": data.get("transaction_id"),
         }
         path = "/phr/app/login/profile/set-preffered/abha-address"
+        response = PhrProfileService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-token": f"Bearer {data.get('x_token', '')}",
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(
+                detail=PhrProfileService.handle_error(response.json())
+            )
+
+        return response.json()
+
+    @staticmethod
+    def phr__profile__update(
+        data: PhrProfileUpdateBody,
+    ) -> PhrProfileUpdateResponse:
+        payload = data.get("profile_data")
+
+        path = "/phr/app/login/profile/verify"
+        response = PhrProfileService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-token": f"Bearer {data.get('x_token', '')}",
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(
+                detail=PhrProfileService.handle_error(response.json())
+            )
+
+        return response.json()
+
+    @staticmethod
+    def phr__profile__reset__password(
+        data: PhrProfileResetPasswordBody,
+    ) -> PhrProfileResetPasswordResponse:
+        payload = {
+            "scope": ["password-verify", "abha-address-profile"],
+            "authData": {
+                "authMethods": ["password"],
+                "password": {
+                    "abhaAddress": data.get("abha_address"),
+                    "password": encrypt_message(data.get("password")),
+                },
+            },
+        }
+        path = "/phr/app/login/profile/verify"
         response = PhrProfileService.request.post(
             path,
             payload,

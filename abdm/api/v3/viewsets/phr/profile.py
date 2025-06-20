@@ -10,12 +10,20 @@ from rest_framework.viewsets import GenericViewSet
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from abdm.api.v3.serializers.phr.profile import (
+    PhrProfileLogoutSerializer,
     PhrProfileRequestOtpSerializer,
+    PhrProfileResetPasswordSerializer,
     PhrProfileSwitchVerifySerializer,
+    PhrProfileUpdateSerializer,
     PhrProfileVerifyOtpSerializer,
     PhrRequestTokenSerializer,
 )
-from abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
+from abdm.authentication import (
+    PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX,
+    PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX,
+    IsPhrAuthenticated,
+    PhrCustomAuthentication,
+)
 from abdm.models import AbhaNumber
 from abdm.service.helper import (
     PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
@@ -38,10 +46,13 @@ class PhrProfileViewSet(GenericViewSet):
     authentication_classes = [PhrCustomAuthentication]
 
     serializer_action_classes = {
-        "phr_profile__switch__verify_user": PhrProfileSwitchVerifySerializer,
         "phr__request__token": PhrRequestTokenSerializer,
+        "phr_profile__switch__verify_user": PhrProfileSwitchVerifySerializer,
         "phr_profile__request_otp": PhrProfileRequestOtpSerializer,
         "phr_profile__verify_otp": PhrProfileVerifyOtpSerializer,
+        "phr_profile__update": PhrProfileUpdateSerializer,
+        "phr_profile__reset__password": PhrProfileResetPasswordSerializer,
+        "phr_profile__logout": PhrProfileLogoutSerializer,
     }
 
     def get_serializer_class(self):
@@ -246,6 +257,7 @@ class PhrProfileViewSet(GenericViewSet):
 
         return Response(
             {
+                "switchProfileEnabled": result.get("switchProfileEnabled", True),
                 **self._get_tokens(
                     abha_address=abha_number.health_id,
                     id=abha_number.id,
@@ -317,7 +329,6 @@ class PhrProfileViewSet(GenericViewSet):
         if result.get("authResult") == "failed":
             return Response(
                 {
-                    "transaction_id": result.get("txnId"),
                     "detail": result.get("message"),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -367,9 +378,24 @@ class PhrProfileViewSet(GenericViewSet):
         validated_data = self.validate_request(request)
         x_token = self._get_x_token(request)
 
-        profile_data = validated_data.get("profile_data")
+        profile_data = {
+            "address": validated_data.get("address"),
+            "firstName": validated_data.get("first_name"),
+            "middleName": validated_data.get("middle_name", ""),
+            "lastName": validated_data.get("last_name", ""),
+            "gender": validated_data.get("gender"),
+            "dayOfBirth": validated_data.get("day_of_birth", ""),
+            "monthOfBirth": validated_data.get("month_of_birth", ""),
+            "yearOfBirth": validated_data.get("year_of_birth"),
+            "stateCode": validated_data.get("state_code"),
+            "stateName": validated_data.get("state_name"),
+            "districtCode": validated_data.get("district_code"),
+            "districtName": validated_data.get("district_name"),
+            "pinCode": validated_data.get("pincode"),
+            "profilePhoto": validated_data.get("profile_photo", ""),
+        }
 
-        result = PhrProfileService.phr__profile__update(
+        PhrProfileService.phr__profile__update(
             {
                 "x_token": x_token,
                 "profile_data": profile_data,
@@ -377,21 +403,73 @@ class PhrProfileViewSet(GenericViewSet):
         )
 
         return Response(
-            {
-                "profile": result,
-            },
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["get"], url_path="logout")
-    def phr_profile__logout(self, request):
+    @action(detail=False, methods=["post"], url_path="reset_password")
+    def phr_profile__reset__password(self, request):
+        validated_data = self.validate_request(request)
         x_token = self._get_x_token(request)
 
-        result = PhrProfileService.phr__profile__logout({"x_token": x_token})
+        result = PhrProfileService.phr__profile__reset__password(
+            {
+                "x_token": x_token,
+                "abha_address": self._normalize_abha_address(
+                    validated_data.get("abha_address")
+                ),
+                "password": validated_data.get("password"),
+            }
+        )
+
+        if result.get("authResult") == "failure":
+            return Response(
+                {
+                    "detail": result.get("message")
+                    or "Password update failed. Please try again.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         return Response(
             {
-                "result": result,
+                "detail": result.get("message"),
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["post"], url_path="logout")
+    def phr_profile__logout(self, request):
+        validated_data = self.validate_request(request)
+
+        cache.set(
+            f"{PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX}{validated_data['access_token']}",
+            "invalidated_on_logout",
+            timeout=1800,
+        )
+
+        cache.set(
+            f"{PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX}{validated_data['refresh_token']}",
+            "invalidated_on_logout",
+            timeout=1800,
+        )
+
+        remove_cached_phr_tokens(abha_health_id=request.user.abha_address)
+
+        try:
+            x_token = self._get_x_token(request)
+            result = PhrProfileService.phr__profile__logout({"x_token": x_token})
+
+            return Response(
+                {
+                    "detail": result.get("message", "Successfully logged out"),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception:
+            return Response(
+                {
+                    "detail": "Successfully logged out from local session. There might have been an issue with external logout.",
+                },
+                status=status.HTTP_200_OK,
+            )

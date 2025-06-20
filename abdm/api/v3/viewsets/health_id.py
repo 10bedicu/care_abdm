@@ -73,9 +73,7 @@ class HealthIdViewSet(GenericViewSet):
             external_id=validated_data.get("patient")
         ).first()
 
-        if not AuthorizationController.call(
-            "can_create_patient", self.request.user
-        ):
+        if not AuthorizationController.call("can_create_patient", self.request.user):
             return Response(
                 {
                     "detail": "Patient not found or you do not have permission to access the patient",

@@ -75,3 +75,13 @@ class PhrProfileUpdateSerializer(Serializer):
     district_name = CharField(max_length=100, required=True)
     pincode = CharField(max_length=6, required=True)
     profile_photo = CharField(max_length=1000, required=False, allow_blank=True)
+
+
+class PhrProfileResetPasswordSerializer(Serializer):
+    abha_address = CharField(max_length=50, min_length=3, required=True)
+    password = CharField(write_only=True, min_length=8, required=True)
+
+
+class PhrProfileLogoutSerializer(Serializer):
+    access_token = CharField(required=True, write_only=True)
+    refresh_token = CharField(required=True, write_only=True)
