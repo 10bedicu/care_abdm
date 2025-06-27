@@ -8,7 +8,7 @@ from rest_framework.serializers import (
 )
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from care_abdm.abdm.authentication import PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX
+from abdm.authentication import PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX
 
 
 class PhrEnrollmentSendOtpSerializer(Serializer):
@@ -58,10 +58,10 @@ class PhrEnrollmentAbhaAddressExistsSerializer(Serializer):
 
 
 class PhrAddressDetailsSerializer(Serializer):
-    abha_address = CharField(max_length=50, required=True)
+    abha_address = CharField(max_length=50, min_length=3, required=True)
     address = CharField(max_length=255, required=True)
     day_of_birth = CharField(max_length=2, required=False, allow_blank=True)
-    district_code = CharField(max_length=3, min_length=3, required=True)
+    district_code = CharField(max_length=3, required=True)
     district_name = CharField(max_length=100, required=True)
     email = CharField(max_length=100, required=False, allow_blank=True)
     profile_photo = CharField(required=False, allow_blank=True)
@@ -73,7 +73,7 @@ class PhrAddressDetailsSerializer(Serializer):
     month_of_birth = CharField(max_length=2, required=False, allow_blank=True)
     password = CharField(write_only=True, min_length=8, required=False)
     pincode = CharField(max_length=6, required=True)
-    state_code = CharField(max_length=2, min_length=2, required=True)
+    state_code = CharField(max_length=2, required=True)
     state_name = CharField(max_length=100, required=True)
     year_of_birth = CharField(max_length=4, required=True)
 

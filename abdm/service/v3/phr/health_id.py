@@ -61,32 +61,56 @@ class PhrHealthIdService:
         return "Unknown error occurred at ABDM's end while processing the request. Please try again later."
 
     @staticmethod
-    def phr__enrollment__request__otp(
-        data: PhrEnrollmentRequestOtpBody,
-    ) -> PhrEnrollmentRequestOtpResponse:
-        payload = {
-            "scope": data.get("scope"),
-            "loginHint": data.get("type"),
-            "loginId": encrypt_message(data.get("value")),
-            "otpSystem": data.get("otp_system"),
+    def _make_request(
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        params: dict | None = None,
+        headers: dict | None = None,
+    ):
+        default_headers = {
+            "REQUEST-ID": uuid(),
+            "TIMESTAMP": timestamp(),
         }
+        if headers:
+            default_headers.update(headers)
 
-        path = "/phr/app/enrollment/request/otp"
-        response = PhrHealthIdService.request.post(
-            path,
-            payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-            },
-        )
+        if method.upper() == "GET":
+            response = PhrHealthIdService.request.get(
+                path, params=params, headers=default_headers
+            )
+        elif method.upper() == "POST":
+            response = PhrHealthIdService.request.post(
+                path, payload, headers=default_headers
+            )
+        else:
+            raise ABDMAPIException(f"Unsupported HTTP method: {method}")
 
         if response.status_code != 200:
             raise ABDMAPIException(
                 detail=PhrHealthIdService.handle_error(response.json())
             )
 
-        return response.json()
+        return response
+
+    @staticmethod
+    def phr__enrollment__request__otp(
+        data: PhrEnrollmentRequestOtpBody,
+    ) -> PhrEnrollmentRequestOtpResponse:
+        payload = {
+            "scope": data.get("scope"),
+            "loginHint": data.get("type"),
+            "loginId": encrypt_message(
+                data.get("value"), data.get("type") != "abha-number"
+            ),
+            "otpSystem": data.get("otp_system"),
+        }
+
+        return PhrHealthIdService._make_request(
+            "POST",
+            "/phr/app/enrollment/request/otp",
+            payload,
+        ).json()
 
     @staticmethod
     def phr__enrollment__verify__otp(
@@ -103,22 +127,11 @@ class PhrHealthIdService:
             },
         }
 
-        path = "/phr/app/enrollment/verify"
-        response = PhrHealthIdService.request.post(
-            path,
+        return PhrHealthIdService._make_request(
+            "POST",
+            "/phr/app/enrollment/verify",
             payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
-            )
-
-        return response.json()
+        ).json()
 
     @staticmethod
     def phr__enrollment__abha_address__suggestion(
@@ -133,43 +146,25 @@ class PhrHealthIdService:
             "dayOfBirth": data.get("day_of_birth"),
         }
 
-        path = "/phr/app/enrollment/suggestion"
-        response = PhrHealthIdService.request.post(
-            path,
+        return PhrHealthIdService._make_request(
+            "POST",
+            "/phr/app/enrollment/suggestion",
             payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
-            )
-
-        return response.json()
+        ).json()
 
     @staticmethod
     def phr__enrollment__abha_address__exists(
         data: PhrEnrollmentAbhaAddressExistsBody,
     ) -> bool:
-        path = "/phr/app/enrollment/isExists"
-        response = PhrHealthIdService.request.get(
-            path,
-            params={"abhaAddress": data.get("abha_address")},
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
+        try:
+            response = PhrHealthIdService._make_request(
+                "GET",
+                "/phr/app/enrollment/isExists",
+                params={"abhaAddress": data.get("abha_address")},
             )
-
-        return response.content.decode().lower() == "true"
+            return response.content.decode().strip().lower() == "true"
+        except (UnicodeDecodeError, AttributeError):
+            return False
 
     @staticmethod
     def phr__enrollment__enrol__abha_address(
@@ -192,22 +187,11 @@ class PhrHealthIdService:
             "txnId": data.get("transaction_id"),
         }
 
-        path = "/phr/app/enrollment/enrol"
-        response = PhrHealthIdService.request.post(
-            path,
+        return PhrHealthIdService._make_request(
+            "POST",
+            "/phr/app/enrollment/enrol",
             payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
-            )
-
-        return response.json()
+        ).json()
 
     @staticmethod
     def phr__login__request__otp(
@@ -216,26 +200,17 @@ class PhrHealthIdService:
         payload = {
             "scope": data.get("scope"),
             "loginHint": data.get("type"),
-            "loginId": encrypt_message(data.get("value")),
+            "loginId": encrypt_message(
+                data.get("value"), data.get("type") != "abha-number"
+            ),
             "otpSystem": data.get("otp_system"),
         }
 
-        path = "/phr/app/login/request/otp"
-        response = PhrHealthIdService.request.post(
-            path,
+        return PhrHealthIdService._make_request(
+            "POST",
+            "/phr/app/login/request/otp",
             payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
-            )
-
-        return response.json()
+        ).json()
 
     @staticmethod
     def phr__login__verify__otp(
@@ -251,22 +226,12 @@ class PhrHealthIdService:
                 },
             },
         }
-        path = "/phr/app/login/verify"
-        response = PhrHealthIdService.request.post(
-            path,
+
+        return PhrHealthIdService._make_request(
+            "POST",
+            "/phr/app/login/verify",
             payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
-            )
-
-        return response.json()
+        ).json()
 
     @staticmethod
     def phr__login__verify__password(
@@ -282,22 +247,12 @@ class PhrHealthIdService:
                 },
             },
         }
-        path = "/phr/app/login/verify"
-        response = PhrHealthIdService.request.post(
-            path,
+
+        return PhrHealthIdService._make_request(
+            "POST",
+            "/phr/app/login/verify",
             payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
-            )
-
-        return response.json()
+        ).json()
 
     @staticmethod
     def phr__login__verify__user(
@@ -308,23 +263,16 @@ class PhrHealthIdService:
             "txnId": data.get("transaction_id"),
         }
 
-        path = "/phr/app/login/verify/user"
-        response = PhrHealthIdService.request.post(
-            path,
+        headers = {
+            "T-token": f"Bearer {data.get('t_token', '')}",
+        }
+
+        return PhrHealthIdService._make_request(
+            "POST",
+            "/phr/app/login/verify/user",
             payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "T-TOKEN": f"Bearer {data.get('t_token', '')}",
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
-            )
-
-        return response.json()
+            headers=headers,
+        ).json()
 
     @staticmethod
     def phr__login_search_auth_methods(
@@ -334,19 +282,8 @@ class PhrHealthIdService:
             "abhaAddress": data.get("abha_address"),
         }
 
-        path = "/phr/app/login/search"
-        response = PhrHealthIdService.request.post(
-            path,
+        return PhrHealthIdService._make_request(
+            "POST",
+            "/phr/app/login/search",
             payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-            },
-        )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrHealthIdService.handle_error(response.json())
-            )
-
-        return response.json()
+        ).json()

@@ -9,6 +9,7 @@ CREATE_OR_LINK_ABHA_NUMBER = {
                 "create_via_aadhaar_demographics",
                 "create_via_aadhaar_otp",
                 "link_via_otp",
+                "link_via_password",
                 "scan_and_pull",
             ],
         },
