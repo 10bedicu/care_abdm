@@ -13,10 +13,10 @@ from abdm.service.v3.types.health_id import (
     ProfileAccountResponse,
 )
 from abdm.service.v3.types.phr.profile import (
-    PhrProfileCardBody,
-    PhrProfileCardResponse,
     PhrProfileLinkDelinkBody,
     PhrProfileLinkDelinkResponse,
+    PhrProfileLogoutBody,
+    PhrProfileLogoutResponse,
     PhrProfileRequestOtpBody,
     PhrProfileRequestOtpResponse,
     PhrProfileResetPasswordBody,
@@ -67,63 +67,80 @@ class PhrProfileService:
         return "Unknown error occurred at ABDM's end while processing the request. Please try again later."
 
     @staticmethod
-    def phr__request__token(
-        data: PhrRequestTokenBody,
-    ) -> PhrRequestTokenResponse:
-        path = "/phr/app/login/profile/request/token"
+    def _make_request(
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        params: dict | None = None,
+        headers: dict | None = None,
+        expected_status: int = 200,
+    ):
+        default_headers = {
+            "REQUEST-ID": uuid(),
+            "TIMESTAMP": timestamp(),
+        }
+        if headers:
+            default_headers.update(headers)
 
-        response = PhrProfileService.request.get(
-            path,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "R-TOKEN": f"Bearer {data.get('r_token', '')}",
-            },
-        )
+        if method.upper() == "GET":
+            response = PhrProfileService.request.get(
+                path, params=params, headers=default_headers
+            )
+        elif method.upper() == "POST":
+            response = PhrProfileService.request.post(
+                path, payload, headers=default_headers
+            )
+        else:
+            raise ABDMAPIException(f"Unsupported HTTP method: {method}")
 
-        if response.status_code != 200:
+        if response.status_code != expected_status:
             raise ABDMAPIException(
                 detail=PhrProfileService.handle_error(response.json())
             )
+
+        return response
+
+    @staticmethod
+    def phr__request__token(
+        data: PhrRequestTokenBody,
+    ) -> PhrRequestTokenResponse:
+        headers = {
+            "R-TOKEN": f"Bearer {data.get('r_token', '')}",
+        }
+
+        response = PhrProfileService._make_request(
+            "GET",
+            "/phr/app/login/profile/request/token",
+            headers=headers,
+        )
 
         return response.json()
 
     @staticmethod
     def phr__profile(data: ProfileAccountBody) -> ProfileAccountResponse:
-        path = "/phr/app/login/profile"
-        response = PhrProfileService.request.get(
-            path,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
-        )
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
 
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        response = PhrProfileService._make_request(
+            "GET",
+            "/phr/app/login/profile",
+            headers=headers,
+        )
 
         return response.json()
 
     @staticmethod
     def phr__profile__switch(data: PhrProfileSwitchBody) -> PhrProfileSwitchResponse:
-        path = "/phr/app/login/profile/switch-profile"
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
 
-        response = PhrProfileService.request.get(
-            path,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
+        response = PhrProfileService._make_request(
+            "GET",
+            "/phr/app/login/profile/switch-profile",
+            headers=headers,
         )
-
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
 
         return response.json()
 
@@ -136,40 +153,31 @@ class PhrProfileService:
             "txnId": data.get("transaction_id"),
         }
 
-        path = "/phr/app/login/profile/verify/switch-profile/user"
-        response = PhrProfileService.request.post(
-            path,
-            payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "T-TOKEN": f"Bearer {data.get('t_token', '')}",
-            },
-        )
+        headers = {
+            "T-TOKEN": f"Bearer {data.get('t_token', '')}",
+        }
 
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        response = PhrProfileService._make_request(
+            "POST",
+            "/phr/app/login/profile/verify/switch-profile/user",
+            payload,
+            headers=headers,
+        )
 
         return response.json()
 
     @staticmethod
-    def phr_profile__card(data: PhrProfileCardBody) -> PhrProfileCardResponse:
-        path = "/phr/app/login/profile/phrCard"
-        response = PhrProfileService.request.get(
-            path,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
-        )
+    def phr_profile__card(data: ProfileAccountBody) -> bytes:
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
 
-        if response.status_code != 202:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        response = PhrProfileService._make_request(
+            "GET",
+            "/phr/app/login/profile/phrCard",
+            headers=headers,
+            expected_status=202,
+        )
 
         return response.content
 
@@ -180,25 +188,22 @@ class PhrProfileService:
         payload = {
             "scope": data.get("scope"),
             "loginHint": data.get("type"),
-            "loginId": encrypt_message(data.get("value")),
+            "loginId": encrypt_message(
+                data.get("value"), data.get("type") != "abha-number"
+            ),
             "otpSystem": data.get("otp_system"),
         }
 
-        path = "/phr/app/login/profile/request/otp"
-        response = PhrProfileService.request.post(
-            path,
-            payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
-        )
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
 
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        response = PhrProfileService._make_request(
+            "POST",
+            "/phr/app/login/profile/request/otp",
+            payload,
+            headers=headers,
+        )
 
         return response.json()
 
@@ -212,25 +217,24 @@ class PhrProfileService:
                 "authMethods": ["otp"],
                 "otp": {
                     "txnId": data.get("transaction_id"),
-                    "otpValue": encrypt_message(data.get("otp")),
+                    "otpValue": encrypt_message(
+                        data.get("otp"),
+                        "abha-login" not in data.get("scope"),
+                    ),
                 },
             },
         }
-        path = "/phr/app/login/profile/verify"
-        response = PhrProfileService.request.post(
-            path,
-            payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
-        )
 
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
+
+        response = PhrProfileService._make_request(
+            "POST",
+            "/phr/app/login/profile/verify",
+            payload,
+            headers=headers,
+        )
 
         return response.json()
 
@@ -244,25 +248,22 @@ class PhrProfileService:
             "transactionId": data.get("transaction_id"),
         }
 
-        if action == "LINK":
-            path = "/phr/app/login/profile/link"
-        else:
-            path = "/phr/app/login/profile/de-link"
-
-        response = PhrProfileService.request.post(
-            path,
-            payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
+        path = (
+            "/phr/app/login/profile/link"
+            if action == "LINK"
+            else "/phr/app/login/profile/de-link"
         )
 
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
+
+        response = PhrProfileService._make_request(
+            "POST",
+            path,
+            payload,
+            headers=headers,
+        )
 
         return response.json()
 
@@ -273,21 +274,17 @@ class PhrProfileService:
         payload = {
             "transactionId": data.get("transaction_id"),
         }
-        path = "/phr/app/login/profile/set-preffered/abha-address"
-        response = PhrProfileService.request.post(
-            path,
-            payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
-        )
 
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
+
+        response = PhrProfileService._make_request(
+            "POST",
+            "/phr/app/login/profile/set-preffered/abha-address",
+            payload,
+            headers=headers,
+        )
 
         return response.json()
 
@@ -297,21 +294,16 @@ class PhrProfileService:
     ) -> PhrProfileUpdateResponse:
         payload = data.get("profile_data")
 
-        path = "/phr/app/login/profile/updateProfile"
-        response = PhrProfileService.request.post(
-            path,
-            payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
-        )
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
 
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        response = PhrProfileService._make_request(
+            "POST",
+            "/phr/app/login/profile/updateProfile",
+            payload,
+            headers=headers,
+        )
 
         return response.json()
 
@@ -325,45 +317,36 @@ class PhrProfileService:
                 "authMethods": ["password"],
                 "password": {
                     "abhaAddress": data.get("abha_address"),
-                    "password": encrypt_message(data.get("password")),
+                    "password": encrypt_message(data.get("password"), is_phr=True),
                 },
             },
         }
-        path = "/phr/app/login/profile/verify"
-        response = PhrProfileService.request.post(
-            path,
-            payload,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
-        )
 
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
+
+        response = PhrProfileService._make_request(
+            "POST",
+            "/phr/app/login/profile/verify",
+            payload,
+            headers=headers,
+        )
 
         return response.json()
 
     @staticmethod
     def phr__profile__logout(
-        data: ProfileAccountBody,
-    ) -> ProfileAccountResponse:
-        path = "/phr/app/login/profile/request/logout"
-        response = PhrProfileService.request.get(
-            path,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-token": f"Bearer {data.get('x_token', '')}",
-            },
-        )
+        data: PhrProfileLogoutBody,
+    ) -> PhrProfileLogoutResponse:
+        headers = {
+            "X-token": f"Bearer {data.get('x_token', '')}",
+        }
 
-        if response.status_code != 200:
-            raise ABDMAPIException(
-                detail=PhrProfileService.handle_error(response.json())
-            )
+        response = PhrProfileService._make_request(
+            "GET",
+            "/phr/app/login/profile/request/logout",
+            headers=headers,
+        )
 
         return response.json()

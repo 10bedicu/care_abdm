@@ -168,10 +168,7 @@ class PhrProfileViewSet(GenericViewSet):
             timeout=1800,
         )
 
-        return Response(
-            result,
-            status=status.HTTP_200_OK,
-        )
+        return Response(result, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="get_profile")
     def phr_profile(self, request):
@@ -181,20 +178,13 @@ class PhrProfileViewSet(GenericViewSet):
 
         self._update_abha_from_profile(profile)
 
-        return Response(
-            profile,
-            status=status.HTTP_200_OK,
-        )
+        return Response(profile, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="switch")
     def phr_profile__switch(self, request):
         x_token = self._get_x_token(request)
 
-        result = PhrProfileService.phr__profile__switch(
-            {
-                "x_token": x_token,
-            }
-        )
+        result = PhrProfileService.phr__profile__switch({"x_token": x_token})
 
         cache.set(
             f"{PHR_PROFILE_SWITCH_VERIFY_TOKEN_CACHE_KEY}:{result.get('txnId')}",
@@ -220,7 +210,7 @@ class PhrProfileViewSet(GenericViewSet):
 
         if not t_token:
             return Response(
-                {"detail": "Token expired or not found."},
+                {"detail": "Session expired. Please try again."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -234,7 +224,7 @@ class PhrProfileViewSet(GenericViewSet):
 
         if not result.get("token"):
             return Response(
-                {"detail": "User verification failed."},
+                {"detail": "User verfication failed. Please try again."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -328,9 +318,7 @@ class PhrProfileViewSet(GenericViewSet):
 
         if result.get("authResult") == "failed":
             return Response(
-                {
-                    "detail": result.get("message"),
-                },
+                {"detail": result.get("message")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -344,9 +332,7 @@ class PhrProfileViewSet(GenericViewSet):
             )
 
             return Response(
-                {
-                    "detail": result.get("message"),
-                },
+                {"detail": result.get("message")},
                 status=status.HTTP_200_OK,
             )
 
@@ -359,16 +345,12 @@ class PhrProfileViewSet(GenericViewSet):
             )
 
             return Response(
-                {
-                    "abhaAddress": result.get("abhaAddress"),
-                },
+                {"abhaAddress": result.get("abhaAddress")},
                 status=status.HTTP_200_OK,
             )
 
         return Response(
-            {
-                "detail": result.get("message"),
-            },
+            {"detail": result.get("message")},
             status=status.HTTP_200_OK,
         )
 
@@ -401,9 +383,7 @@ class PhrProfileViewSet(GenericViewSet):
             }
         )
 
-        return Response(
-            status=status.HTTP_200_OK,
-        )
+        return Response(status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="reset_password")
     def phr_profile__reset__password(self, request):
@@ -422,17 +402,12 @@ class PhrProfileViewSet(GenericViewSet):
 
         if result.get("authResult") == "failure":
             return Response(
-                {
-                    "detail": result.get("message")
-                    or "Password update failed. Please try again.",
-                },
+                {"detail": result.get("message")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         return Response(
-            {
-                "detail": result.get("message"),
-            },
+            {"detail": result.get("message")},
             status=status.HTTP_200_OK,
         )
 
@@ -459,9 +434,7 @@ class PhrProfileViewSet(GenericViewSet):
             remove_cached_phr_tokens(abha_health_id=request.user.abha_address)
 
             return Response(
-                {
-                    "detail": result.get("message", "Successfully logged out"),
-                },
+                {"detail": result.get("message", "Successfully logged out")},
                 status=status.HTTP_200_OK,
             )
 
@@ -469,8 +442,6 @@ class PhrProfileViewSet(GenericViewSet):
             remove_cached_phr_tokens(abha_health_id=request.user.abha_address)
 
             return Response(
-                {
-                    "detail": "Successfully logged out",
-                },
+                {"detail": "Successfully logged out"},
                 status=status.HTTP_200_OK,
             )

@@ -1,7 +1,6 @@
 from typing import Literal, TypedDict
 
 from abdm.service.v3.types.health_id import Token, User
-from care_abdm.abdm.service.v3.types.phr.health_id import PhrDetails
 
 
 class PhrRequestTokenBody(TypedDict):
@@ -33,14 +32,7 @@ class PhrProfileSwitchVerifyUserResponse(TypedDict):
     expiresIn: int
     refreshToken: str
     refreshExpiresIn: int
-
-
-class PhrProfileCardBody(TypedDict):
-    x_token: str
-
-
-class PhrProfileCardResponse(TypedDict):
-    pass
+    switchProfileEnabled: bool
 
 
 class PhrProfileRequestOtpBody(TypedDict):
@@ -88,15 +80,17 @@ class PhrProfileVerifyOtpResponse(TypedDict):
 class PhrProfileLinkDelinkBody(TypedDict):
     action: Literal["LINK", "DE_LINK"]
     transaction_id: str
+    x_token: str
 
 
 class PhrProfileLinkDelinkResponse(TypedDict):
-    authResult: Literal["success", "failure"]
     message: str
+    authResult: Literal["success", "failure"]
 
 
 class PhrSelectPreferredAbhaBody(TypedDict):
     transaction_id: str
+    x_token: str
 
 
 class PhrSelectPreferredAbhaResponse(TypedDict):
@@ -104,21 +98,21 @@ class PhrSelectPreferredAbhaResponse(TypedDict):
     status: Literal["ACTIVE"]
 
 
-class PhrProfileUpdateData(TypedDict):
+class PhrDetails(TypedDict):
     address: str
-    first_name: str
-    middle_name: str | None
-    last_name: str | None
+    firstName: str
+    middleName: str
+    lastName: str
     gender: Literal["M", "F", "O"]
-    day_of_birth: str | None
-    month_of_birth: str | None
-    year_of_birth: str
-    state_code: str
-    state_name: str
-    district_code: str
-    district_name: str
-    pincode: str
-    profile_photo: str | None
+    dayOfBirth: str
+    monthOfBirth: str
+    yearOfBirth: str
+    stateCode: str
+    stateName: str
+    districtCode: str
+    districtName: str
+    pinCode: str
+    profilePhoto: str
 
 
 class PhrProfileUpdateBody(TypedDict):
@@ -138,9 +132,12 @@ class PhrProfileResetPasswordBody(TypedDict):
 
 class PhrProfileResetPasswordResponse(TypedDict):
     message: str
-    timestamp: str
+    authResult: Literal["success", "failure"]
+
+
+class PhrProfileLogoutBody(TypedDict):
+    x_token: str
 
 
 class PhrProfileLogoutResponse(TypedDict):
     message: str
-    authResult: Literal["success", "failure"]
