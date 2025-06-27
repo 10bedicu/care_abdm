@@ -83,8 +83,6 @@ class PhrSessionUser:
     is_anonymous = False
 
     def __init__(self, abha_address: str, record_id: int):
-        if not isinstance(abha_address, str):
-            raise ValueError("abha_address must be a string.")
         self.abha_address = abha_address
         self.id = record_id
 

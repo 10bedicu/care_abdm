@@ -269,13 +269,13 @@ class PhrAuthViewSet(GenericViewSet):
 
         phr_details_camel = {
             "abhaAddress": self._normalize_abha_address(
-                phr_details.get("abha_address", "")
+                phr_details.get("abha_address")
             ),
             "address": phr_details.get("address"),
             "dayOfBirth": phr_details.get("day_of_birth", ""),
             "districtCode": phr_details.get("district_code"),
             "districtName": phr_details.get("district_name"),
-            "email": phr_details.get("email", ""),
+            "email": phr_details.get("email"),
             "profilePhoto": phr_details.get("profile_photo", ""),
             "firstName": phr_details.get("first_name"),
             "gender": phr_details.get("gender"),
@@ -283,7 +283,7 @@ class PhrAuthViewSet(GenericViewSet):
             "middleName": phr_details.get("middle_name", ""),
             "mobile": phr_details.get("mobile"),
             "monthOfBirth": phr_details.get("month_of_birth", ""),
-            "password": phr_details.get("password", ""),
+            "password": phr_details.get("password"),
             "pinCode": phr_details.get("pincode"),
             "stateCode": phr_details.get("state_code"),
             "stateName": phr_details.get("state_name"),
@@ -479,7 +479,9 @@ class PhrAuthViewSet(GenericViewSet):
             type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
             meta_data={
                 "abha_number": str(abha_number.external_id),
-                "method": "link_via_otp",  # TODO : NEED TO CHANGE THIS FOR PASSWORD
+                "method": "link_via_password"
+                if verify_system == "password"
+                else "link_via_otp",
                 "type": "abha-address",
                 "system": verify_system,
             },
@@ -586,7 +588,6 @@ class PhrAuthViewSet(GenericViewSet):
 
         return Response(
             {
-                "abha_number": result.get("healthIdNumber"),
                 "auth_methods": result.get("authMethods"),
             },
             status=status.HTTP_200_OK,

@@ -44,12 +44,16 @@ def uuid():
     return str(uuid4())
 
 
-def encrypt_message(message: str):
+def encrypt_message(message: str, is_phr: bool = True):
+    if is_phr:
+        path = "/v3/phr/app/login/public/certificate"
+    else:
+        path = "/v3/profile/public/certificate"
     rsa_public_key = RSA.importKey(
         b64decode(
             Request(settings.ABDM_ABHA_URL)
             .get(
-                "/v3/profile/public/certificate",
+                path,
                 None,
                 {"TIMESTAMP": timestamp(), "REQUEST-ID": uuid()},
             )
@@ -285,7 +289,7 @@ PHR_ACCESS_TOKEN_CACHE_TIMEOUT = 1800
 PHR_REFRESH_TOKEN_CACHE_TIMEOUT = 129600
 
 
-def cache_phr_tokens(self, abha_health_id, access_token, refresh_token):
+def cache_phr_tokens(abha_health_id, access_token, refresh_token):
     cache.set(
         f"{PHR_ACCESS_TOKEN_PREFIX}{abha_health_id}",
         access_token,
@@ -299,6 +303,6 @@ def cache_phr_tokens(self, abha_health_id, access_token, refresh_token):
     )
 
 
-def remove_cached_phr_tokens(self, abha_health_id):
+def remove_cached_phr_tokens(abha_health_id):
     cache.delete(f"{PHR_ACCESS_TOKEN_PREFIX}{abha_health_id}")
     cache.delete(f"{PHR_REFRESH_TOKEN_PREFIX}{abha_health_id}")
