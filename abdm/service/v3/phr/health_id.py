@@ -122,7 +122,10 @@ class PhrHealthIdService:
                 "authMethods": ["otp"],
                 "otp": {
                     "txnId": data.get("transaction_id"),
-                    "otpValue": encrypt_message(data.get("otp")),
+                    "otpValue": encrypt_message(
+                        data.get("otp"),
+                        "abha-login" not in data.get("scope"),
+                    ),
                 },
             },
         }
@@ -177,7 +180,7 @@ class PhrHealthIdService:
 
         for field in encrypt_fields:
             phr_payload[field] = (
-                encrypt_message(phr_details.get(field, ""))
+                encrypt_message(phr_details.get(field), is_phr=True)
                 if phr_details.get(field)
                 else ""
             )
@@ -222,7 +225,10 @@ class PhrHealthIdService:
                 "authMethods": ["otp"],
                 "otp": {
                     "txnId": data.get("transaction_id"),
-                    "otpValue": encrypt_message(data.get("otp")),
+                    "otpValue": encrypt_message(
+                        data.get("otp"),
+                        "abha-login" not in data.get("scope"),
+                    ),
                 },
             },
         }
@@ -243,7 +249,7 @@ class PhrHealthIdService:
                 "authMethods": ["password"],
                 "password": {
                     "abhaAddress": data.get("abha_address"),
-                    "password": encrypt_message(data.get("password")),
+                    "password": encrypt_message(data.get("password"), is_phr=True),
                 },
             },
         }
