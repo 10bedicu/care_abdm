@@ -44,7 +44,7 @@ def uuid():
     return str(uuid4())
 
 
-def encrypt_message(message: str, is_phr: bool = True):
+def encrypt_message(message: str, is_phr: bool = False):
     if is_phr:
         path = "/v3/phr/app/login/public/certificate"
     else:
