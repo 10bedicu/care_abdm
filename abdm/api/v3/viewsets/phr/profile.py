@@ -361,7 +361,6 @@ class PhrProfileViewSet(GenericViewSet):
             return Response(
                 {
                     "abhaAddress": result.get("abhaAddress"),
-                    "status": result.get("status"),
                 },
                 status=status.HTTP_200_OK,
             )
@@ -453,11 +452,11 @@ class PhrProfileViewSet(GenericViewSet):
             timeout=1800,
         )
 
-        remove_cached_phr_tokens(abha_health_id=request.user.abha_address)
-
         try:
             x_token = self._get_x_token(request)
             result = PhrProfileService.phr__profile__logout({"x_token": x_token})
+
+            remove_cached_phr_tokens(abha_health_id=request.user.abha_address)
 
             return Response(
                 {
@@ -467,9 +466,11 @@ class PhrProfileViewSet(GenericViewSet):
             )
 
         except Exception:
+            remove_cached_phr_tokens(abha_health_id=request.user.abha_address)
+
             return Response(
                 {
-                    "detail": "Successfully logged out from local session. There might have been an issue with external logout.",
+                    "detail": "Successfully logged out",
                 },
                 status=status.HTTP_200_OK,
             )

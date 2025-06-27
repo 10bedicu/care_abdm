@@ -69,12 +69,12 @@ class PhrProfileUpdateSerializer(Serializer):
     day_of_birth = CharField(max_length=2, required=False, allow_blank=True)
     month_of_birth = CharField(max_length=2, required=False, allow_blank=True)
     year_of_birth = CharField(max_length=4, required=True)
-    state_code = CharField(max_length=3, min_length=3, required=True)
+    state_code = CharField(max_length=2, required=True)
     state_name = CharField(max_length=100, required=True)
-    district_code = CharField(max_length=3, min_length=3, required=True)
+    district_code = CharField(max_length=3, required=True)
     district_name = CharField(max_length=100, required=True)
     pincode = CharField(max_length=6, required=True)
-    profile_photo = CharField(max_length=1000, required=False, allow_blank=True)
+    profile_photo = CharField(required=False, allow_blank=True)
 
 
 class PhrProfileResetPasswordSerializer(Serializer):

@@ -297,7 +297,7 @@ class PhrProfileService:
     ) -> PhrProfileUpdateResponse:
         payload = data.get("profile_data")
 
-        path = "/phr/app/login/profile/verify"
+        path = "/phr/app/login/profile/updateProfile"
         response = PhrProfileService.request.post(
             path,
             payload,
@@ -320,7 +320,7 @@ class PhrProfileService:
         data: PhrProfileResetPasswordBody,
     ) -> PhrProfileResetPasswordResponse:
         payload = {
-            "scope": ["password-verify", "abha-address-profile"],
+            "scope": ["abha-address-profile", "password-verify"],
             "authData": {
                 "authMethods": ["password"],
                 "password": {
