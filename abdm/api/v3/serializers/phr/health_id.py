@@ -168,6 +168,18 @@ class PhrLoginVerifyUserSerializer(Serializer):
     abha_address = CharField(max_length=50, min_length=3, required=True)
 
 
+class PhrLoginCheckAuthMethodsSerializer(Serializer):
+    abha_address = CharField(max_length=50, min_length=3, required=True)
+    verify_system = ChoiceField(
+        choices=[
+            ("aadhaar", "Aadhaar"),
+            ("abdm", "Abdm"),
+            ("password", "Password"),
+        ],
+        required=True,
+    )
+
+
 class PhrTokenRefreshSerializer(Serializer):
     refresh = CharField()
     access = CharField(read_only=True)

@@ -10,15 +10,13 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from abdm.api.serializers.abha_number import AbhaNumberSerializer
-from abdm.api.v3.serializers.health_id import (
-    AbhaLoginCheckAuthMethodsSerializer,
-)
 from abdm.api.v3.serializers.phr.health_id import (
     PhrEnrollmentAbhaAddressExistsSerializer,
     PhrEnrollmentAbhaAddressSuggestionSerializer,
     PhrEnrollmentEnrolAbhaAddressSerializer,
     PhrEnrollmentSendOtpSerializer,
     PhrEnrollmentVerifyOtpSerializer,
+    PhrLoginCheckAuthMethodsSerializer,
     PhrLoginSendOtpSerializer,
     PhrLoginVerifySerializer,
     PhrLoginVerifyUserSerializer,
@@ -46,7 +44,7 @@ class PhrAuthViewSet(GenericViewSet):
         "phr_login__send_otp": PhrLoginSendOtpSerializer,
         "phr_login__verify": PhrLoginVerifySerializer,
         "phr_login__verify__user": PhrLoginVerifyUserSerializer,
-        "phr_login__check_auth_methods": AbhaLoginCheckAuthMethodsSerializer,
+        "phr_login__check_auth_methods": PhrLoginCheckAuthMethodsSerializer,
         "phr_refresh_token": PhrTokenRefreshSerializer,
     }
 
@@ -380,38 +378,18 @@ class PhrAuthViewSet(GenericViewSet):
 
         login_hint = validated_data.get("type")
         verify_system = validated_data.get("verify_system")
-
         scope = self._build_scope(login_hint, verify_system, "login")
-        token = None
 
         if verify_system == "password":
             result = PhrHealthIdService.phr__login__verify__password(
                 {
                     "scope": scope,
                     "abha_address": self._normalize_abha_address(
-                        validated_data.get("abha_address", "")
+                        validated_data.get("abha_address")
                     ),
                     "password": validated_data.get("password"),
                 }
             )
-
-            if result.get("authResult") == "failed":
-                return Response(
-                    {
-                        "transaction_id": result.get("txnId"),
-                        "detail": result.get("message"),
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            token = {
-                "access_token": result.get("tokens", {}).get("token"),
-                "refresh_token": result.get("tokens", {}).get("refreshToken"),
-                "switchProfileEnabled": result.get("tokens", {}).get(
-                    "switchProfileEnabled"
-                ),
-            }
-
         else:
             result = PhrHealthIdService.phr__login__verify__otp(
                 {
@@ -421,65 +399,56 @@ class PhrAuthViewSet(GenericViewSet):
                 }
             )
 
-            if result.get("authResult") == "failed":
-                return Response(
-                    {
-                        "transaction_id": result.get("txnId"),
-                        "detail": result.get("message"),
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if login_hint != "abha-address":
-                cache.set(
-                    f"{PHR_VERIFY_USER_TOKEN_PREFIX}{result['txnId']}",
-                    result["tokens"]["token"],
-                    timeout=PHR_VERIFY_USER_TOKEN_TIMEOUT,
-                )
-
-                return Response(
-                    {
-                        "transaction_id": result.get("txnId"),
-                        "detail": result.get("message"),
-                        "users": result.get("users"),
-                    },
-                    status=status.HTTP_200_OK,
-                )
-
-            token = {
-                "txn_id": result.get("txnId"),
-                "access_token": result.get("tokens", {}).get("token"),
-                "refresh_token": result.get("tokens", {}).get("refreshToken"),
-                "switchProfileEnabled": result.get("tokens", {}).get(
-                    "switchProfileEnabled"
-                ),
-            }
-
-        if not token:
+        if result.get("authResult") == "failed":
             return Response(
                 {
-                    "detail": "Unable to verify OTP, Please try again later",
+                    "transaction_id": result.get("txnId"),
+                    "detail": result.get("message"),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = PhrProfileService.phr__profile(
-            {"x_token": token.get("access_token")}
-        )
+        if verify_system != "password" and login_hint != "abha-address":
+            cache.set(
+                f"{PHR_VERIFY_USER_TOKEN_PREFIX}{result['txnId']}",
+                result["tokens"]["token"],
+                timeout=PHR_VERIFY_USER_TOKEN_TIMEOUT,
+            )
+            return Response(
+                {
+                    "transaction_id": result.get("txnId"),
+                    "detail": result.get("message"),
+                    "users": result.get("users"),
+                },
+                status=status.HTTP_200_OK,
+            )
 
+        tokens = result.get("tokens", {})
+        access_token = tokens.get("token")
+        refresh_token = tokens.get("refreshToken")
+
+        if not access_token:
+            return Response(
+                {
+                    "detail": "Unable to verify credentials. Please try again later.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profile_result = PhrProfileService.phr__profile({"x_token": access_token})
         abha_number, _ = self._update_abha_from_profile(
             profile_result,
-            access_token=token.get("access_token"),
-            refresh_token=token.get("refresh_token"),
+            access_token=access_token,
+            refresh_token=refresh_token,
         )
 
         Transaction.objects.create(
-            reference_id=token.get("txn_id")
+            reference_id=result.get("txnId")
             or str(validated_data.get("transaction_id")),
             type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
             meta_data={
                 "abha_number": str(abha_number.external_id),
-                "method": "link_via_password"
+                "method": f"link_via_{verify_system}"
                 if verify_system == "password"
                 else "link_via_otp",
                 "type": "abha-address",
@@ -489,14 +458,14 @@ class PhrAuthViewSet(GenericViewSet):
 
         cache_phr_tokens(
             abha_health_id=abha_number.health_id,
-            access_token=token.get("access_token"),
-            refresh_token=token.get("refresh_token"),
+            access_token=access_token,
+            refresh_token=refresh_token,
         )
 
         return Response(
             {
                 "abha_number": AbhaNumberSerializer(abha_number).data,
-                "switchProfileEnabled": token.get("switchProfileEnabled", False),
+                "switchProfileEnabled": tokens.get("switchProfileEnabled", False),
                 **self._get_tokens(
                     abha_address=abha_number.health_id, id=abha_number.id
                 ),
@@ -578,6 +547,8 @@ class PhrAuthViewSet(GenericViewSet):
     def phr_login__check_auth_methods(self, request):
         validated_data = self.validate_request(request)
 
+        verify_system = validated_data.get("verify_system")
+
         result = PhrHealthIdService.phr__login_search_auth_methods(
             {
                 "abha_address": self._normalize_abha_address(
@@ -586,9 +557,27 @@ class PhrAuthViewSet(GenericViewSet):
             }
         )
 
+        auth_methods = result.get("authMethods")
+
+        method_checks = {
+            "password": "PASSWORD",
+            "aadhaar": "AADHAAR_OTP",
+            "abdm": "MOBILE_OTP",
+        }
+
+        required_method = method_checks.get(verify_system)
+        if required_method and required_method not in auth_methods:
+            error_label = method_checks.get(verify_system).replace("_", " ").title()
+            return Response(
+                {
+                    "detail": f"{error_label} method is not supported for this {validated_data.get('abha_address')}. Please try again with a different method.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         return Response(
             {
-                "auth_methods": result.get("authMethods"),
+                "auth_methods": auth_methods,
             },
             status=status.HTTP_200_OK,
         )
