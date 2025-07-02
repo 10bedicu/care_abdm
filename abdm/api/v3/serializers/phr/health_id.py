@@ -71,7 +71,9 @@ class PhrAddressDetailsSerializer(Serializer):
     middle_name = CharField(max_length=100, required=False, allow_blank=True)
     mobile = CharField(max_length=10, required=True)
     month_of_birth = CharField(max_length=2, required=False, allow_blank=True)
-    password = CharField(write_only=True, min_length=8, required=False)
+    password = CharField(
+        write_only=True, min_length=8, required=False, allow_blank=True
+    )
     pincode = CharField(max_length=6, required=True)
     state_code = CharField(max_length=2, required=True)
     state_name = CharField(max_length=100, required=True)

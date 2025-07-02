@@ -295,21 +295,10 @@ class PhrAuthViewSet(GenericViewSet):
             }
         )
 
-        abha_addresses = result.get("phrDetails", {}).get("abhaAddress", [])
-
-        abha_number = AbhaNumber.objects.filter(health_id__in=abha_addresses).first()
-
-        if not abha_number:
-            return Response(
-                {
-                    "detail": "Couldn't enroll abha address, ABHA Number not found, Please try again later",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         profile_result = PhrProfileService.phr__profile(
-            {"x_token": abha_number.access_token}
+            {"x_token": result.get("tokens", {}).get("token")}
         )
+
         abha_number, _ = self._update_abha_from_profile(
             profile_result,
             access_token=result.get("tokens", {}).get("token"),
