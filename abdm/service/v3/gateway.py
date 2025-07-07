@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -58,6 +59,8 @@ from care.emr.models.file_upload import FileUpload
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.questionnaire import QuestionnaireResponse
 
+logger = logging.getLogger(__name__)
+
 
 class GatewayService:
     request = Request(settings.ABDM_GATEWAY_URL)
@@ -90,6 +93,10 @@ class GatewayService:
     def token__generate_token(
         data: TokenGenerateTokenBody,
     ) -> TokenGenerateTokenResponse:
+        logger.debug(
+            f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Initiated Token Generation for {data.get('abha_number')} {data.get('hf_id')}"
+        )
+
         abha_number = data.get("abha_number")
         hf_id = data.get("hf_id", None)
 
@@ -131,6 +138,10 @@ class GatewayService:
         )
 
         if last_generate_token_request:
+            logger.debug(
+                f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Last Generate Token Request found for {abha_number.health_id} {hf_id}"
+            )
+
             return {}
 
         cache.set(
@@ -151,6 +162,10 @@ class GatewayService:
             },
         )
 
+        logger.debug(
+            f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Response for {payload} {response.status_code} {response.json()}"
+        )
+
         if response.status_code != 202:
             raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
 
@@ -158,6 +173,10 @@ class GatewayService:
 
     @staticmethod
     def link__carecontext(data: LinkCarecontextBody) -> LinkCarecontextResponse:
+        logger.debug(
+            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Initiated Care Context Linking for {data.get('care_contexts')} {data.get('patient')} {data.get('hf_id')}"
+        )
+
         patient = data.get("patient")
         if not patient:
             raise ABDMAPIException(detail="Provide a patient to link care context")
@@ -179,7 +198,7 @@ class GatewayService:
             )
 
         reference_id = data.get("reference_id", uuid())
-        Transaction.objects.update_or_create(
+        transaction, created = Transaction.objects.update_or_create(
             reference_id=reference_id,
             defaults={
                 "type": TransactionType.LINK_CARE_CONTEXT,
@@ -194,9 +213,21 @@ class GatewayService:
             },
         )
 
+        logger.debug(
+            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Transaction for {reference_id} {created}"
+        )
+
         link_token = cache.get(f"abdm_link_token__{hf_id}__{abha_number.health_id}")
 
+        logger.debug(
+            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Link Token for {abha_number.health_id} {link_token}"
+        )
+
         if not link_token:
+            logger.debug(
+                f"ABDM_DEBUG__LINK_CARE_CONTEXT :: No Link Token found for {abha_number.health_id} {hf_id}"
+            )
+
             GatewayService.token__generate_token(
                 {
                     "abha_number": abha_number,
@@ -248,6 +279,10 @@ class GatewayService:
                 "X-HIP-ID": hf_id,
                 "X-LINK-TOKEN": link_token,
             },
+        )
+
+        logger.debug(
+            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Response for {payload} {response.status_code} {response.json()}"
         )
 
         if response.status_code != 202:
