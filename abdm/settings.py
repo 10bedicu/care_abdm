@@ -124,6 +124,10 @@ DEFAULTS = {
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
+    "ABHA_NUMBER_CODE_SYSTEM": {
+        "system": "https://care.ohc.network/abha_number",
+        "display": "Abha Number",
+    },
 }
 
 plugin_settings = PluginSettings(

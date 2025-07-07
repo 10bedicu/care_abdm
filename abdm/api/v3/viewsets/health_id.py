@@ -31,8 +31,9 @@ from abdm.service.helper import (
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
-from care.emr.models.patient import Patient
+from care.emr.models.patient import Patient, PatientIdentifier, PatientIdentifierConfig
 from care.security.authorization.base import AuthorizationController
+from care.users.models import User
 
 
 @extend_schema(tags=["ABDM: Health ID"])
@@ -73,9 +74,7 @@ class HealthIdViewSet(GenericViewSet):
             external_id=validated_data.get("patient")
         ).first()
 
-        if not AuthorizationController.call(
-            "can_create_patient", self.request.user
-        ):
+        if not AuthorizationController.call("can_create_patient", self.request.user):
             return Response(
                 {
                     "detail": "Patient not found or you do not have permission to access the patient",
@@ -113,6 +112,36 @@ class HealthIdViewSet(GenericViewSet):
 
         abha_number.patient = patient
         abha_number.save()
+
+        patient_identifier_config, _ = PatientIdentifierConfig.objects.get_or_create(
+            config__system=settings.ABHA_NUMBER_CODE_SYSTEM.get("system"),
+            defaults={
+                "status": "active",
+                "config": {
+                    "use": "official",
+                    "description": settings.ABHA_NUMBER_CODE_SYSTEM.get("display"),
+                    "required": False,
+                    "unique": True,
+                    "regex": "",
+                    "system": settings.ABHA_NUMBER_CODE_SYSTEM.get("system"),
+                    "display": settings.ABHA_NUMBER_CODE_SYSTEM.get("display"),
+                    "retrieve_config": {
+                        "retrieve_with_dob": False,
+                        "retrieve_with_year_of_birth": False,
+                        "retrieve_with_otp": False,
+                    },
+                },
+                "facility": None,
+                "created_by": User.objects.filter(is_superuser=True).first(),
+            },
+        )
+
+        PatientIdentifier.objects.create(
+            patient=patient,
+            config=patient_identifier_config,
+            value=abha_number.abha_number,
+            created_by=request.user,
+        )
 
         hf_care_contexts = generate_care_contexts_for_existing_data(patient)
 
