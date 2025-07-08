@@ -93,7 +93,7 @@ class GatewayService:
     def token__generate_token(
         data: TokenGenerateTokenBody,
     ) -> TokenGenerateTokenResponse:
-        logger.debug(
+        logger.info(
             f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Initiated Token Generation for {data.get('abha_number')} {data.get('hf_id')}"
         )
 
@@ -138,7 +138,7 @@ class GatewayService:
         )
 
         if last_generate_token_request:
-            logger.debug(
+            logger.info(
                 f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Last Generate Token Request found for {abha_number.health_id} {hf_id}"
             )
 
@@ -162,8 +162,8 @@ class GatewayService:
             },
         )
 
-        logger.debug(
-            f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Response for {payload} {response.status_code} {response.json()}"
+        logger.info(
+            f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Response for {payload} {response.status_code} {response.text}"
         )
 
         if response.status_code != 202:
@@ -173,7 +173,7 @@ class GatewayService:
 
     @staticmethod
     def link__carecontext(data: LinkCarecontextBody) -> LinkCarecontextResponse:
-        logger.debug(
+        logger.info(
             f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Initiated Care Context Linking for {data.get('care_contexts')} {data.get('patient')} {data.get('hf_id')}"
         )
 
@@ -213,18 +213,18 @@ class GatewayService:
             },
         )
 
-        logger.debug(
+        logger.info(
             f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Transaction for {reference_id} {created}"
         )
 
         link_token = cache.get(f"abdm_link_token__{hf_id}__{abha_number.health_id}")
 
-        logger.debug(
+        logger.info(
             f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Link Token for {abha_number.health_id} {link_token}"
         )
 
         if not link_token:
-            logger.debug(
+            logger.info(
                 f"ABDM_DEBUG__LINK_CARE_CONTEXT :: No Link Token found for {abha_number.health_id} {hf_id}"
             )
 
@@ -281,8 +281,8 @@ class GatewayService:
             },
         )
 
-        logger.debug(
-            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Response for {payload} {response.status_code} {response.json()}"
+        logger.info(
+            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Response for {payload} {response.status_code} {response.text}"
         )
 
         if response.status_code != 202:

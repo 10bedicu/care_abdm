@@ -103,13 +103,13 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hip/token/on-generate-token")
     def hip__token__on_generate_token(self, request):
-        logger.debug(
-            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Request for {request.data} {request.headers}"
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Request for {request.data!s} {request.headers!s}"
         )
 
         validated_data = self.validate_request(request)
 
-        logger.debug(
+        logger.info(
             f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Validated data for {validated_data}"
         )
 
@@ -135,7 +135,7 @@ class HIPCallbackViewSet(GenericViewSet):
             f"abdm_link_care_context__{hf_id}__{health_id}__*"
         )
 
-        logger.debug(
+        logger.info(
             f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Link Care Context Request Cache Keys for {link_care_context_request_cache_keys}"
         )
 
@@ -143,7 +143,7 @@ class HIPCallbackViewSet(GenericViewSet):
             cached_data = cache.get(request_cache_key)
 
             if cached_data.get("purpose") == "LINK_CARECONTEXT":
-                logger.debug(
+                logger.info(
                     f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Initiated Care Context Linking for {cached_data.get('reference_id')} {cached_data.get('patient')} {cached_data.get('care_contexts')} {cached_data.get('hf_id')}"
                 )
 
@@ -163,13 +163,13 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="link/on_carecontext")
     def link__on_carecontext(self, request):
-        logger.debug(
-            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Request for {request.data} {request.headers}"
+        logger.info(
+            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Request for {request.data!s} {request.headers!s}"
         )
 
         data = self.validate_request(request)
 
-        logger.debug(f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Validated data for {data}")
+        logger.info(f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Validated data for {data}")
 
         # TODO: delete care context transaction if it failed
 
