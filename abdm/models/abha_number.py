@@ -7,6 +7,9 @@ class AbhaNumber(BaseModel):
     abha_number = models.TextField(null=True, blank=True, unique=True)
     health_id = models.TextField(null=True, blank=True, unique=True)
 
+    phr_health_id = models.TextField(null=True, blank=True, unique=True)
+    phr_auto_approve_request_id = models.TextField(null=True, blank=True, unique=True)
+
     deprecated_patient = models.OneToOneField(
         "facility.PatientRegistration",
         related_name="abha_number",
