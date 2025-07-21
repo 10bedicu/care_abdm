@@ -88,7 +88,7 @@ class PhrAuthViewSet(GenericViewSet):
 
         defaults = {
             "abha_number": data.get(abha_key),
-            "health_id": data.get("abhaAddress"),
+            "phr_health_id": data.get("abhaAddress"),
             "name": data.get("name") or data.get("fullName"),
             "first_name": data.get("firstName"),
             "middle_name": data.get("middleName"),
@@ -314,7 +314,7 @@ class PhrAuthViewSet(GenericViewSet):
         )
 
         cache_phr_tokens(
-            abha_health_id=abha_number.health_id,
+            abha_health_id=abha_number.phr_health_id,
             access_token=result.get("tokens", {}).get("token"),
             refresh_token=result.get("tokens", {}).get("refreshToken"),
         )
@@ -326,7 +326,7 @@ class PhrAuthViewSet(GenericViewSet):
                     "switchProfileEnabled", True
                 ),
                 **self._get_tokens(
-                    abha_address=abha_number.health_id, id=abha_number.id
+                    abha_address=abha_number.phr_health_id, id=abha_number.id
                 ),
             },
             status=status.HTTP_200_OK,
@@ -446,7 +446,7 @@ class PhrAuthViewSet(GenericViewSet):
         )
 
         cache_phr_tokens(
-            abha_health_id=abha_number.health_id,
+            abha_health_id=abha_number.phr_health_id,
             access_token=access_token,
             refresh_token=refresh_token,
         )
@@ -456,7 +456,7 @@ class PhrAuthViewSet(GenericViewSet):
                 "abha_number": AbhaNumberSerializer(abha_number).data,
                 "switchProfileEnabled": tokens.get("switchProfileEnabled", False),
                 **self._get_tokens(
-                    abha_address=abha_number.health_id, id=abha_number.id
+                    abha_address=abha_number.phr_health_id, id=abha_number.id
                 ),
             },
             status=status.HTTP_200_OK,
@@ -516,7 +516,7 @@ class PhrAuthViewSet(GenericViewSet):
         )
 
         cache_phr_tokens(
-            abha_health_id=abha_number.health_id,
+            abha_health_id=abha_number.phr_health_id,
             access_token=result.get("token"),
             refresh_token=result.get("refreshToken"),
         )
@@ -526,7 +526,7 @@ class PhrAuthViewSet(GenericViewSet):
                 "abha_number": AbhaNumberSerializer(abha_number).data,
                 "switchProfileEnabled": result.get("switchProfileEnabled", True),
                 **self._get_tokens(
-                    abha_address=abha_number.health_id, id=abha_number.id
+                    abha_address=abha_number.phr_health_id, id=abha_number.id
                 ),
             },
             status=status.HTTP_200_OK,
