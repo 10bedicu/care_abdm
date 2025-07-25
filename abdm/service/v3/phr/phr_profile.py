@@ -12,7 +12,8 @@ from abdm.service.v3.types.health_id import (
     ProfileAccountBody,
     ProfileAccountResponse,
 )
-from abdm.service.v3.types.phr.profile import (
+from abdm.settings import plugin_settings as settings
+from care_abdm.abdm.service.v3.types.phr.phr_profile import (
     PhrProfileLinkDelinkBody,
     PhrProfileLinkDelinkResponse,
     PhrProfileLogoutBody,
@@ -34,7 +35,6 @@ from abdm.service.v3.types.phr.profile import (
     PhrSelectPreferredAbhaBody,
     PhrSelectPreferredAbhaResponse,
 )
-from abdm.settings import plugin_settings as settings
 
 logger = getLogger(__name__)
 

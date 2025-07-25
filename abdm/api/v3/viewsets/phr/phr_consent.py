@@ -22,8 +22,8 @@ from abdm.service.helper import (
     transform_phr_links_data,
 )
 from abdm.service.v3.phr.phr_consent import PhrConsentService
-from abdm.service.v3.phr.profile import PhrProfileService
-from abdm.service.v3.phr.user_init_linking import PhrUserInitLinkingService
+from abdm.service.v3.phr.phr_user_init_linking import PhrUserInitLinkingService
+from care_abdm.abdm.service.v3.phr.phr_profile import PhrProfileService
 
 logger = getLogger(__name__)
 

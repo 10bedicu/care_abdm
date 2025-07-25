@@ -8,7 +8,7 @@ from abdm.service.helper import (
     uuid,
 )
 from abdm.service.request import Request
-from abdm.service.v3.types.phr.user_init_linking import (
+from abdm.service.v3.types.phr.phr_user_init_linking import (
     PhrUserInitLinkingCareContextConfirmBody,
     PhrUserInitLinkingCareContextConfirmResponse,
     PhrUserInitLinkingCareContextDiscoverBody,

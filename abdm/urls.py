@@ -10,6 +10,7 @@ from abdm.api.viewsets.health_facility import HealthFacilityViewSet
 from abdm.api.viewsets.health_information import HealthInformationViewSet
 from care_abdm.abdm.api.v3.viewsets.phr.health_id import PhrAuthViewSet
 from care_abdm.abdm.api.v3.viewsets.phr.phr_consent import PhrConsentViewSet
+from care_abdm.abdm.api.v3.viewsets.phr.phr_profile import PhrProfileViewSet
 from care_abdm.abdm.api.v3.viewsets.phr.phr_subscription import (
     PhrSubscriptionCallbackViewSet,
     PhrSubscriptionViewSet,
@@ -18,7 +19,6 @@ from care_abdm.abdm.api.v3.viewsets.phr.phr_user_init_linking import (
     PhrUserInitLinkingCallbackViewSet,
     PhrUserInitLinkingViewSet,
 )
-from care_abdm.abdm.api.v3.viewsets.phr.profile import PhrProfileViewSet
 
 
 class OptionalSlashRouter(SimpleRouter):

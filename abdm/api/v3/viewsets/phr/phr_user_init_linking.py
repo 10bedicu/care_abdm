@@ -8,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
-from abdm.api.v3.serializers.phr.user_init_linking import (
+from abdm.api.v3.serializers.phr.phr_user_init_linking import (
     PhrUserInitLinkingCareContextConfirmSerializer,
     PhrUserInitLinkingCareContextDiscoverSerializer,
     PhrUserInitLinkingCareContextInitSerializer,
@@ -24,8 +24,8 @@ from abdm.service.helper import (
     PHR_REFRESH_TOKEN_PREFIX,
     transform_phr_links_data,
 )
-from abdm.service.v3.phr.profile import PhrProfileService
-from abdm.service.v3.phr.user_init_linking import PhrUserInitLinkingService
+from abdm.service.v3.phr.phr_user_init_linking import PhrUserInitLinkingService
+from care_abdm.abdm.service.v3.phr.phr_profile import PhrProfileService
 
 logger = getLogger(__name__)
 
