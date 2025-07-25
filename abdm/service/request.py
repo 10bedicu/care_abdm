@@ -109,6 +109,23 @@ class Request:
 
         return self._handle_response(response)
 
+    def put(self, path, data=None, headers=None, auth=None):
+        url = self.url + path
+        payload = json.dumps(data)
+        headers = self.headers(headers, auth)
+
+        response = requests.put(
+            url, data=payload, headers=headers, timeout=settings.ABDM_REQUEST_TIMEOUT
+        )
+
+        if response.status_code == 400 or response.status_code == 401:
+            result = response.json()
+            if "code" in result and result["code"] == "900901":
+                cache.delete(ABDM_TOKEN_CACHE_KEY)
+                return self.put(path, data, headers, auth)
+
+        return self._handle_response(response)
+
     def _handle_response(self, response: requests.Response):
         def custom_json():
             try:
