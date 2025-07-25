@@ -9,6 +9,15 @@ from abdm.api.viewsets.consent import ConsentViewSet
 from abdm.api.viewsets.health_facility import HealthFacilityViewSet
 from abdm.api.viewsets.health_information import HealthInformationViewSet
 from care_abdm.abdm.api.v3.viewsets.phr.health_id import PhrAuthViewSet
+from care_abdm.abdm.api.v3.viewsets.phr.phr_consent import PhrConsentViewSet
+from care_abdm.abdm.api.v3.viewsets.phr.phr_subscription import (
+    PhrSubscriptionCallbackViewSet,
+    PhrSubscriptionViewSet,
+)
+from care_abdm.abdm.api.v3.viewsets.phr.phr_user_init_linking import (
+    PhrUserInitLinkingCallbackViewSet,
+    PhrUserInitLinkingViewSet,
+)
 from care_abdm.abdm.api.v3.viewsets.phr.profile import PhrProfileViewSet
 
 
@@ -40,6 +49,16 @@ router.register("v3/hiu", HIUViewSet, basename="abdm__v3__hiu")
 ## PHR Routes
 router.register("v3/phr/health_id", PhrAuthViewSet, basename="abdm__v3__phr_health_id")
 router.register("v3/phr/profile", PhrProfileViewSet, basename="abdm__v3__phr_profile")
+router.register(
+    "v3/phr/subscription", PhrSubscriptionViewSet, basename="abdm__v3__phr_subscription"
+)
+router.register("v3/phr/consent", PhrConsentViewSet, basename="abdm__v3__phr_consent")
+
+router.register(
+    "v3/phr/user_init_linking",
+    PhrUserInitLinkingViewSet,
+    basename="abdm__v3__phr_user_init_linking",
+)
 
 
 ## Utility Routes
@@ -53,5 +72,18 @@ router.register(
 ## Callback Routes
 router.register("api/v3", HIPCallbackViewSet, basename="abdm__v3__hip__callback")
 router.register("api/v3", HIUCallbackViewSet, basename="abdm__v3__hiu__callback")
+
+## PHR Callback Routes
+router.register(
+    "api/v3",
+    PhrSubscriptionCallbackViewSet,
+    basename="abdm__v3__phr_subscription__callback",
+)
+router.register(
+    "api/v3",
+    PhrUserInitLinkingCallbackViewSet,
+    basename="abdm__v3__phr_user_init_linking__callback",
+)
+
 
 urlpatterns = router.urls
