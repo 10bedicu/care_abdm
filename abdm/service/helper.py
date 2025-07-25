@@ -1,5 +1,5 @@
 from base64 import b64decode, b64encode
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from Crypto.Cipher import PKCS1_OAEP
@@ -8,6 +8,7 @@ from Crypto.PublicKey import RSA
 from django.core.cache import cache
 from django.db.models import Q
 from django.db.models.functions import TruncDate
+from django.utils import timezone
 from rest_framework.exceptions import APIException
 
 from abdm.models.abha_number import AbhaNumber
@@ -308,3 +309,54 @@ def cache_phr_tokens(abha_health_id, access_token, refresh_token):
 def remove_cached_phr_tokens(abha_health_id):
     cache.delete(f"{PHR_ACCESS_TOKEN_PREFIX}{abha_health_id}")
     cache.delete(f"{PHR_REFRESH_TOKEN_PREFIX}{abha_health_id}")
+
+
+def format_abdm_datetime(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def get_default_abdm_period(days=365):
+    now = timezone.now()
+    return {
+        "from": format_abdm_datetime(now + timedelta(seconds=10)),
+        "to": format_abdm_datetime(now + timedelta(days=days)),
+    }
+
+
+def transform_phr_links_data(links_data, include_links=True):
+    patient = links_data.get("patient", {})
+    links = patient.get("links", [])
+
+    hip_groups = {}
+
+    for link in links:
+        hip = link.get("hip", {})
+        hip_id = hip.get("id")
+
+        if not hip_id:
+            continue
+
+        if hip_id not in hip_groups:
+            hip_groups[hip_id] = {"hip": hip, "links": []}
+
+        if include_links:
+            care_contexts = link.get("careContexts", [])
+            for care_context in care_contexts:
+                link_object = {
+                    "patientReference": link.get("referenceNumber"),
+                    "careContextReference": care_context.get("referenceNumber"),
+                    "display": care_context.get("display"),
+                }
+                hip_groups[hip_id]["links"].append(link_object)
+
+    if include_links:
+        transformed_data = [
+            {"hip": group_data["hip"], "careContexts": group_data["links"]}
+            for group_data in hip_groups.values()
+        ]
+    else:
+        transformed_data = [
+            {"hip": group_data["hip"]} for group_data in hip_groups.values()
+        ]
+
+    return transformed_data
