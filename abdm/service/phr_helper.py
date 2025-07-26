@@ -82,7 +82,9 @@ def remove_cached_phr_tokens(abha_health_id):
     cache.delete(f"{PHR_REFRESH_TOKEN_PREFIX}{abha_health_id}")
 
 
-def get_phr_access_token(abha_address: str = "dora8sbx"):
+def get_phr_access_token(abha_address):
+    if not abha_address:
+        abha_address = "dora8sbx"
     abha_address = normalize_abha_address(abha_address)
     access_key = f"{PHR_ACCESS_TOKEN_PREFIX}{abha_address}"
     refresh_key = f"{PHR_REFRESH_TOKEN_PREFIX}{abha_address}"
@@ -117,7 +119,7 @@ def get_default_abdm_period(days=365):
     }
 
 
-def transform_phr_links_data(links_data, include_links=True):
+def transform_phr_links_data(links_data, include_care_contexts=True):
     patient = links_data.get("patient", {})
     links = patient.get("links", [])
 
@@ -133,7 +135,7 @@ def transform_phr_links_data(links_data, include_links=True):
         if hip_id not in hip_groups:
             hip_groups[hip_id] = {"hip": hip, "links": []}
 
-        if include_links:
+        if include_care_contexts:
             care_contexts = link.get("careContexts", [])
             for care_context in care_contexts:
                 link_object = {
@@ -143,7 +145,7 @@ def transform_phr_links_data(links_data, include_links=True):
                 }
                 hip_groups[hip_id]["links"].append(link_object)
 
-    if include_links:
+    if include_care_contexts:
         transformed_data = [
             {"hip": group_data["hip"], "careContexts": group_data["links"]}
             for group_data in hip_groups.values()

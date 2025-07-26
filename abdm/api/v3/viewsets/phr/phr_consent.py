@@ -1,6 +1,5 @@
 from logging import getLogger
 
-from django.core.cache import cache
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
@@ -14,16 +13,9 @@ from abdm.api.v3.serializers.phr.phr_consent import (
     PhrConsentRequestRevokeSerializer,
 )
 from abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
-from abdm.service.phr_helper import (
-    PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
-    PHR_ACCESS_TOKEN_PREFIX,
-    PHR_REFRESH_TOKEN_CACHE_TIMEOUT,
-    PHR_REFRESH_TOKEN_PREFIX,
-    transform_phr_links_data,
-)
+from abdm.service.phr_helper import get_phr_access_token, transform_phr_links_data
 from abdm.service.v3.phr.phr_consent import PhrConsentService
-from abdm.service.v3.phr.phr_user_init_linking import PhrUserInitLinkingService
-from care_abdm.abdm.service.v3.phr.phr_profile import PhrProfileService
+from abdm.service.v3.phr.phr_gateway import PhrGatewayService
 
 logger = getLogger(__name__)
 
@@ -56,10 +48,13 @@ class PhrConsentViewSet(GenericViewSet):
         "phr_consent__auto__approve__update": PhrConsentAutoApproveUpdateSerializer,
     }
 
+    @property
+    def x_token(self):
+        return get_phr_access_token(self.request.user.abha_address)
+
     def get_serializer_class(self):
         if self.action in self.serializer_action_classes:
             return self.serializer_action_classes[self.action]
-
         return super().get_serializer_class()
 
     def validate_request(self, request):
@@ -67,34 +62,11 @@ class PhrConsentViewSet(GenericViewSet):
         serializer.is_valid(raise_exception=True)
         return serializer.validated_data
 
-    def _get_x_token(self, request):
-        # abha_address = self._normalize_abha_address(request.user.abha_address)
-        abha_address = "dora8sbx@sbx"
-
-        access_key = f"{PHR_ACCESS_TOKEN_PREFIX}{abha_address}"
-        refresh_key = f"{PHR_REFRESH_TOKEN_PREFIX}{abha_address}"
-
-        x_token = cache.get(access_key)
-        if x_token:
-            return x_token
-
-        refresh_token = cache.get(refresh_key)
-
-        result = PhrProfileService.phr__request__token({"r_token": refresh_token})
-        tokens = result.get("tokens") or {}
-
-        access_token = tokens.get("token")
-        new_refresh_token = tokens.get("refreshToken")
-
-        cache.set(access_key, access_token, timeout=PHR_ACCESS_TOKEN_CACHE_TIMEOUT)
-        cache.set(
-            refresh_key, new_refresh_token, timeout=PHR_REFRESH_TOKEN_CACHE_TIMEOUT
-        )
-
-        return access_token
-
     def _get_query_params(self, request):
         status_param = request.query_params.get("status", "ALL")
+
+        if status_param not in self.VALID_STATUSES:
+            return None, None, None
 
         try:
             limit = max(int(request.query_params.get("limit", -1)), -1)
@@ -102,14 +74,12 @@ class PhrConsentViewSet(GenericViewSet):
         except (ValueError, TypeError):
             return None, None, None
 
-        if status_param not in self.VALID_STATUSES:
-            return None, None, None
-
         return status_param, limit, offset
 
     def _is_valid_item(self, item, item_type="request"):
         if item_type == "request":
             return all(item.get(field) for field in self.REQUIRED_REQUEST_FIELDS)
+
         if item_type == "artefact":
             consent_detail = item.get("consentDetail")
             return (
@@ -124,11 +94,22 @@ class PhrConsentViewSet(GenericViewSet):
     def _filter_valid_items(self, items, item_type="request"):
         return [item for item in items if self._is_valid_item(item, item_type)]
 
-    def _get_links_for_eligible_status(self, status_value, x_token):
-        if status_value == "REQUESTED":
-            links = PhrUserInitLinkingService.phr__user_initiated_linking__care_context__links(
+    def _build_links_response(self, consent_request):
+        hip_id = consent_request.get("hip", {}).get("id")
+        care_contexts = consent_request.get("careContexts", [])
+
+        if hip_id and care_contexts:
+            return [
                 {
-                    "x_token": x_token,
+                    "hip": consent_request.get("hip"),
+                    "careContexts": consent_request.get("careContexts"),
+                }
+            ]
+
+        if consent_request.get("status") == "REQUESTED":
+            links = PhrGatewayService.phr__gateway__patient__links(
+                {
+                    "x_token": self.x_token,
                 }
             )
             return transform_phr_links_data(links)
@@ -137,26 +118,22 @@ class PhrConsentViewSet(GenericViewSet):
 
     @action(detail=False, methods=["get"], url_path="requests")
     def phr_consent__requests(self, request):
-        x_token = self._get_x_token(request)
-
         status_param, limit, offset = self._get_query_params(request)
-        if status_param is None:
-            return Response([], status=status.HTTP_200_OK)
 
         consent_requests = PhrConsentService.phr__consent__requests(
             {
-                "x_token": x_token,
+                "x_token": self.x_token,
                 "status": status_param,
                 "limit": limit,
                 "offset": offset,
             }
         )
 
-        filter_consent_requests = self._filter_valid_items(
+        filtered_requests = self._filter_valid_items(
             consent_requests.get("requests", []), "request"
         )
 
-        return Response(filter_consent_requests, status=status.HTTP_200_OK)
+        return Response(filtered_requests, status=status.HTTP_200_OK)
 
     @action(
         detail=False,
@@ -164,59 +141,36 @@ class PhrConsentViewSet(GenericViewSet):
         url_path="request/(?P<request_id>[^/.]+)",
     )
     def phr_consent__request(self, request, request_id):
-        x_token = self._get_x_token(request)
-
         consent_request = PhrConsentService.phr__consent__request(
-            {"x_token": x_token, "request_id": request_id}
-        )
-
-        hip_id = consent_request.get("hip", {}).get("id")
-        care_contexts = consent_request.get("careContexts", [])
-
-        if hip_id and care_contexts:
-            return Response(
-                {
-                    "request": consent_request,
-                    "links": [
-                        {
-                            "hip": consent_request.get("hip"),
-                            "careContexts": consent_request.get("careContexts"),
-                        }
-                    ],
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        links = self._get_links_for_eligible_status(
-            consent_request.get("status"), x_token
+            {"x_token": self.x_token, "request_id": request_id}
         )
 
         return Response(
-            {"request": consent_request, "links": links}, status=status.HTTP_200_OK
+            {
+                "request": consent_request,
+                "links": self._build_links_response(consent_request),
+            },
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=False, methods=["get"], url_path="artefacts")
     def phr_consent__artefacts(self, request):
-        x_token = self._get_x_token(request)
-
         status_param, limit, offset = self._get_query_params(request)
-        if status_param is None:
-            return Response([], status=status.HTTP_200_OK)
 
         consent_artefacts = PhrConsentService.phr__consent__artefacts(
             {
-                "x_token": x_token,
+                "x_token": self.x_token,
                 "status": status_param,
                 "limit": limit,
                 "offset": offset,
             }
         )
 
-        filter_consent_artefacts = self._filter_valid_items(
+        filtered_artefacts = self._filter_valid_items(
             consent_artefacts.get("consentArtefacts", []), "artefact"
         )
 
-        return Response(filter_consent_artefacts, status=status.HTTP_200_OK)
+        return Response(filtered_artefacts, status=status.HTTP_200_OK)
 
     @action(
         detail=False,
@@ -224,17 +178,15 @@ class PhrConsentViewSet(GenericViewSet):
         url_path="request/(?P<request_id>[^/.]+)/artefacts",
     )
     def phr_consent__request__artefacts(self, request, request_id):
-        x_token = self._get_x_token(request)
-
         consent_request_artefacts = PhrConsentService.phr__consent__request__artefacts(
-            {"x_token": x_token, "request_id": request_id}
+            {"x_token": self.x_token, "request_id": request_id}
         )
 
-        filter_consent_request_artefacts = self._filter_valid_items(
+        filtered_artefacts = self._filter_valid_items(
             consent_request_artefacts, "artefact"
         )
 
-        return Response(filter_consent_request_artefacts, status=status.HTTP_200_OK)
+        return Response(filtered_artefacts, status=status.HTTP_200_OK)
 
     @action(
         detail=False,
@@ -242,10 +194,8 @@ class PhrConsentViewSet(GenericViewSet):
         url_path="artefact/(?P<artefact_id>[^/.]+)",
     )
     def phr_consent__artefact(self, request, artefact_id):
-        x_token = self._get_x_token(request)
-
         consent_artefact = PhrConsentService.phr__consent__artefact(
-            {"x_token": x_token, "artefact_id": artefact_id}
+            {"x_token": self.x_token, "artefact_id": artefact_id}
         )
 
         consent_detail = consent_artefact.get("consentDetail")
@@ -270,20 +220,16 @@ class PhrConsentViewSet(GenericViewSet):
     )
     def phr_consent__request__approve(self, request, request_id):
         validated_data = self.validate_request(request)
-        x_token = self._get_x_token(request)
 
         result = PhrConsentService.phr__consent__request__approve(
             {
-                "x_token": x_token,
+                "x_token": self.x_token,
                 "request_id": request_id,
                 "consents": validated_data.get("consents"),
             }
         )
 
-        return Response(
-            {"detail": result.get("message")},
-            status=status.HTTP_200_OK,
-        )
+        return Response({"detail": result.get("message")}, status=status.HTTP_200_OK)
 
     @action(
         detail=False,
@@ -292,47 +238,37 @@ class PhrConsentViewSet(GenericViewSet):
     )
     def phr_consent__request__deny(self, request, request_id):
         validated_data = self.validate_request(request)
-        x_token = self._get_x_token(request)
 
         result = PhrConsentService.phr__consent__request__deny(
             {
-                "x_token": x_token,
+                "x_token": self.x_token,
                 "request_id": request_id,
                 "reason": validated_data.get("reason"),
             }
         )
 
-        return Response(
-            {"detail": result.get("status")},
-            status=status.HTTP_200_OK,
-        )
+        return Response({"detail": result.get("status")}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="revoke")
     def phr_consent__request__revoke(self, request):
         validated_data = self.validate_request(request)
-        x_token = self._get_x_token(request)
 
         result = PhrConsentService.phr__consent__request__revoke(
             {
-                "x_token": x_token,
+                "x_token": self.x_token,
                 "consents": [
                     str(consent) for consent in validated_data.get("consents", [])
                 ],
             }
         )
 
-        return Response(
-            {"detail": result.get("message")},
-            status=status.HTTP_200_OK,
-        )
+        return Response({"detail": result.get("message")}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="auto_approve/setup")
     def phr_consent__auto__approve__setup(self, request):
-        x_token = self._get_x_token(request)
-
         result = PhrConsentService.phr__consent__auto__approve__setup(
             {
-                "x_token": x_token,
+                "x_token": self.x_token,
             }
         )
 
@@ -351,17 +287,13 @@ class PhrConsentViewSet(GenericViewSet):
     )
     def phr_consent__auto__approve__update(self, request, auto_approve_request_id):
         validated_data = self.validate_request(request)
-        x_token = self._get_x_token(request)
 
         result = PhrConsentService.phr__consent__auto__approve__update(
             {
-                "x_token": x_token,
+                "x_token": self.x_token,
                 "auto_approve_request_id": auto_approve_request_id,
                 "enable": validated_data.get("enable"),
             }
         )
 
-        return Response(
-            {"detail": result.get("message")},
-            status=status.HTTP_200_OK,
-        )
+        return Response({"detail": result.get("message")}, status=status.HTTP_200_OK)

@@ -25,8 +25,8 @@ from abdm.service.phr_helper import (
     PHR_REFRESH_TOKEN_PREFIX,
     transform_phr_links_data,
 )
+from abdm.service.v3.phr.phr_gateway import PhrGatewayService
 from abdm.service.v3.phr.phr_subscription import PhrSubscriptionService
-from abdm.service.v3.phr.phr_user_init_linking import PhrUserInitLinkingService
 from care_abdm.abdm.service.v3.phr.phr_profile import PhrProfileService
 
 logger = getLogger(__name__)
@@ -104,12 +104,12 @@ class PhrSubscriptionViewSet(GenericViewSet):
 
     def _get_links_for_eligible_status(self, status_value, x_token):
         if status_value in ["GRANTED", "REQUESTED"]:
-            links = PhrUserInitLinkingService.phr__user_initiated_linking__care_context__links(
+            links = PhrGatewayService.phr__gateway__patient__links(
                 {
                     "x_token": x_token,
                 }
             )
-            return transform_phr_links_data(links, include_links=False)
+            return transform_phr_links_data(links, include_care_contexts=False)
 
         return []
 

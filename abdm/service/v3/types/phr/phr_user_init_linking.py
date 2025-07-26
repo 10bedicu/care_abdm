@@ -27,14 +27,6 @@ class Patient(TypedDict):
     count: int
 
 
-class PhrUserInitLinkingCareContextLinksBody(TypedDict):
-    x_token: str
-
-
-class PhrUserInitLinkingCareContextLinksResponse(TypedDict):
-    patient: Patient
-
-
 class PhrUserInitLinkingCareContextDiscoverBody(TypedDict):
     x_token: str
     hip: Hip

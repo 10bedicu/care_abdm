@@ -20,8 +20,6 @@ from abdm.settings import plugin_settings as settings
 
 logger = getLogger(__name__)
 
-ABDM_HIU_ID = "IN3210000018"
-
 
 class PhrGatewayService:
     request = Request(f"{settings.ABDM_GATEWAY_URL}")

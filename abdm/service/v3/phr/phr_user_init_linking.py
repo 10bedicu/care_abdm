@@ -15,8 +15,6 @@ from abdm.service.v3.types.phr.phr_user_init_linking import (
     PhrUserInitLinkingCareContextDiscoverResponse,
     PhrUserInitLinkingCareContextInitBody,
     PhrUserInitLinkingCareContextInitResponse,
-    PhrUserInitLinkingCareContextLinksBody,
-    PhrUserInitLinkingCareContextLinksResponse,
 )
 from abdm.settings import plugin_settings as settings
 
@@ -26,7 +24,7 @@ ABDM_HIU_ID = "IN3210000018"
 
 
 class PhrUserInitLinkingService:
-    request = Request(f"{settings.ABDM_GATEWAY_URL}")
+    request = Request(f"{settings.ABDM_GATEWAY_URL}/user-initiated-linking/v3")
 
     @staticmethod
     def handle_error(error: dict[str, Any] | str) -> str:
@@ -88,20 +86,6 @@ class PhrUserInitLinkingService:
         return response
 
     @staticmethod
-    def phr__user_initiated_linking__care_context__links(
-        data: PhrUserInitLinkingCareContextLinksBody,
-    ) -> PhrUserInitLinkingCareContextLinksResponse:
-        response = PhrUserInitLinkingService._make_request(
-            "GET",
-            "/hip/v3/link/patient/links",
-            headers={
-                "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
-            },
-            expected_status=200,
-        )
-        return response.json()
-
-    @staticmethod
     def phr__user_initiated_linking__care_context__discover(
         data: PhrUserInitLinkingCareContextDiscoverBody,
     ) -> PhrUserInitLinkingCareContextDiscoverResponse:
@@ -112,7 +96,7 @@ class PhrUserInitLinkingService:
 
         PhrUserInitLinkingService._make_request(
             "POST",
-            "/user-initiated-linking/v3/patient/care-context/discover",
+            "/patient/care-context/discover",
             payload={
                 "hip": data.get("hip"),
                 "unverifiedIdentifiers": data.get("unverified_identifiers"),
@@ -133,7 +117,7 @@ class PhrUserInitLinkingService:
 
         PhrUserInitLinkingService._make_request(
             "POST",
-            "/user-initiated-linking/v3/link/care-context/init",
+            "/link/care-context/init",
             payload={
                 "transactionId": data.get("transaction_id"),
                 "patient": data.get("patient"),
@@ -154,7 +138,7 @@ class PhrUserInitLinkingService:
 
         PhrUserInitLinkingService._make_request(
             "POST",
-            "/user-initiated-linking/v3/link/care-context/confirm",
+            "/link/care-context/confirm",
             payload={
                 "linkRefNumber": data.get("link_ref_number"),
                 "token": data.get("token"),
