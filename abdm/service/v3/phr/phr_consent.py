@@ -5,10 +5,10 @@ from abdm.models.base import HealthInformationType
 from abdm.service.helper import (
     ABDMAPIException,
     cm_id,
-    get_default_abdm_period,
     timestamp,
     uuid,
 )
+from abdm.service.phr_helper import get_default_abdm_period
 from abdm.service.request import Request
 from abdm.service.v3.types.phr.phr_consent import (
     PhrConsentArtefactBody,

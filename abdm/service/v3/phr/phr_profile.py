@@ -40,7 +40,7 @@ logger = getLogger(__name__)
 
 
 class PhrProfileService:
-    request = Request(f"{settings.ABDM_ABHA_URL}/v3")
+    request = Request(f"{settings.ABDM_ABHA_URL}/v3/phr/app/login/profile")
 
     @staticmethod
     def handle_error(error: dict[str, Any] | str) -> str:
@@ -124,7 +124,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "GET",
-            "/phr/app/login/profile",
+            "/",
             headers=headers,
         )
 
@@ -138,7 +138,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "GET",
-            "/phr/app/login/profile/switch-profile",
+            "/switch-profile",
             headers=headers,
         )
 
@@ -159,7 +159,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "POST",
-            "/phr/app/login/profile/verify/switch-profile/user",
+            "/verify/switch-profile/user",
             payload,
             headers=headers,
         )
@@ -174,7 +174,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "GET",
-            "/phr/app/login/profile/phrCard",
+            "/phrCard",
             headers=headers,
             expected_status=202,
         )
@@ -200,7 +200,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "POST",
-            "/phr/app/login/profile/request/otp",
+            "/request/otp",
             payload,
             headers=headers,
         )
@@ -231,7 +231,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "POST",
-            "/phr/app/login/profile/verify",
+            "/verify",
             payload,
             headers=headers,
         )
@@ -248,11 +248,7 @@ class PhrProfileService:
             "transactionId": data.get("transaction_id"),
         }
 
-        path = (
-            "/phr/app/login/profile/link"
-            if action == "LINK"
-            else "/phr/app/login/profile/de-link"
-        )
+        path = "/link" if action == "LINK" else "/de-link"
 
         headers = {
             "X-token": f"Bearer {data.get('x_token', '')}",
@@ -281,7 +277,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "POST",
-            "/phr/app/login/profile/set-preffered/abha-address",
+            "/set-preffered/abha-address",
             payload,
             headers=headers,
         )
@@ -300,7 +296,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "POST",
-            "/phr/app/login/profile/updateProfile",
+            "/updateProfile",
             payload,
             headers=headers,
         )
@@ -328,7 +324,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "POST",
-            "/phr/app/login/profile/verify",
+            "/verify",
             payload,
             headers=headers,
         )
@@ -345,7 +341,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "GET",
-            "/phr/app/login/profile/request/logout",
+            "/request/logout",
             headers=headers,
         )
 

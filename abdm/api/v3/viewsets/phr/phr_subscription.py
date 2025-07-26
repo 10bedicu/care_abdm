@@ -18,7 +18,7 @@ from abdm.authentication import (
     IsPhrAuthenticated,
     PhrCustomAuthentication,
 )
-from abdm.service.helper import (
+from abdm.service.phr_helper import (
     PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
     PHR_ACCESS_TOKEN_PREFIX,
     PHR_REFRESH_TOKEN_CACHE_TIMEOUT,

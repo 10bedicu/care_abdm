@@ -3,22 +3,23 @@ from rest_framework.routers import SimpleRouter
 from abdm.api.v3.viewsets.health_id import HealthIdViewSet
 from abdm.api.v3.viewsets.hip import HIPCallbackViewSet, HIPViewSet
 from abdm.api.v3.viewsets.hiu import HIUCallbackViewSet, HIUViewSet
+from abdm.api.v3.viewsets.phr.health_id import PhrAuthViewSet
+from abdm.api.v3.viewsets.phr.phr_consent import PhrConsentViewSet
+from abdm.api.v3.viewsets.phr.phr_gateway import PhrGatewayViewSet
+from abdm.api.v3.viewsets.phr.phr_profile import PhrProfileViewSet
+from abdm.api.v3.viewsets.phr.phr_subscription import (
+    PhrSubscriptionCallbackViewSet,
+    PhrSubscriptionViewSet,
+)
+from abdm.api.v3.viewsets.phr.phr_user_init_linking import (
+    PhrUserInitLinkingCallbackViewSet,
+    PhrUserInitLinkingViewSet,
+)
 from abdm.api.v3.viewsets.utility import UtilityViewSet
 from abdm.api.viewsets.abha_number import AbhaNumberViewSet
 from abdm.api.viewsets.consent import ConsentViewSet
 from abdm.api.viewsets.health_facility import HealthFacilityViewSet
 from abdm.api.viewsets.health_information import HealthInformationViewSet
-from care_abdm.abdm.api.v3.viewsets.phr.health_id import PhrAuthViewSet
-from care_abdm.abdm.api.v3.viewsets.phr.phr_consent import PhrConsentViewSet
-from care_abdm.abdm.api.v3.viewsets.phr.phr_profile import PhrProfileViewSet
-from care_abdm.abdm.api.v3.viewsets.phr.phr_subscription import (
-    PhrSubscriptionCallbackViewSet,
-    PhrSubscriptionViewSet,
-)
-from care_abdm.abdm.api.v3.viewsets.phr.phr_user_init_linking import (
-    PhrUserInitLinkingCallbackViewSet,
-    PhrUserInitLinkingViewSet,
-)
 
 
 class OptionalSlashRouter(SimpleRouter):
@@ -59,6 +60,7 @@ router.register(
     PhrUserInitLinkingViewSet,
     basename="abdm__v3__phr_user_init_linking",
 )
+router.register("v3/phr/gateway", PhrGatewayViewSet, basename="abdm__v3__phr_gateway")
 
 
 ## Utility Routes

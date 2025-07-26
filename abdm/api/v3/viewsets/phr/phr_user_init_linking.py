@@ -17,15 +17,11 @@ from abdm.api.v3.serializers.phr.phr_user_init_linking import (
     PhrUserInitLinkingCareContextOnInitSerializer,
 )
 from abdm.authentication import ABDMAuthentication
-from abdm.service.helper import (
-    PHR_ACCESS_TOKEN_CACHE_TIMEOUT,
-    PHR_ACCESS_TOKEN_PREFIX,
-    PHR_REFRESH_TOKEN_CACHE_TIMEOUT,
-    PHR_REFRESH_TOKEN_PREFIX,
-    transform_phr_links_data,
+from abdm.service.phr_helper import (
+    get_phr_access_token,
+    normalize_abha_address,
 )
 from abdm.service.v3.phr.phr_user_init_linking import PhrUserInitLinkingService
-from care_abdm.abdm.service.v3.phr.phr_profile import PhrProfileService
 
 logger = getLogger(__name__)
 
@@ -55,53 +51,12 @@ class PhrUserInitLinkingViewSet(GenericViewSet):
 
         return serializer.validated_data
 
-    def _get_x_token(self, request):
-        # abha_address = self._normalize_abha_address(request.user.abha_address)
-        abha_address = "dora8sbx@sbx"
-
-        access_key = f"{PHR_ACCESS_TOKEN_PREFIX}{abha_address}"
-        refresh_key = f"{PHR_REFRESH_TOKEN_PREFIX}{abha_address}"
-
-        x_token = cache.get(access_key)
-        if x_token:
-            return x_token
-
-        refresh_token = cache.get(refresh_key)
-
-        result = PhrProfileService.phr__request__token({"r_token": refresh_token})
-        tokens = result.get("tokens") or {}
-
-        access_token = tokens.get("token")
-        new_refresh_token = tokens.get("refreshToken")
-
-        cache.set(access_key, access_token, timeout=PHR_ACCESS_TOKEN_CACHE_TIMEOUT)
-        cache.set(
-            refresh_key, new_refresh_token, timeout=PHR_REFRESH_TOKEN_CACHE_TIMEOUT
-        )
-
-        return access_token
-
-    @action(detail=False, methods=["get"], url_path="links")
-    def phr_user_initiated_linking__care_context__links(self, request):
-        x_token = self._get_x_token(request)
-
-        links = (
-            PhrUserInitLinkingService.phr__user_initiated_linking__care_context__links(
-                {
-                    "x_token": x_token,
-                }
-            )
-        )
-
-        return Response(transform_phr_links_data(links), status=status.HTTP_200_OK)
-
     @action(detail=False, methods=["post"], url_path="discover")
     def phr_user_initiated_linking__care_context__discover(self, request):
         validated_data = self.validate_request(request)
 
         hip = validated_data.get("hip")
-        # abha_address = request.user.abha_address
-        abha_address = "dora8sbx@sbx"
+        abha_address = normalize_abha_address(request.user.abha_address)
 
         cache_key = f"{LAST_PATIENT_DISCOVER_CACHE_KEY}{hip['id']}_{abha_address}"
 
@@ -115,7 +70,7 @@ class PhrUserInitLinkingViewSet(GenericViewSet):
 
         cache.set(cache_key, "temp_value", timeout=LAST_PATIENT_DISCOVER_CACHE_TIMEOUT)
 
-        x_token = self._get_x_token(request)
+        x_token = get_phr_access_token(abha_address)
 
         PhrUserInitLinkingService.phr__user_initiated_linking__care_context__discover(
             {
@@ -136,7 +91,7 @@ class PhrUserInitLinkingViewSet(GenericViewSet):
     def phr_user_initiated_linking__care_context__init(self, request):
         validated_data = self.validate_request(request)
 
-        x_token = self._get_x_token(request)
+        x_token = get_phr_access_token(request.user.abha_address)
 
         PhrUserInitLinkingService.phr__user_initiated_linking__care_context__init(
             {
@@ -155,7 +110,7 @@ class PhrUserInitLinkingViewSet(GenericViewSet):
     def phr_user_initiated_linking__care_context__confirm(self, request):
         validated_data = self.validate_request(request)
 
-        x_token = self._get_x_token(request)
+        x_token = get_phr_access_token(request.user.abha_address)
 
         PhrUserInitLinkingService.phr__user_initiated_linking__care_context__confirm(
             {
