@@ -19,8 +19,8 @@ class CareContextSerializer(Serializer):
 
 class HipSerializer(Serializer):
     id = CharField(required=True)
-    name = CharField(required=False)
-    type = CharField(required=False)
+    name = CharField(required=False, allow_null=True, allow_blank=True)
+    type = CharField(required=False, allow_null=True, allow_blank=True)
 
 
 class DateRangeSerializer(Serializer):
@@ -29,9 +29,9 @@ class DateRangeSerializer(Serializer):
         to_value = data.get("to")
 
         if not from_value:
-            raise ValidationError({"from": ["This field is required."]})
+            raise ValidationError({"from": ["from date is required"]})
         if not to_value:
-            raise ValidationError({"to": ["This field is required."]})
+            raise ValidationError({"to": ["to date is required"]})
 
         return {
             "from": from_value,

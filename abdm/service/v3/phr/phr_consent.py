@@ -36,9 +36,11 @@ from abdm.settings import plugin_settings as settings
 
 logger = getLogger(__name__)
 
+ABDM_HIU_ID = "sbx_001"
+
 
 class PhrConsentService:
-    request = Request(f"{settings.ABDM_GATEWAY_URL}")
+    request = Request(f"{settings.ABDM_GATEWAY_URL}/consent/v3")
 
     @staticmethod
     def handle_error(error: dict[str, Any] | str) -> str:
@@ -114,7 +116,7 @@ class PhrConsentService:
     ) -> PhrConsentRequestsResponse:
         return PhrConsentService._make_request(
             "GET",
-            "/consent/v3/request",
+            "/request",
             params={
                 "limit": data.get("limit"),
                 "offset": data.get("offset"),
@@ -131,7 +133,7 @@ class PhrConsentService:
     ) -> PhrConsentRequestResponse:
         return PhrConsentService._make_request(
             "GET",
-            f"/consent/v3/request/{data.get('request_id')}",
+            f"/request/{data.get('request_id')}",
             headers={
                 "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
             },
@@ -143,7 +145,7 @@ class PhrConsentService:
     ) -> PhrConsentArtefactsResponse:
         return PhrConsentService._make_request(
             "GET",
-            "/consent/v3/artefact",
+            "/artefact",
             params={
                 "limit": data.get("limit"),
                 "offset": data.get("offset"),
@@ -160,7 +162,7 @@ class PhrConsentService:
     ) -> PhrConsentRequestArtefactsResponse:
         return PhrConsentService._make_request(
             "GET",
-            f"/consent/v3/artefact/request/{data.get('request_id')}",
+            f"/artefact/request/{data.get('request_id')}",
             headers={
                 "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
             },
@@ -172,7 +174,7 @@ class PhrConsentService:
     ) -> PhrConsentArtefactResponse:
         return PhrConsentService._make_request(
             "GET",
-            f"/consent/v3/artefact/{data.get('artefact_id')}",
+            f"/artefact/{data.get('artefact_id')}",
             headers={
                 "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
             },
@@ -184,7 +186,7 @@ class PhrConsentService:
     ) -> PhrConsentRequestApproveResponse:
         return PhrConsentService._make_request(
             "POST",
-            f"/consent/v3/request/{data.get('request_id')}/approve",
+            f"/request/{data.get('request_id')}/approve",
             payload={
                 "consents": data.get("consents"),
             },
@@ -199,7 +201,7 @@ class PhrConsentService:
     ) -> PhrConsentRequestDenyResponse:
         return PhrConsentService._make_request(
             "POST",
-            f"/consent/v3/request/{data.get('request_id')}/deny",
+            f"/request/{data.get('request_id')}/deny",
             payload={
                 "reason": data.get("reason"),
             },
@@ -214,7 +216,7 @@ class PhrConsentService:
     ) -> PhrConsentRequestRevokeResponse:
         return PhrConsentService._make_request(
             "POST",
-            "/consent/v3/revoke",
+            "/revoke",
             payload={
                 "consents": data.get("consents"),
             },
@@ -229,7 +231,7 @@ class PhrConsentService:
     ) -> PhrConsentAutoApproveSetupResponse:
         payload = {
             "isApplicableForAllHIPs": True,
-            "hiu": {"id": "sbx_001"},  # TODO: Get from config
+            "hiu": {"id": ABDM_HIU_ID},  # TODO: Get from config
             "includedSources": [
                 {
                     "hiTypes": [hi_type.value for hi_type in HealthInformationType],
@@ -245,7 +247,7 @@ class PhrConsentService:
 
         return PhrConsentService._make_request(
             "POST",
-            "/consent/v3/auto/approve",
+            "/auto/approve",
             payload,
             headers={
                 "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
@@ -256,7 +258,7 @@ class PhrConsentService:
     def phr__consent__auto__approve__update(
         data: PhrConsentAutoApproveUpdateBody,
     ) -> PhrConsentAutoApproveUpdateResponse:
-        base_path = f"/consent/v3/auto/approve/{data.get('auto_approve_request_id')}"
+        base_path = f"/auto/approve/{data.get('auto_approve_request_id')}"
         path = f"{base_path}/enable" if data.get("enable") else f"{base_path}/disable"
 
         return PhrConsentService._make_request(
