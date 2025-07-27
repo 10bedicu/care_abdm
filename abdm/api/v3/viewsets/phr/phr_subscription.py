@@ -15,6 +15,8 @@ from abdm.api.v3.serializers.phr.phr_subscription import (
 )
 from abdm.authentication import (
     ABDMAuthentication,
+    IsPhrAuthenticated,
+    PhrCustomAuthentication,
 )
 from abdm.service.phr_helper import get_phr_access_token, transform_phr_links_data
 from abdm.service.v3.phr.phr_gateway import PhrGatewayService
@@ -25,9 +27,8 @@ logger = getLogger(__name__)
 
 @extend_schema(tags=["PHR Subscription"])
 class PhrSubscriptionViewSet(GenericViewSet):
-    # permission_classes = [IsPhrAuthenticated]
-    # authentication_classes = [PhrCustomAuthentication]
-    permission_classes = []
+    permission_classes = [IsPhrAuthenticated]
+    authentication_classes = [PhrCustomAuthentication]
 
     REQUIRED_REQUEST_FIELDS = ["purpose", "period", "categories", "hiu"]
     VALID_STATUSES = ["ALL", "REQUESTED", "EXPIRED", "REVOKED", "GRANTED", "DENIED"]
@@ -114,6 +115,12 @@ class PhrSubscriptionViewSet(GenericViewSet):
     @action(detail=False, methods=["get"], url_path="requests")
     def phr_subscription__requests(self, request):
         status_param, limit, offset = self._get_query_params(request)
+
+        if not status_param:
+            return Response(
+                [],
+                status=status.HTTP_200_OK,
+            )
 
         subscription_requests = PhrSubscriptionService.phr__subscription__requests(
             {
@@ -244,6 +251,24 @@ class PhrSubscriptionViewSet(GenericViewSet):
         )
 
         return Response({"detail": result.get("message")}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="patient_lockers")
+    def phr_subscription__lockers(self, request):
+        result = PhrSubscriptionService.phr__subscription__lockers(
+            {"x_token": self.x_token}
+        )
+
+        return Response(result, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False, methods=["get"], url_path="patient_locker/(?P<locker_id>[^/.]+)"
+    )
+    def phr_subscription__locker(self, request, locker_id):
+        result = PhrSubscriptionService.phr__subscription__locker(
+            {"x_token": self.x_token, "locker_id": locker_id}
+        )
+
+        return Response(result, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="request/hiu/init")
     def phr_subscription__request__init(self, request):

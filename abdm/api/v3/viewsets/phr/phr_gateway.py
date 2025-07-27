@@ -21,7 +21,7 @@ class PhrGatewayViewSet(GenericViewSet):
 
     @action(detail=False, methods=["get"], url_path="patient/links")
     def phr_gateway__patient__links(self, request):
-        x_token = get_phr_access_token(request.user.abha_address)
+        x_token = get_phr_access_token("dora8sbx")
 
         links = PhrGatewayService.phr__gateway__patient__links(
             {

@@ -110,7 +110,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "GET",
-            "/phr/app/login/profile/request/token",
+            "/request/token",
             headers=headers,
         )
 

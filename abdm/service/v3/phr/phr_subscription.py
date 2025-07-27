@@ -9,6 +9,10 @@ from abdm.service.helper import (
 )
 from abdm.service.request import Request
 from abdm.service.v3.types.phr.phr_subscription import (
+    PhrSubscribedLockerBody,
+    PhrSubscribedLockerResponse,
+    PhrSubscribedLockersBody,
+    PhrSubscribedLockersResponse,
     PhrSubscriptionArtefactBody,
     PhrSubscriptionArtefactResponse,
     PhrSubscriptionEditBody,
@@ -33,7 +37,7 @@ ABDM_HIU_ID = "IN3210000018"
 
 
 class PhrSubscriptionService:
-    request = Request(f"{settings.ABDM_GATEWAY_URL}/subscription-requests")
+    request = Request(f"{settings.ABDM_GATEWAY_URL}/subscription-requests/v3")
 
     @staticmethod
     def handle_error(error: dict[str, Any] | str) -> str:
@@ -117,7 +121,7 @@ class PhrSubscriptionService:
     ) -> PhrSubscriptionRequestsResponse:
         return PhrSubscriptionService._make_request(
             "GET",
-            "/v3/requests",
+            "/requests",
             params={
                 "limit": data.get("limit"),
                 "offset": data.get("offset"),
@@ -134,7 +138,7 @@ class PhrSubscriptionService:
     ) -> PhrSubscriptionRequestResponse:
         return PhrSubscriptionService._make_request(
             "GET",
-            f"/v3/request/{data.get('request_id')}",
+            f"/request/{data.get('request_id')}",
             headers={
                 "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
             },
@@ -146,7 +150,7 @@ class PhrSubscriptionService:
     ) -> PhrSubscriptionArtefactResponse:
         return PhrSubscriptionService._make_request(
             "GET",
-            f"/v3/{data.get('subscription_id')}",
+            f"/{data.get('subscription_id')}",
             headers={
                 "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
             },
@@ -158,7 +162,7 @@ class PhrSubscriptionService:
     ) -> PhrSubscriptionRequestApproveResponse:
         return PhrSubscriptionService._make_request(
             "POST",
-            f"/v3/{data.get('request_id')}/approve",
+            f"/{data.get('request_id')}/approve",
             payload=data.get("subscription"),
             headers={
                 "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
@@ -171,7 +175,7 @@ class PhrSubscriptionService:
     ) -> PhrSubscriptionRequestDenyResponse:
         return PhrSubscriptionService._make_request(
             "POST",
-            f"/v3/{data.get('request_id')}/deny",
+            f"/{data.get('request_id')}/deny",
             payload={
                 "reason": data.get("reason"),
             },
@@ -188,7 +192,7 @@ class PhrSubscriptionService:
 
         return PhrSubscriptionService._make_request(
             "POST",
-            f"/v3/{base_path}/{data.get('subscription_id')}",
+            f"/{base_path}/{data.get('subscription_id')}",
             payload={},
             headers={
                 "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
@@ -201,7 +205,7 @@ class PhrSubscriptionService:
     ) -> PhrSubscriptionEditResponse:
         return PhrSubscriptionService._make_request(
             "PUT",
-            f"/v3/patients/{data.get('subscription_id')}",
+            f"/patients/{data.get('subscription_id')}",
             payload={
                 "hiuId": ABDM_HIU_ID,
                 "subscriptionEditAndApprovalRequest": data.get("subscription"),
@@ -211,6 +215,32 @@ class PhrSubscriptionService:
             },
         ).json()
 
+    @staticmethod
+    def phr__subscription__lockers(
+        data: PhrSubscribedLockersBody,
+    ) -> PhrSubscribedLockersResponse:
+        return PhrSubscriptionService._make_request(
+            "GET",
+            "/patients/lockers",
+            headers={
+                "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
+            },
+            expected_status=200,
+        ).json()
+
+    @staticmethod
+    def phr__subscription__locker(
+        data: PhrSubscribedLockerBody,
+    ) -> PhrSubscribedLockerResponse:
+        return PhrSubscriptionService._make_request(
+            "GET",
+            f"/patients/lockers/{data.get('locker_id')}",
+            headers={
+                "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
+            },
+            expected_status=200,
+        ).json()
+
     # SUBSCRIPTION REQUEST CALLBACK SERVICES
     @staticmethod
     def phr__subscription__request__init(
@@ -218,7 +248,7 @@ class PhrSubscriptionService:
     ) -> dict:
         response = PhrSubscriptionService._make_request(
             "POST",
-            "/v3/init",
+            "/init",
             payload=data,
             expected_status=202,
         )
@@ -233,7 +263,7 @@ class PhrSubscriptionService:
     ) -> dict:
         PhrSubscriptionService._make_request(
             "POST",
-            "/v3/hiu/on-notify",
+            "/hiu/on-notify",
             payload=data,
         )
 

@@ -68,3 +68,27 @@ class PhrSubscriptionEditBody(TypedDict):
 
 class PhrSubscriptionEditResponse(TypedDict):
     message: str
+
+
+class PhrSubscribedLockersBody(TypedDict):
+    x_token: str
+
+
+class PatientLocker(TypedDict):
+    id: int
+    lockerId: str
+    lockerName: str
+    dateCreated: str
+    dateModified: str
+
+
+PhrSubscribedLockersResponse = list[PatientLocker]
+
+
+class PhrSubscribedLockerBody(TypedDict):
+    x_token: str
+    locker_id: str
+
+
+class PhrSubscribedLockerResponse(TypedDict):
+    pass

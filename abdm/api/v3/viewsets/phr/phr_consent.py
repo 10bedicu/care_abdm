@@ -120,6 +120,12 @@ class PhrConsentViewSet(GenericViewSet):
     def phr_consent__requests(self, request):
         status_param, limit, offset = self._get_query_params(request)
 
+        if not status_param:
+            return Response(
+                [],
+                status=status.HTTP_200_OK,
+            )
+
         consent_requests = PhrConsentService.phr__consent__requests(
             {
                 "x_token": self.x_token,
@@ -156,6 +162,12 @@ class PhrConsentViewSet(GenericViewSet):
     @action(detail=False, methods=["get"], url_path="artefacts")
     def phr_consent__artefacts(self, request):
         status_param, limit, offset = self._get_query_params(request)
+
+        if not status_param:
+            return Response(
+                [],
+                status=status.HTTP_200_OK,
+            )
 
         consent_artefacts = PhrConsentService.phr__consent__artefacts(
             {
