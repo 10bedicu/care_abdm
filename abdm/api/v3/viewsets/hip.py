@@ -28,6 +28,7 @@ from abdm.models import (
     ConsentArtefact,
     HealthFacility,
     Transaction,
+    TransactionStatus,
     TransactionType,
 )
 from abdm.service.helper import uuid, validate_and_format_date
@@ -168,14 +169,17 @@ class HIPCallbackViewSet(GenericViewSet):
         )
 
         data = self.validate_request(request)
+        request_id = data.get("response", {}).get("requestId")
 
         logger.info(f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Validated data for {data}")
 
-        # TODO: delete care context transaction if it failed
+        Transaction.objects.filter(reference_id=request_id).update(
+            status=TransactionStatus.COMPLETED
+        )
 
-        # FIXME: only mark a care context linking transaction as completed here
-
-        # TODO: handle failed link requests
+        logger.info(
+            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Transaction status updated for {request_id} to {TransactionStatus.COMPLETED.label}"
+        )
 
         return Response(status=status.HTTP_202_ACCEPTED)
 

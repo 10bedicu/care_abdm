@@ -288,10 +288,6 @@ class GatewayService:
         if response.status_code != 202:
             raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
 
-        Transaction.objects.filter(reference_id=reference_id).update(
-            status=TransactionStatus.COMPLETED
-        )
-
         return {}
 
     @staticmethod
