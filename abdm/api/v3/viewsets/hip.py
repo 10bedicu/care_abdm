@@ -27,6 +27,7 @@ from abdm.models import (
     ConsentArtefact,
     HealthFacility,
     Transaction,
+    TransactionStatus,
     TransactionType,
 )
 from abdm.service.helper import uuid, validate_and_format_date
@@ -100,7 +101,15 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hip/token/on-generate-token")
     def hip__token__on_generate_token(self, request):
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Request for {request.data!s} {request.headers!s}"
+        )
+
         validated_data = self.validate_request(request)
+
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Validated data for {validated_data}"
+        )
 
         hf_id = request.headers.get("X-HIP-ID")
         health_id = validated_data.get("abhaAddress")
@@ -124,10 +133,18 @@ class HIPCallbackViewSet(GenericViewSet):
             f"abdm_link_care_context__{hf_id}__{health_id}__*"
         )
 
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Link Care Context Request Cache Keys for {link_care_context_request_cache_keys}"
+        )
+
         for request_cache_key in link_care_context_request_cache_keys:
             cached_data = cache.get(request_cache_key)
 
             if cached_data.get("purpose") == "LINK_CARECONTEXT":
+                logger.info(
+                    f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Initiated Care Context Linking for {cached_data.get('reference_id')} {cached_data.get('patient')} {cached_data.get('care_contexts')} {cached_data.get('hf_id')}"
+                )
+
                 GatewayService.link__carecontext(
                     {
                         "reference_id": cached_data.get("reference_id"),
@@ -144,11 +161,22 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="link/on_carecontext")
     def link__on_carecontext(self, request):
-        self.validate_request(request)
+        logger.info(
+            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Request for {request.data!s} {request.headers!s}"
+        )
 
-        # TODO: delete care context transaction if it failed
+        data = self.validate_request(request)
+        request_id = data.get("response", {}).get("requestId")
 
-        # TODO: handle failed link requests
+        logger.info(f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Validated data for {data}")
+
+        Transaction.objects.filter(reference_id=request_id).update(
+            status=TransactionStatus.COMPLETED
+        )
+
+        logger.info(
+            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Transaction status updated for {request_id} to {TransactionStatus.COMPLETED.label}"
+        )
 
         return Response(status=status.HTTP_202_ACCEPTED)
 
