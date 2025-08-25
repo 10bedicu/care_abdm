@@ -7,6 +7,15 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
+from abdm.api.v3.serializers.phr.phr_profile import (
+    PhrProfileLogoutSerializer,
+    PhrProfileRequestOtpSerializer,
+    PhrProfileResetPasswordSerializer,
+    PhrProfileSwitchVerifySerializer,
+    PhrProfileUpdateSerializer,
+    PhrProfileVerifyOtpSerializer,
+    PhrRequestTokenSerializer,
+)
 from abdm.authentication import (
     PHR_TEMP_ACCESS_TOKEN_INVALIDATION_PREFIX,
     PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX,
@@ -22,17 +31,8 @@ from abdm.service.phr_helper import (
     remove_cached_phr_tokens,
     update_abha_from_profile,
 )
+from abdm.service.v3.phr.phr_profile import PhrProfileService
 from abdm.service.v3.phr.phr_subscription import PhrSubscriptionService
-from care_abdm.abdm.api.v3.serializers.phr.phr_profile import (
-    PhrProfileLogoutSerializer,
-    PhrProfileRequestOtpSerializer,
-    PhrProfileResetPasswordSerializer,
-    PhrProfileSwitchVerifySerializer,
-    PhrProfileUpdateSerializer,
-    PhrProfileVerifyOtpSerializer,
-    PhrRequestTokenSerializer,
-)
-from care_abdm.abdm.service.v3.phr.phr_profile import PhrProfileService
 
 PHR_PROFILE_SWITCH_VERIFY_TOKEN_CACHE_KEY = "phr__profile__switch__token"
 

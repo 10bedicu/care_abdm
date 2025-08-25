@@ -28,7 +28,7 @@ from abdm.service.phr_helper import (
     update_abha_from_profile,
 )
 from abdm.service.v3.phr.health_id import PhrHealthIdService
-from care_abdm.abdm.service.v3.phr.phr_profile import PhrProfileService
+from abdm.service.v3.phr.phr_profile import PhrProfileService
 
 PHR_VERIFY_USER_TOKEN_PREFIX = "phr_verify_user_token:"
 PHR_VERIFY_USER_TOKEN_TIMEOUT = 300
