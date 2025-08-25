@@ -76,6 +76,7 @@ class PhrUserInitLinkingCareContextOnDiscoverSerializer(Serializer):
 
 
 class PhrUserInitLinkingCareContextInitSerializer(Serializer):
+    hip = HipSerializer(required=True)
     transaction_id = UUIDField(required=True)
     patient = PatientSerializer(many=True, required=True)
 
@@ -94,7 +95,7 @@ class LinkSerializer(Serializer):
 
 class PhrUserInitLinkingCareContextOnInitSerializer(Serializer):
     transactionId = UUIDField(required=True)
-    link = LinkSerializer(required=True)
+    link = LinkSerializer(required=False)
     error = ErrorSerializer(required=False, allow_null=True, default=None)
     response = ResponseSerializer(required=True)
 
@@ -109,6 +110,7 @@ class PhrUserInitLinkingCareContextOnInitSerializer(Serializer):
 
 
 class PhrUserInitLinkingCareContextConfirmSerializer(Serializer):
+    hip = HipSerializer(required=True)
     link_ref_number = CharField(max_length=50, required=True)
     token = CharField(max_length=20, required=True)
 

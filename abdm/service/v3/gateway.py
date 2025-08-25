@@ -588,7 +588,6 @@ class GatewayService:
                     continue
 
                 fhir_data = Fhir().create_op_consult_record(encounter)
-
             if (
                 model == "encounter"
                 and HealthInformationType.DISCHARGE_SUMMARY in consent.hi_types
@@ -807,7 +806,7 @@ class GatewayService:
         if not consent:
             raise ABDMAPIException(detail="Provide a consent to initiate")
 
-        hiu_id = hf_id_from_abha_id(consent.patient_abha.health_id)
+        hiu_id = consent.hiu or hf_id_from_abha_id(consent.patient_abha.health_id)
 
         payload = {
             "consent": {
@@ -887,7 +886,8 @@ class GatewayService:
                 "REQUEST-ID": uuid(),
                 "TIMESTAMP": timestamp(),
                 "X-CM-ID": cm_id(),
-                "X-HIU-ID": hf_id_from_abha_id(consent.patient_abha.health_id),
+                "X-HIU-ID": consent.hiu
+                or hf_id_from_abha_id(consent.patient_abha.health_id),
             },
         )
 
@@ -955,7 +955,8 @@ class GatewayService:
                 "REQUEST-ID": uuid(),
                 "TIMESTAMP": timestamp(),
                 "X-CM-ID": cm_id(),
-                "X-HIU-ID": hf_id_from_abha_id(artefact.patient_abha.health_id),
+                "X-HIU-ID": artefact.hiu
+                or hf_id_from_abha_id(artefact.patient_abha.health_id),
             },
         )
 
@@ -1009,7 +1010,8 @@ class GatewayService:
                 "REQUEST-ID": request_id,
                 "TIMESTAMP": timestamp(),
                 "X-CM-ID": cm_id(),
-                "X-HIU-ID": hf_id_from_abha_id(artefact.patient_abha.health_id),
+                "X-HIU-ID": artefact.hiu
+                or hf_id_from_abha_id(artefact.patient_abha.health_id),
             },
         )
 

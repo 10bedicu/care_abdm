@@ -31,6 +31,7 @@ class PhrUserInitLinkingCareContextDiscoverBody(TypedDict):
     x_token: str
     hip: Hip
     unverified_identifiers: list[DiscoveryIdentifiers]
+    request_id: str
 
 
 class PhrUserInitLinkingCareContextDiscoverResponse(TypedDict):
@@ -41,6 +42,7 @@ class PhrUserInitLinkingCareContextInitBody(TypedDict):
     x_token: str
     transaction_id: str
     patient: list[Patient]
+    request_id: str
 
 
 class PhrUserInitLinkingCareContextInitResponse(TypedDict):
@@ -51,6 +53,7 @@ class PhrUserInitLinkingCareContextConfirmBody(TypedDict):
     x_token: str
     link_ref_number: str
     token: str
+    request_id: str
 
 
 class PhrUserInitLinkingCareContextConfirmResponse(TypedDict):

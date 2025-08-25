@@ -10,10 +10,15 @@ from abdm.api.v3.serializers.phr.phr_consent import (
     PhrConsentAutoApproveUpdateSerializer,
     PhrConsentRequestApproveSerializer,
     PhrConsentRequestDenySerializer,
+    PhrConsentRequestInitSerializer,
     PhrConsentRequestRevokeSerializer,
 )
 from abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
-from abdm.service.phr_helper import get_phr_access_token, transform_phr_links_data
+from abdm.service.phr_helper import (
+    get_phr_access_token,
+    transform_phr_links_data,
+    update_phr_metadata,
+)
 from abdm.service.v3.phr.phr_consent import PhrConsentService
 from abdm.service.v3.phr.phr_gateway import PhrGatewayService
 
@@ -30,6 +35,7 @@ class PhrConsentViewSet(GenericViewSet):
         "requester",
         "permission",
         "hiTypes",
+        "hiu",
     ]
     REQUIRED_ARTEFACT_FIELDS = [
         "purpose",
@@ -38,6 +44,7 @@ class PhrConsentViewSet(GenericViewSet):
         "hiTypes",
         "careContexts",
         "hip",
+        "hiu",
     ]
     VALID_STATUSES = ["ALL", "REQUESTED", "EXPIRED", "REVOKED", "GRANTED", "DENIED"]
 
@@ -46,6 +53,7 @@ class PhrConsentViewSet(GenericViewSet):
         "phr_consent__request__deny": PhrConsentRequestDenySerializer,
         "phr_consent__request__revoke": PhrConsentRequestRevokeSerializer,
         "phr_consent__auto__approve__update": PhrConsentAutoApproveUpdateSerializer,
+        "phr_consent__request__init": PhrConsentRequestInitSerializer,
     }
 
     @property
@@ -116,13 +124,28 @@ class PhrConsentViewSet(GenericViewSet):
 
         return []
 
+    @action(detail=False, methods=["post"], url_path="request_init")
+    def phr_consent__request__init(self, request):
+        validated_data = self.validate_request(request)
+
+        PhrConsentService.phr_consent_request_init(
+            {
+                "patient_id": validated_data.get("patient_id"),
+            }
+        )
+
+        return Response(status=status.HTTP_200_OK)
+
     @action(detail=False, methods=["get"], url_path="requests")
     def phr_consent__requests(self, request):
         status_param, limit, offset = self._get_query_params(request)
 
         if not status_param:
             return Response(
-                [],
+                {
+                    "results": [],
+                    "hasMore": False,
+                },
                 status=status.HTTP_200_OK,
             )
 
@@ -139,7 +162,13 @@ class PhrConsentViewSet(GenericViewSet):
             consent_requests.get("requests", []), "request"
         )
 
-        return Response(filtered_requests, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "results": filtered_requests,
+                "hasMore": len(filtered_requests) == limit,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(
         detail=False,
@@ -165,7 +194,10 @@ class PhrConsentViewSet(GenericViewSet):
 
         if not status_param:
             return Response(
-                [],
+                {
+                    "results": [],
+                    "hasMore": False,
+                },
                 status=status.HTTP_200_OK,
             )
 
@@ -182,7 +214,13 @@ class PhrConsentViewSet(GenericViewSet):
             consent_artefacts.get("consentArtefacts", []), "artefact"
         )
 
-        return Response(filtered_artefacts, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "results": filtered_artefacts,
+                "hasMore": len(filtered_artefacts) == limit,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(
         detail=False,
@@ -198,7 +236,12 @@ class PhrConsentViewSet(GenericViewSet):
             consent_request_artefacts, "artefact"
         )
 
-        return Response(filtered_artefacts, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "results": filtered_artefacts,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(
         detail=False,
@@ -284,6 +327,14 @@ class PhrConsentViewSet(GenericViewSet):
             }
         )
 
+        update_phr_metadata(
+            request.user.abha_address,
+            {
+                "auto_approve_id": result.get("autoApprovalId"),
+                "is_auto_approve_enabled": True,
+            },
+        )
+
         return Response(
             {
                 "detail": result.get("message"),
@@ -306,6 +357,13 @@ class PhrConsentViewSet(GenericViewSet):
                 "auto_approve_request_id": auto_approve_request_id,
                 "enable": validated_data.get("enable"),
             }
+        )
+
+        update_phr_metadata(
+            request.user.abha_address,
+            {
+                "is_auto_approve_enabled": validated_data.get("enable"),
+            },
         )
 
         return Response({"detail": result.get("message")}, status=status.HTTP_200_OK)

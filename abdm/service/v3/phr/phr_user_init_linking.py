@@ -5,8 +5,8 @@ from abdm.service.helper import (
     ABDMAPIException,
     cm_id,
     timestamp,
-    uuid,
 )
+from abdm.service.phr_helper import get_phr_hf_id
 from abdm.service.request import Request
 from abdm.service.v3.types.phr.phr_user_init_linking import (
     PhrUserInitLinkingCareContextConfirmBody,
@@ -19,8 +19,6 @@ from abdm.service.v3.types.phr.phr_user_init_linking import (
 from abdm.settings import plugin_settings as settings
 
 logger = getLogger(__name__)
-
-ABDM_HIU_ID = "IN3210000018"
 
 
 class PhrUserInitLinkingService:
@@ -60,7 +58,6 @@ class PhrUserInitLinkingService:
         expected_status: int = 202,
     ):
         default_headers = {
-            "REQUEST-ID": uuid(),
             "TIMESTAMP": timestamp(),
             "X-CM-ID": cm_id(),
         }
@@ -91,7 +88,8 @@ class PhrUserInitLinkingService:
     ) -> PhrUserInitLinkingCareContextDiscoverResponse:
         headers = {
             "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
-            "X-HIU-ID": ABDM_HIU_ID,
+            "X-HIU-ID": get_phr_hf_id(),
+            "REQUEST-ID": data.get("request_id"),
         }
 
         PhrUserInitLinkingService._make_request(
@@ -112,7 +110,8 @@ class PhrUserInitLinkingService:
     ) -> PhrUserInitLinkingCareContextInitResponse:
         headers = {
             "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
-            "X-HIU-ID": ABDM_HIU_ID,
+            "X-HIU-ID": get_phr_hf_id(),
+            "REQUEST-ID": data.get("request_id"),
         }
 
         PhrUserInitLinkingService._make_request(
@@ -133,7 +132,8 @@ class PhrUserInitLinkingService:
     ) -> PhrUserInitLinkingCareContextConfirmResponse:
         headers = {
             "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
-            "X-HIU-ID": ABDM_HIU_ID,
+            "X-HIU-ID": get_phr_hf_id(),
+            "REQUEST-ID": data.get("request_id"),
         }
 
         PhrUserInitLinkingService._make_request(

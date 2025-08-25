@@ -84,3 +84,7 @@ class PhrConsentRequestRevokeSerializer(Serializer):
 
 class PhrConsentAutoApproveUpdateSerializer(Serializer):
     enable = BooleanField(required=True)
+
+
+class PhrConsentRequestInitSerializer(Serializer):
+    patient_id = CharField(required=True)

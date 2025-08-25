@@ -96,3 +96,11 @@ class PhrConsentAutoApproveUpdateBody(TypedDict):
 
 class PhrConsentAutoApproveUpdateResponse(TypedDict):
     message: str
+
+
+class PhrConsentRequestInitBody(TypedDict):
+    patient_id: str
+
+
+class PhrConsentRequestInitResponse(TypedDict):
+    pass

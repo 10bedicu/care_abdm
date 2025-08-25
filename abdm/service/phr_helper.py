@@ -1,17 +1,24 @@
+import logging
 from datetime import datetime, timedelta
 
 from django.core.cache import cache
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 
+logger = logging.getLogger(__name__)
+
 from abdm.models import AbhaNumber
+from abdm.service.v3.phr.phr_profile import PhrProfileService
 from abdm.settings import plugin_settings as settings
-from care_abdm.abdm.service.v3.phr.phr_profile import PhrProfileService
 
 PHR_ACCESS_TOKEN_PREFIX = "phr_access_token:"
 PHR_REFRESH_TOKEN_PREFIX = "phr_refresh_token:"
 PHR_ACCESS_TOKEN_CACHE_TIMEOUT = 1800
 PHR_REFRESH_TOKEN_CACHE_TIMEOUT = 129600
+
+
+def get_phr_hf_id():
+    return settings.PHR_HF_ID
 
 
 def update_abha_from_profile(data, abha_key="abhaNumber", **tokens):
@@ -34,7 +41,9 @@ def update_abha_from_profile(data, abha_key="abhaNumber", **tokens):
         "date_of_birth": date_of_birth,
         "address": data.get("address"),
         "district": data.get("districtName"),
+        "district_code": data.get("districtCode"),
         "state": data.get("stateName"),
+        "state_code": data.get("stateCode"),
         "pincode": data.get("pinCode") or data.get("pincode"),
         "mobile": data.get("mobile"),
         "profile_photo": data.get("profilePhoto"),
@@ -156,3 +165,18 @@ def transform_phr_links_data(links_data, include_care_contexts=True):
         ]
 
     return transformed_data
+
+
+def update_phr_metadata(phr_health_id: str, updates: dict) -> bool:
+    try:
+        abha_number = AbhaNumber.objects.get(
+            phr_health_id=normalize_abha_address(phr_health_id)
+        )
+        health_data = abha_number.phr_health_ids_metadata.get(phr_health_id, {})
+        health_data.update(updates)
+        abha_number.phr_health_ids_metadata[phr_health_id] = health_data
+        abha_number.save()
+        return True
+    except AbhaNumber.DoesNotExist:
+        logger.warning(f"ABHA record not found for address: {phr_health_id}")
+        return False

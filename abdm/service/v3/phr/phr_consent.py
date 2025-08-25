@@ -1,14 +1,23 @@
+from datetime import timedelta
 from logging import getLogger
 from typing import Any
 
-from abdm.models.base import HealthInformationType
+from django.utils import timezone
+
+from abdm.models.abha_number import AbhaNumber
+from abdm.models.base import HealthInformationType, Purpose
+from abdm.models.consent import ConsentRequest
 from abdm.service.helper import (
     ABDMAPIException,
     cm_id,
     timestamp,
     uuid,
 )
-from abdm.service.phr_helper import get_default_abdm_period
+from abdm.service.phr_helper import (
+    format_abdm_datetime,
+    get_default_abdm_period,
+    get_phr_hf_id,
+)
 from abdm.service.request import Request
 from abdm.service.v3.types.phr.phr_consent import (
     PhrConsentArtefactBody,
@@ -26,6 +35,8 @@ from abdm.service.v3.types.phr.phr_consent import (
     PhrConsentRequestBody,
     PhrConsentRequestDenyBody,
     PhrConsentRequestDenyResponse,
+    PhrConsentRequestInitBody,
+    PhrConsentRequestInitResponse,
     PhrConsentRequestResponse,
     PhrConsentRequestRevokeBody,
     PhrConsentRequestRevokeResponse,
@@ -35,8 +46,6 @@ from abdm.service.v3.types.phr.phr_consent import (
 from abdm.settings import plugin_settings as settings
 
 logger = getLogger(__name__)
-
-ABDM_HIU_ID = "sbx_001"
 
 
 class PhrConsentService:
@@ -101,10 +110,11 @@ class PhrConsentService:
 
         response_json = response.json()
 
-        if ("error" in response_json and response_json["error"] is not None) or (
+        if ("error" in response_json and response_json["error"] not in (None, "")) or (
             isinstance(response_json, list)
             and len(response_json) > 0
             and "error" in response_json[0]
+            and response_json[0]["error"] not in (None, "")
         ):
             raise ABDMAPIException(detail=PhrConsentService.handle_error(response_json))
 
@@ -231,7 +241,7 @@ class PhrConsentService:
     ) -> PhrConsentAutoApproveSetupResponse:
         payload = {
             "isApplicableForAllHIPs": True,
-            "hiu": {"id": ABDM_HIU_ID},  # TODO: Get from config
+            "hiu": {"id": get_phr_hf_id()},
             "includedSources": [
                 {
                     "hiTypes": [hi_type.value for hi_type in HealthInformationType],
@@ -240,7 +250,7 @@ class PhrConsentService:
                         "code": "PATRQT",
                         "refUri": "http://terminology.hl7.org/CodeSystem/v3-ActReason",
                     },
-                    "period": get_default_abdm_period(),
+                    "period": get_default_abdm_period(days=365 * 100),
                 }
             ],
         }
@@ -269,3 +279,86 @@ class PhrConsentService:
                 "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
             },
         ).json()
+
+    @staticmethod
+    def phr_consent_request_init(
+        data: PhrConsentRequestInitBody,
+    ) -> PhrConsentRequestInitResponse:
+        payload = {
+            "consent": {
+                "purpose": {
+                    "text": "Self Requested",
+                    "code": "PATRQT",
+                    "refUri": "http://terminology.hl7.org/ValueSet/v3-PurposeOfUse",
+                },
+                "patient": {"id": data.get("patient_id")},
+                "hiu": {"id": get_phr_hf_id()},
+                "requester": {
+                    "name": "Self",
+                    "identifier": {
+                        "type": "Self",
+                        "value": "Self",
+                        "system": settings.CURRENT_DOMAIN,
+                    },
+                },
+                "hiTypes": [hi_type.value for hi_type in HealthInformationType],
+                "permission": {
+                    "accessMode": "VIEW",
+                    "dateRange": {
+                        "from": format_abdm_datetime(
+                            timezone.now() - timedelta(days=365 * 100)
+                        ),
+                        "to": format_abdm_datetime(timezone.now()),
+                    },
+                    "dataEraseAt": get_default_abdm_period(days=365 * 100).get("to"),
+                    "frequency": {
+                        "unit": "HOUR",
+                        "value": 1,
+                        "repeats": 2,
+                    },
+                },
+            },
+        }
+
+        patient_abha = AbhaNumber.objects.filter(
+            phr_health_id=data.get("patient_id")
+        ).first()
+
+        consent = ConsentRequest(
+            purpose=Purpose.SELF_REQUESTED.value,
+            hi_types=payload.get("consent").get("hiTypes"),
+            from_time=payload.get("consent")
+            .get("permission")
+            .get("dateRange")
+            .get("from"),
+            to_time=payload.get("consent").get("permission").get("dateRange").get("to"),
+            expiry=payload.get("consent").get("permission").get("dataEraseAt"),
+            frequency_unit=payload.get("consent")
+            .get("permission")
+            .get("frequency")
+            .get("unit"),
+            frequency_value=payload.get("consent")
+            .get("permission")
+            .get("frequency")
+            .get("value"),
+            frequency_repeats=payload.get("consent")
+            .get("permission")
+            .get("frequency")
+            .get("repeats"),
+            access_mode=payload.get("consent").get("permission").get("accessMode"),
+            hiu=get_phr_hf_id(),
+            patient_abha=patient_abha,
+        )
+
+        PhrConsentService._make_request(
+            "POST",
+            "/request/init",
+            payload,
+            headers={
+                "REQUEST-ID": str(consent.external_id),
+            },
+        )
+
+        consent.save()
+
+        return {}

@@ -33,7 +33,7 @@ class SourceSerializer(Serializer):
     period = DateRangeSerializer(required=True)
 
 
-class PhrSubscriptionEditAndApproveSerializer(Serializer):
+class PhrSubscriptionApproveSerializer(Serializer):
     isApplicableForAllHIPs = BooleanField(required=True)
     includedSources = SourceSerializer(required=True, many=True)
     excludedSources = SourceSerializer(required=False, many=True, allow_empty=True)
@@ -75,3 +75,8 @@ class PhrSubscriptionRequestDenySerializer(Serializer):
 
 class PhrSubscriptionStatusUpdateSerializer(Serializer):
     enable = BooleanField(required=True)
+
+
+class PhrSubscriptionEditSerializer(Serializer):
+    subscription = PhrSubscriptionApproveSerializer(required=True)
+    hiuId = CharField(required=True)

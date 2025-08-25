@@ -63,6 +63,7 @@ class PhrSubscriptionStatusUpdateResponse(TypedDict):
 class PhrSubscriptionEditBody(TypedDict):
     x_token: str
     subscription_id: str
+    hiu_id: str
     subscription: dict
 
 
@@ -91,4 +92,30 @@ class PhrSubscribedLockerBody(TypedDict):
 
 
 class PhrSubscribedLockerResponse(TypedDict):
+    pass
+
+
+class PhrSubscriptionRequestInitBody(TypedDict):
+    abha_address: str
+
+
+class PhrSubscriptionRequestInitResponse(TypedDict):
+    pass
+
+
+class PhrSubscriptionRequestOnNotifyBody(TypedDict):
+    request_id: str
+    subscription_request_id: str
+
+
+class PhrSubscriptionRequestOnNotifyResponse(TypedDict):
+    pass
+
+
+class PhrSubscriptionOnNotifyBody(TypedDict):
+    request_id: str
+    event_id: str
+
+
+class PhrSubscriptionOnNotifyResponse(TypedDict):
     pass

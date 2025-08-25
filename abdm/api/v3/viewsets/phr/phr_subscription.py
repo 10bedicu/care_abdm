@@ -1,15 +1,16 @@
 from logging import getLogger
 
+from django.utils.dateparse import parse_datetime
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
 from abdm.api.v3.serializers.phr.phr_subscription import (
-    PhrSubscriptionEditAndApproveSerializer,
+    PhrSubscriptionApproveSerializer,
+    PhrSubscriptionEditSerializer,
     PhrSubscriptionRequestDenySerializer,
     PhrSubscriptionStatusUpdateSerializer,
 )
@@ -18,7 +19,13 @@ from abdm.authentication import (
     IsPhrAuthenticated,
     PhrCustomAuthentication,
 )
-from abdm.service.phr_helper import get_phr_access_token, transform_phr_links_data
+from abdm.models.phr_notification import PhrNotification
+from abdm.service.phr_helper import (
+    get_phr_access_token,
+    transform_phr_links_data,
+    update_phr_metadata,
+)
+from abdm.service.v3.phr.phr_consent import PhrConsentService
 from abdm.service.v3.phr.phr_gateway import PhrGatewayService
 from abdm.service.v3.phr.phr_subscription import PhrSubscriptionService
 
@@ -34,15 +41,15 @@ class PhrSubscriptionViewSet(GenericViewSet):
     VALID_STATUSES = ["ALL", "REQUESTED", "EXPIRED", "REVOKED", "GRANTED", "DENIED"]
 
     serializer_action_classes = {
-        "phr_subscription__request__approve": PhrSubscriptionEditAndApproveSerializer,
+        "phr_subscription__request__approve": PhrSubscriptionApproveSerializer,
         "phr_subscription__request__deny": PhrSubscriptionRequestDenySerializer,
         "phr_subscription__status__update": PhrSubscriptionStatusUpdateSerializer,
-        "phr_subscription__edit": PhrSubscriptionEditAndApproveSerializer,
+        "phr_subscription__edit": PhrSubscriptionEditSerializer,
     }
 
     @property
     def x_token(self):
-        return get_phr_access_token("dora8sbx")
+        return get_phr_access_token(self.request.user.abha_address)
 
     def get_serializer_class(self):
         if self.action in self.serializer_action_classes:
@@ -82,7 +89,7 @@ class PhrSubscriptionViewSet(GenericViewSet):
                 {"x_token": self.x_token}
             )
             response["availableLinks"] = transform_phr_links_data(
-                links, include_care_contexts=False
+                links, include_contexts=False
             )
 
         if hips_data:
@@ -118,7 +125,10 @@ class PhrSubscriptionViewSet(GenericViewSet):
 
         if not status_param:
             return Response(
-                [],
+                {
+                    "results": [],
+                    "hasMore": False,
+                },
                 status=status.HTTP_200_OK,
             )
 
@@ -137,7 +147,13 @@ class PhrSubscriptionViewSet(GenericViewSet):
             if self._is_valid_item(req)
         ]
 
-        return Response(filtered_requests, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "results": filtered_requests,
+                "hasMore": len(filtered_requests) == limit,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=False, methods=["get"], url_path="request/(?P<request_id>[^/.]+)")
     def phr_subscription__request(self, request, request_id):
@@ -246,7 +262,8 @@ class PhrSubscriptionViewSet(GenericViewSet):
             {
                 "x_token": self.x_token,
                 "subscription_id": subscription_id,
-                "subscription": validated_data,
+                "hiu_id": validated_data.get("hiuId"),
+                "subscription": validated_data.get("subscription"),
             }
         )
 
@@ -264,20 +281,98 @@ class PhrSubscriptionViewSet(GenericViewSet):
         detail=False, methods=["get"], url_path="patient_locker/(?P<locker_id>[^/.]+)"
     )
     def phr_subscription__locker(self, request, locker_id):
+        # TODO: Remove this after testing
+        result = {
+            "lockerId": "ekacare",
+            "lockerName": "Sandbox Test Hospital",
+            "dateCreated": "2025-04-02T18:03:10.491Z",
+            "subscriptions": [
+                {
+                    "subscriptionId": "259efd14-2037-404a-9944-0cdce52ac3a7",
+                    "purpose": {
+                        "text": "Self Requested",
+                        "code": "PATRQT",
+                        "refUri": "www.abdm.gov.in",
+                    },
+                    "dateCreated": "2025-04-02T18:03:08.277Z",
+                    "status": "GRANTED",
+                    "dateGranted": "2025-07-03T12:10:44.663Z",
+                    "patient": {"id": "75224862464787@abdm"},
+                    "requester": {
+                        "id": "ekacare",
+                        "name": "Eka Care",
+                        "type": "HEALTH_LOCKER",
+                    },
+                    "includedSources": [
+                        {
+                            "categories": ["LINK", "DATA"],
+                            "hiTypes": [
+                                "DiagnosticReport",
+                                "Prescription",
+                                "DischargeSummary",
+                                "OPConsultation",
+                                "ImmunizationRecord",
+                                "WellnessRecord",
+                                "HealthDocumentRecord",
+                            ],
+                            "period": {
+                                "from": "2025-04-02T18:04:10.402Z",
+                                "to": "2125-03-09T18:03:08.171Z",
+                            },
+                            "status": "GRANTED",
+                        }
+                    ],
+                }
+            ],
+            "autoApprovals": [
+                {
+                    "id": 70423630,
+                    "autoApprovalId": "ba4f23d9-bc64-420f-ba02-60b2d667c649",
+                    "hiuId": "ekacare",
+                    "patientId": "75224862464787@abdm",
+                    "dateCreated": "2025-04-02T18:03:10.473Z",
+                    "dateModified": "2025-04-02T18:03:10.489Z",
+                    "policy": {
+                        "hiu": {"id": "ekacare", "name": "Eka Care"},
+                        "includedSources": [
+                            {
+                                "hiTypes": [
+                                    "DiagnosticReport",
+                                    "Prescription",
+                                    "DischargeSummary",
+                                    "OPConsultation",
+                                    "ImmunizationRecord",
+                                    "WellnessRecord",
+                                    "HealthDocumentRecord",
+                                ],
+                                "purpose": {
+                                    "text": "Self Requested",
+                                    "code": "PATRQT",
+                                    "refUri": "www.abdm.gov.in",
+                                },
+                                "hip": None,
+                                "period": {
+                                    "from": "2025-04-02T18:04:10.402Z",
+                                    "to": "2125-03-09T18:03:08.171Z",
+                                },
+                            }
+                        ],
+                        "excludedSources": [],
+                        "isApplicableForAllHIPs": True,
+                    },
+                    "isActive": True,
+                }
+            ],
+            "active": True,
+        }
+
+        return Response(result, status=status.HTTP_200_OK)
+
         result = PhrSubscriptionService.phr__subscription__locker(
             {"x_token": self.x_token, "locker_id": locker_id}
         )
 
         return Response(result, status=status.HTTP_200_OK)
-
-    @action(detail=False, methods=["post"], url_path="request/hiu/init")
-    def phr_subscription__request__init(self, request):
-        PhrSubscriptionService.phr__subscription__request__init(request.data)
-
-        return Response(
-            {"detail": "Subscription request initiated successfully"},
-            status=status.HTTP_200_OK,
-        )
 
 
 @extend_schema(tags=["PHR Subscription Callbacks"])
@@ -291,32 +386,104 @@ class PhrSubscriptionCallbackViewSet(GenericViewSet):
         url_path="hiu/hiecm/subscription-requests/on-init",
     )
     def phr_subscription__request__on__init(self, request):
-        logger.info(f"SUBSCRIPTION ON INIT: {request.data}")
+        data = request.data
+
+        logger.info(f"SUBSCRIPTION REQUEST ON INIT: {data}")
+
+        if data.get("error"):
+            return Response(data.get("error"), status=status.HTTP_400_BAD_REQUEST)
+
+        if not data.get("subscriptionRequest"):
+            return Response(
+                "Missing subscriptionRequest", status=status.HTTP_400_BAD_REQUEST
+            )
+
         return Response(status=status.HTTP_200_OK)
 
     @action(
         detail=False, methods=["post"], url_path="hiu/subscription-requests/hiu/notify"
     )
     def phr_subscription__request__on__notify(self, request):
-        logger.info(f"SUBSCRIPTION NOTIFY: {request.data}")
-
+        logger.info(f"SUBSCRIPTION  NOTIFY: {request.data}")
         notification_data = request.data.get("notification")
-        if not notification_data:
-            raise ValidationError("Missing notification data")
 
-        subscription_data = notification_data.get("subscription")
-        if not subscription_data:
-            raise ValidationError("Missing subscription data in notification")
+        if not notification_data:
+            logger.warning(f"Missing notification data: {request.data}")
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        subscription_status = notification_data.get("status")
+
+        if subscription_status == "GRANTED":
+            subscription_data = notification_data.get("subscription")
+            if not subscription_data:
+                logger.warning(
+                    f"Missing subscription data in notification: {notification_data}"
+                )
+                return Response(status=status.HTTP_400_BAD_REQUEST)
+
+            patient_id = subscription_data.get("patient", {}).get("id")
+            update_phr_metadata(
+                patient_id,
+                {
+                    "subscription_id": subscription_data.get("id"),
+                },
+            )
 
         PhrSubscriptionService.phr__subscription__request__on__notify(
             {
-                "acknowledgement": {
-                    "status": "OK",
-                    "subscriptionRequestId": notification_data.get(
-                        "subscriptionRequestId"
-                    ),
-                },
-                "response": {"requestId": subscription_data.get("requestId")},
+                "subscription_request_id": notification_data.get(
+                    "subscriptionRequestId"
+                ),
+                "request_id": request.headers.get("REQUEST-ID"),
+            }
+        )
+
+        return Response(status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="hiu/subscription/notify")
+    def phr_subscription__notify(self, request):
+        logger.info(f"SUBSCRIPTION NOTIFICATION NOTIFY: {request.data}")
+        event = request.data.get("event")
+
+        if not event:
+            logger.warning(f"Missing event data: {request.data}")
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        event_id = event.get("id")
+        category = event.get("category")
+
+        if category == "LINK":
+            content = event.get("content", {})
+            hip = PhrGatewayService.phr__gateway__provider(
+                {"id": content.get("hip", {}).get("id")}
+            ).get("identifier", {})
+            PhrNotification.objects.create(
+                event_id=event_id,
+                category=category,
+                subscription_id=event.get("subscriptionId"),
+                published_at=parse_datetime(event.get("published")),
+                abha_address=content.get("patient", {}).get("id"),
+                hip_id=hip.get("id"),
+                contexts=content.get("contexts", []),
+                title="New Record Linked",
+                description=f"A new record is linked to your abha address from {hip.get('name')}",
+                raw_event_data=event,
+            )
+
+            PhrConsentService.phr_consent_request_init(
+                {
+                    "patient_id": content.get("patient", {}).get("id"),
+                }
+            )
+
+        elif category == "DATA":
+            logger.info(f"DATA category event received: {event_id}")
+            # TODO: Find out the payload structure and store in DB
+
+        PhrSubscriptionService.phr__subscription__on__notify(
+            {
+                "event_id": event_id,
+                "request_id": request.headers.get("REQUEST-ID"),
             }
         )
 

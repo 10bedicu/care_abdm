@@ -124,7 +124,7 @@ class PhrProfileService:
 
         response = PhrProfileService._make_request(
             "GET",
-            "/",
+            "",
             headers=headers,
         )
 

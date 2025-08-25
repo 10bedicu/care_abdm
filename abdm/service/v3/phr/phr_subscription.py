@@ -7,6 +7,7 @@ from abdm.service.helper import (
     timestamp,
     uuid,
 )
+from abdm.service.phr_helper import get_default_abdm_period, get_phr_hf_id
 from abdm.service.request import Request
 from abdm.service.v3.types.phr.phr_subscription import (
     PhrSubscribedLockerBody,
@@ -17,11 +18,17 @@ from abdm.service.v3.types.phr.phr_subscription import (
     PhrSubscriptionArtefactResponse,
     PhrSubscriptionEditBody,
     PhrSubscriptionEditResponse,
+    PhrSubscriptionOnNotifyBody,
+    PhrSubscriptionOnNotifyResponse,
     PhrSubscriptionRequestApproveBody,
     PhrSubscriptionRequestApproveResponse,
     PhrSubscriptionRequestBody,
     PhrSubscriptionRequestDenyBody,
     PhrSubscriptionRequestDenyResponse,
+    PhrSubscriptionRequestInitBody,
+    PhrSubscriptionRequestInitResponse,
+    PhrSubscriptionRequestOnNotifyBody,
+    PhrSubscriptionRequestOnNotifyResponse,
     PhrSubscriptionRequestResponse,
     PhrSubscriptionRequestsBody,
     PhrSubscriptionRequestsResponse,
@@ -31,9 +38,6 @@ from abdm.service.v3.types.phr.phr_subscription import (
 from abdm.settings import plugin_settings as settings
 
 logger = getLogger(__name__)
-
-
-ABDM_HIU_ID = "IN3210000018"
 
 
 class PhrSubscriptionService:
@@ -104,10 +108,11 @@ class PhrSubscriptionService:
 
         response_json = response.json()
 
-        if ("error" in response_json and response_json["error"] is not None) or (
+        if ("error" in response_json and response_json["error"] not in (None, "")) or (
             isinstance(response_json, list)
             and len(response_json) > 0
             and "error" in response_json[0]
+            and response_json[0]["error"] not in (None, "")
         ):
             raise ABDMAPIException(
                 detail=PhrSubscriptionService.handle_error(response_json)
@@ -207,7 +212,7 @@ class PhrSubscriptionService:
             "PUT",
             f"/patients/{data.get('subscription_id')}",
             payload={
-                "hiuId": ABDM_HIU_ID,
+                "hiuId": data.get("hiu_id"),
                 "subscriptionEditAndApprovalRequest": data.get("subscription"),
             },
             headers={
@@ -241,30 +246,71 @@ class PhrSubscriptionService:
             expected_status=200,
         ).json()
 
-    # SUBSCRIPTION REQUEST CALLBACK SERVICES
     @staticmethod
     def phr__subscription__request__init(
-        data: dict,
-    ) -> dict:
-        response = PhrSubscriptionService._make_request(
+        data: PhrSubscriptionRequestInitBody,
+    ) -> PhrSubscriptionRequestInitResponse:
+        payload = {
+            "subscription": {
+                "purpose": {
+                    "text": "Self Requested",
+                    "code": "PATRQT",
+                    "refUri": "www.abdm.gov.in",
+                },
+                "patient": {"id": data.get("abha_address")},
+                "hiu": {"id": get_phr_hf_id()},
+                "categories": ["LINK", "DATA"],
+                "period": get_default_abdm_period(days=365 * 100),
+            }
+        }
+
+        PhrSubscriptionService._make_request(
             "POST",
             "/init",
-            payload=data,
+            payload=payload,
             expected_status=202,
         )
-
-        logger.info(f"SUBSCRIPTION REQUEST INIT RESPONSE: {response.json()}")
 
         return {}
 
     @staticmethod
     def phr__subscription__request__on__notify(
-        data: dict,
-    ) -> dict:
+        data: PhrSubscriptionRequestOnNotifyBody,
+    ) -> PhrSubscriptionRequestOnNotifyResponse:
+        payload = {
+            "acknowledgement": {
+                "status": "OK",
+                "subscriptionRequestId": data.get("subscription_request_id"),
+            },
+            "response": {"requestId": data.get("request_id")},
+        }
+
         PhrSubscriptionService._make_request(
             "POST",
             "/hiu/on-notify",
-            payload=data,
+            payload=payload,
+            expected_status=202,
+        )
+
+        return {}
+
+    @staticmethod
+    def phr__subscription__on__notify(
+        data: PhrSubscriptionOnNotifyBody,
+    ) -> PhrSubscriptionOnNotifyResponse:
+        payload = {
+            "acknowledgement": {
+                "status": "OK",
+                "eventId": data.get("event_id"),
+            },
+            "response": {"requestId": data.get("request_id")},
+        }
+
+        PhrSubscriptionService._make_request(
+            "POST",
+            "/hiu/care-context/on-notify",
+            payload=payload,
+            expected_status=202,
         )
 
         return {}

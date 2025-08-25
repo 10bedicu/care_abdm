@@ -191,9 +191,7 @@ class PhrTokenRefreshSerializer(Serializer):
         cache_key = f"{PHR_TEMP_REFRESH_TOKEN_INVALIDATION_PREFIX}{refresh_token_str}"
 
         if cache.get(cache_key):
-            raise PermissionDenied(
-                "This refresh token has been invalidated. Please log in again."
-            )
+            raise PermissionDenied("Session expired. Please log in again.")
 
         old_refresh_token = RefreshToken(refresh_token_str)
 

@@ -10,6 +10,7 @@ from rest_framework.viewsets import GenericViewSet
 
 from abdm.api.serializers.consent import ConsentRequestSerializer
 from abdm.models.consent import ConsentRequest
+from abdm.service.helper import hf_id_from_abha_id
 from abdm.service.v3.gateway import GatewayService
 from care.emr.models.organization import FacilityOrganizationUser
 from config.auth_views import CaptchaRequiredException
@@ -71,13 +72,19 @@ class ConsentViewSet(GenericViewSet, ListModelMixin, RetrieveModelMixin):
                 code=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
-        consent = ConsentRequest(**serializer.validated_data, requester=request.user)
+        patient_abha = serializer.validated_data["patient_abha"]
+        hiu_id = hf_id_from_abha_id(patient_abha.health_id)
+
+        consent = ConsentRequest(
+            **serializer.validated_data, requester=request.user, hiu=hiu_id
+        )
 
         GatewayService.consent__request__init(
             {
                 "consent": consent,
             }
         )
+
         consent.save()
 
         return Response(

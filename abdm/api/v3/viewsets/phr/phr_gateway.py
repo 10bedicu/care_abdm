@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
+from abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
 from abdm.service.phr_helper import (
     get_phr_access_token,
     transform_phr_links_data,
@@ -17,15 +18,18 @@ logger = getLogger(__name__)
 
 @extend_schema(tags=["PHR Gateway"])
 class PhrGatewayViewSet(GenericViewSet):
-    permission_classes = []
+    permission_classes = [IsPhrAuthenticated]
+    authentication_classes = [PhrCustomAuthentication]
+
+    @property
+    def x_token(self):
+        return get_phr_access_token(self.request.user.abha_address)
 
     @action(detail=False, methods=["get"], url_path="patient/links")
     def phr_gateway__patient__links(self, request):
-        x_token = get_phr_access_token("dora8sbx")
-
         links = PhrGatewayService.phr__gateway__patient__links(
             {
-                "x_token": x_token,
+                "x_token": self.x_token,
             }
         )
 

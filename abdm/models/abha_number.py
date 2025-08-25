@@ -8,7 +8,7 @@ class AbhaNumber(BaseModel):
     health_id = models.TextField(null=True, blank=True, unique=True)
 
     phr_health_id = models.TextField(null=True, blank=True, unique=True)
-    phr_auto_approve_request_id = models.TextField(null=True, blank=True, unique=True)
+    phr_health_ids_metadata = models.JSONField(default=dict, blank=True)
 
     deprecated_patient = models.OneToOneField(
         "facility.PatientRegistration",
@@ -35,7 +35,9 @@ class AbhaNumber(BaseModel):
 
     address = models.TextField(null=True, blank=True)
     district = models.TextField(null=True, blank=True)
+    district_code = models.TextField(null=True, blank=True)
     state = models.TextField(null=True, blank=True)
+    state_code = models.TextField(null=True, blank=True)
     pincode = models.TextField(null=True, blank=True)
 
     mobile = models.TextField(null=True, blank=True)
