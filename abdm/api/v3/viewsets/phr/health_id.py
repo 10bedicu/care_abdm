@@ -130,15 +130,14 @@ class PhrAuthViewSet(GenericViewSet):
         )
 
         accounts = result.get("accounts", [])
-        if result.get("authResult") == "success" and accounts:
-            account = accounts[0]
-            token = result.get("tokens", {})
+        users = result.get("users", [])
+        health_ids_list = [user.get("abhaAddress") for user in users]
 
+        if result.get("authResult") == "success" and accounts:
             (abha_number, _) = update_abha_from_profile(
-                account,
+                accounts[0],
                 abha_key="ABHANumber",
-                access_token=token.get("token"),
-                refresh_token=token.get("refreshToken"),
+                health_ids_list=health_ids_list,
             )
 
             Transaction.objects.create(
@@ -161,6 +160,7 @@ class PhrAuthViewSet(GenericViewSet):
                 },
                 status=status.HTTP_200_OK,
             )
+        update_abha_from_profile({}, health_ids_list=health_ids_list)
 
         return Response(
             {
@@ -255,8 +255,7 @@ class PhrAuthViewSet(GenericViewSet):
 
         abha_number, _ = update_abha_from_profile(
             profile_result,
-            access_token=result.get("tokens", {}).get("token"),
-            refresh_token=result.get("tokens", {}).get("refreshToken"),
+            health_ids_list=result.get("phrDetails", {}).get("abhaAddress", []),
         )
 
         Transaction.objects.create(
@@ -351,12 +350,18 @@ class PhrAuthViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        users = result.get("users", [])
+        health_ids_list = [user.get("abhaAddress") for user in users]
+
         if verify_system != "password" and login_hint != "abha-address":
             cache.set(
                 f"{PHR_VERIFY_USER_TOKEN_PREFIX}{result['txnId']}",
                 result["tokens"]["token"],
                 timeout=PHR_VERIFY_USER_TOKEN_TIMEOUT,
             )
+
+            update_abha_from_profile({}, health_ids_list=health_ids_list)
+
             return Response(
                 {
                     "transaction_id": result.get("txnId"),
@@ -381,8 +386,7 @@ class PhrAuthViewSet(GenericViewSet):
         profile_result = PhrProfileService.phr__profile({"x_token": access_token})
         abha_number, _ = update_abha_from_profile(
             profile_result,
-            access_token=access_token,
-            refresh_token=refresh_token,
+            health_ids_list=health_ids_list,
         )
 
         Transaction.objects.create(
@@ -450,11 +454,7 @@ class PhrAuthViewSet(GenericViewSet):
             {"x_token": result.get("token")}
         )
 
-        abha_number, _ = update_abha_from_profile(
-            profile_result,
-            access_token=result.get("token"),
-            refresh_token=result.get("refreshToken"),
-        )
+        abha_number, _ = update_abha_from_profile(profile_result)
 
         login_hint = validated_data.get("type")
 

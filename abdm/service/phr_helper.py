@@ -21,39 +21,134 @@ def get_phr_hf_id():
     return settings.PHR_HF_ID
 
 
-def update_abha_from_profile(data, abha_key="abhaNumber", **tokens):
-    date_of_birth = str(
-        datetime.strptime(
-            f"{data.get('yearOfBirth')}-{data.get('monthOfBirth') or '01'}-{data.get('dayOfBirth') or '01'}",
-            "%Y-%m-%d",
-        )
-    )[:10]
+def update_abha_from_profile(data, abha_key="abhaNumber", health_ids_list=None):
+    abha_number_value = data.get(abha_key) if data else None
+    current_health_id = data.get("abhaAddress") if data else None
+    if current_health_id:
+        current_health_id = normalize_abha_address(current_health_id)
+
+    metadata_updates = {}
+    if health_ids_list:
+        for health_id in health_ids_list:
+            if health_id:
+                normalized_id = normalize_abha_address(health_id)
+                metadata_updates[normalized_id] = {
+                    "subscription_id": None,
+                    "auto_approve_id": None,
+                    "is_auto_approve_enabled": False,
+                }
+    elif current_health_id:
+        metadata_updates[current_health_id] = {
+            "subscription_id": None,
+            "auto_approve_id": None,
+            "is_auto_approve_enabled": False,
+        }
+
+    date_of_birth = None
+    if data and data.get("yearOfBirth"):
+        try:
+            date_of_birth = str(
+                datetime.strptime(
+                    f"{data.get('yearOfBirth')}-{data.get('monthOfBirth') or '01'}-{data.get('dayOfBirth') or '01'}",
+                    "%Y-%m-%d",
+                )
+            )[:10]
+        except (ValueError, TypeError):
+            date_of_birth = None
 
     defaults = {
-        "abha_number": data.get(abha_key),
-        "phr_health_id": data.get("abhaAddress"),
-        "name": data.get("name") or data.get("fullName"),
-        "first_name": data.get("firstName"),
-        "middle_name": data.get("middleName"),
-        "last_name": data.get("lastName"),
-        "gender": data.get("gender"),
-        "email": data.get("email"),
-        "date_of_birth": date_of_birth,
-        "address": data.get("address"),
-        "district": data.get("districtName"),
-        "district_code": data.get("districtCode"),
-        "state": data.get("stateName"),
-        "state_code": data.get("stateCode"),
-        "pincode": data.get("pinCode") or data.get("pincode"),
-        "mobile": data.get("mobile"),
-        "profile_photo": data.get("profilePhoto"),
-        **tokens,
+        "abha_number": abha_number_value,
+        "phr_health_id": current_health_id,
     }
 
-    return AbhaNumber.objects.update_or_create(
-        abha_number=data.get(abha_key),
-        defaults=defaults,
-    )
+    if data:
+        defaults.update(
+            {
+                "name": data.get("name") or data.get("fullName"),
+                "first_name": data.get("firstName"),
+                "middle_name": data.get("middleName"),
+                "last_name": data.get("lastName"),
+                "gender": data.get("gender"),
+                "email": data.get("email"),
+                "address": data.get("address"),
+                "district": data.get("districtName"),
+                "district_code": data.get("districtCode"),
+                "state": data.get("stateName"),
+                "state_code": data.get("stateCode"),
+                "pincode": data.get("pinCode") or data.get("pincode"),
+                "mobile": data.get("mobile"),
+                "profile_photo": data.get("profilePhoto"),
+            }
+        )
+
+        if date_of_birth:
+            defaults["date_of_birth"] = date_of_birth
+
+    abha_instance = None
+
+    if abha_number_value:
+        try:
+            abha_instance = AbhaNumber.objects.get(abha_number=abha_number_value)
+        except AbhaNumber.DoesNotExist:
+            pass
+
+    if not abha_instance and (health_ids_list or current_health_id):
+        health_ids_to_check = health_ids_list or [current_health_id]
+        normalized_ids = [
+            normalize_abha_address(hid) for hid in health_ids_to_check if hid
+        ]
+
+        for normalized_id in normalized_ids:
+            existing_records = AbhaNumber.objects.filter(
+                phr_health_ids_metadata__has_key=normalized_id
+            )
+            if existing_records.exists():
+                abha_instance = existing_records.first()
+                break
+
+        if not abha_instance and current_health_id:
+            try:
+                abha_instance = AbhaNumber.objects.get(phr_health_id=current_health_id)
+            except AbhaNumber.DoesNotExist:
+                pass
+
+    if abha_instance:
+        for key, value in defaults.items():
+            if value is not None:
+                setattr(abha_instance, key, value)
+
+        existing_metadata = abha_instance.phr_health_ids_metadata or {}
+        for health_id, default_data in metadata_updates.items():
+            if health_id not in existing_metadata:
+                existing_metadata[health_id] = default_data
+
+        abha_instance.phr_health_ids_metadata = existing_metadata
+        abha_instance.save()
+        created = False
+    else:
+        if not metadata_updates and not defaults:
+            logger.warning("update_abha_from_profile: No data to create record with")
+            return None, False
+
+        defaults["phr_health_ids_metadata"] = metadata_updates
+
+        try:
+            abha_instance = AbhaNumber.objects.create(**defaults)
+            created = True
+        except Exception as e:
+            logger.warning(f"Failed to create AbhaNumber: {e}")
+            if current_health_id:
+                try:
+                    abha_instance = AbhaNumber.objects.get(
+                        phr_health_id=current_health_id
+                    )
+                    created = False
+                except AbhaNumber.DoesNotExist:
+                    return None, False
+            else:
+                return None, False
+
+    return abha_instance, created
 
 
 def normalize_abha_address(address):

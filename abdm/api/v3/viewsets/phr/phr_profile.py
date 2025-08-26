@@ -176,11 +176,7 @@ class PhrProfileViewSet(GenericViewSet):
             {"x_token": result.get("token")}
         )
 
-        abha_number, _ = update_abha_from_profile(
-            profile_result,
-            access_token=result.get("token"),
-            refresh_token=result.get("refreshToken"),
-        )
+        abha_number, _ = update_abha_from_profile(profile_result)
 
         remove_cached_phr_tokens(abha_health_id=request.user.abha_address)
         cache_phr_tokens(
