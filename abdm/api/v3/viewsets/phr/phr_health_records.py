@@ -15,8 +15,9 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
-from abdm.models import ConsentArtefact, Transaction, TransactionType
 from abdm.models.base import Status
+from abdm.models.consent import ConsentArtefact
+from abdm.service.phr_helper import get_phr_hf_id
 from abdm.settings import plugin_settings
 from care.emr.api.viewsets.base import (
     EMRBaseViewSet,
@@ -136,18 +137,28 @@ class PhrHealthRecordsViewSet(EMRBaseViewSet, EMRListMixin, EMRRetrieveMixin):
 
     @action(detail=False, methods=["get"], url_path="linked/(?P<pk>[^/.]+)")
     def phr_linked__health__records(self, request, pk):
-        consent = (
+        artefact = (
             ConsentArtefact.objects.filter(
-                Q(hip_id=pk),
-                Q(patient_abha_address=request.user.abha_address),
-                Q(status=Status.GRANTED.value),
+                hip=pk,
+                hiu=get_phr_hf_id(),
+                status=Status.GRANTED.value,
+                patient_abha_address=request.user.abha_address,
             )
             .order_by("-created_date")
             .first()
         )
 
+        if not artefact:
+            return Response(
+                {"detail": "No Health Information found for the given facility"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        artefact_id = artefact.artefact_id
+
         files = FileUpload.objects.filter(
-            Q(internal_name__contains=f"{pk}.json") | Q(associating_id=pk),
+            Q(internal_name__contains=f"{artefact_id}.json")
+            | Q(associating_id=artefact_id),
             file_type=FileTypeChoices.patient.value,
             file_category=FileCategoryChoices.unspecified.value,
             upload_completed=True,
@@ -156,7 +167,7 @@ class PhrHealthRecordsViewSet(EMRBaseViewSet, EMRListMixin, EMRRetrieveMixin):
 
         if files.count() == 0:
             return Response(
-                {"detail": "No Health Information found for the given id"},
+                {"detail": "No linked health records found for the given facility"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -179,10 +190,11 @@ class PhrHealthRecordsViewSet(EMRBaseViewSet, EMRListMixin, EMRRetrieveMixin):
                 _, content = file.files_manager.file_contents(file)
                 contents.extend(content)
 
-        Transaction.objects.create(
-            reference_id=pk,  # consent_arefact.external_id | consent_request.external_id
-            type=TransactionType.ACCESS_DATA,
-            created_by=request.user.abha_address,
-        )
+        # TODO: Create a transaction after solving the created_by issue
+        # Transaction.objects.create(
+        #     reference_id=pk,  # consent_arefact.external_id | consent_request.external_id
+        #     type=TransactionType.ACCESS_DATA,
+        #     created_by=request.user.abha_address,
+        # )
 
         return Response({"data": json.loads(content)}, status=status.HTTP_200_OK)

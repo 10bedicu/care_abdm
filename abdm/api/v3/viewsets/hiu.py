@@ -1,7 +1,10 @@
 import json
 import logging
+import time
+from zoneinfo import ZoneInfo
 
 from django.db.models import Q
+from django.utils.dateparse import parse_datetime
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
@@ -38,11 +41,13 @@ from care.emr.models.file_upload import FileUpload
 from care.emr.resources.file_upload.spec import FileCategoryChoices, FileTypeChoices
 
 logger = logging.getLogger(__name__)
+IST = ZoneInfo("Asia/Kolkata")
 
 
 @extend_schema(tags=["ABDM: HIU"])
 class HIUViewSet(GenericViewSet):
-    permission_classes = (IsAuthenticated,)
+    # permission_classes = (IsAuthenticated,)
+    permission_classes = []
 
     serializer_action_classes = {
         "identity__authentication": IdentityAuthenticationSerializer,
@@ -209,8 +214,22 @@ class HIUCallbackViewSet(GenericViewSet):
 
         return serializer.validated_data
 
+    def parse_abdm_datetime(self, datetime_value):
+        if not datetime_value:
+            return None
+
+        if hasattr(datetime_value, "astimezone"):
+            return datetime_value.astimezone(IST)
+
+        if isinstance(datetime_value, str):
+            dt = parse_datetime(datetime_value)
+            return dt.astimezone(IST) if dt else None
+
+        return None
+
     @action(detail=False, methods=["POST"], url_path="hiu/consent/request/on-init")
     def hiu__consent__request__on_init(self, request):
+        logger.info(f"TESTLOG - HIU CONSENT REQUEST ON INIT: {request.data}")
         validated_data = self.validate_request(request)
         request_id = validated_data.get("response").get("requestId")
 
@@ -232,6 +251,7 @@ class HIUCallbackViewSet(GenericViewSet):
                 f"Consent Request: {request_id}, Error in Consent Request while On Init: {validated_data.get('error').get('message')}"
             )
 
+        logger.info(f"TESTLOG - HIU CONSENT REQUEST ON INIT RESPONSE: {validated_data}")
         return Response(
             status=status.HTTP_202_ACCEPTED,
         )
@@ -278,6 +298,13 @@ class HIUCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hiu/consent/request/notify")
     def hiu__consent__request__notify(self, request):
+        """
+        This wait time is added to avoid the race condition between this callback and the
+        hiu__consent__request__on_init callback. (Adds a delay to the callback so that on-init completes first)
+        """
+
+        time.sleep(2)
+        logger.info(f"TESTLOG - HIU CONSENT REQUEST NOTIFY: {request.data}")
         validated_data = self.validate_request(request)
 
         notification = validated_data.get("notification")
@@ -323,6 +350,7 @@ class HIUCallbackViewSet(GenericViewSet):
             )
 
             for artefact in consent.consent_artefacts.all():
+                logger.info(f"TESTLOG - HIU CONSENT FETCH: {artefact}")
                 GatewayService.consent__fetch(
                     {
                         "artefact": artefact,
@@ -333,10 +361,21 @@ class HIUCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hiu/consent/on-fetch")
     def hiu__consent__on_fetch(self, request):
+        logger.info(f"TESTLOG - HIU CONSENT ON FETCH: {request.data}")
         validated_data = self.validate_request(request)
 
         consent = validated_data.get("consent")
         consent_detail = consent.get("consentDetail")
+
+        from_time = self.parse_abdm_datetime(
+            consent_detail.get("permission", {}).get("dateRange", {}).get("from")
+        )
+        to_time = self.parse_abdm_datetime(
+            consent_detail.get("permission", {}).get("dateRange", {}).get("to")
+        )
+        expiry = self.parse_abdm_datetime(
+            consent_detail.get("permission", {}).get("dataEraseAt")
+        )
 
         # updating an existing consent artefact
         (artefact, _) = ConsentArtefact.objects.update_or_create(
@@ -349,11 +388,9 @@ class HIUCallbackViewSet(GenericViewSet):
                 "hi_types": consent_detail.get("hiTypes", []),
                 "status": consent.get("status"),
                 "access_mode": consent_detail.get("permission").get("accessMode"),
-                "from_time": consent_detail.get("permission")
-                .get("dateRange")
-                .get("from"),
-                "to_time": consent_detail.get("permission").get("dateRange").get("to"),
-                "expiry": consent_detail.get("permission").get("dataEraseAt"),
+                "from_time": from_time,
+                "to_time": to_time,
+                "expiry": expiry,
                 "frequency_unit": consent_detail.get("permission")
                 .get("frequency")
                 .get("unit"),
@@ -364,6 +401,7 @@ class HIUCallbackViewSet(GenericViewSet):
                 .get("frequency")
                 .get("repeats"),
                 "signature": consent.get("signature"),
+                "patient_abha_address": consent_detail.get("patient").get("id"),
             },
         )
 
@@ -379,6 +417,7 @@ class HIUCallbackViewSet(GenericViewSet):
         detail=False, methods=["POST"], url_path="hiu/health-information/on-request"
     )
     def hiu__health_information__on_request(self, request):
+        logger.info(f"TESTLOG - HIU HEALTH INFORMATION ON REQUEST: {request.data}")
         validated_data = self.validate_request(request)
 
         if "hiRequest" in validated_data:
@@ -409,6 +448,7 @@ class HIUCallbackViewSet(GenericViewSet):
         url_path="hiu/health-information/transfer",
     )
     def hiu__health_information__transfer(self, request):
+        logger.info(f"TESTLOG - HIU HEALTH INFORMATION TRANSFER: {request.data}")
         validated_data = self.validate_request(request)
 
         key_material = validated_data.get("keyMaterial")
@@ -458,6 +498,10 @@ class HIUCallbackViewSet(GenericViewSet):
         )
         file.upload_completed = True
         file.save(skip_internal_name=True)
+
+        logger.info(
+            f"TESTLOG - HIU HEALTH INFORMATION TRANSFER FILE: {file.external_id}"
+        )
 
         Transaction.objects.create(
             reference_id=validated_data.get("transactionId"),

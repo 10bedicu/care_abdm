@@ -189,7 +189,12 @@ class Fhir:
                     ),
                 )
             ],
-            name=[HumanName(text=user.full_name)],
+            name=[
+                HumanName(
+                    text=f"{user_spec.first_name} {user_spec.last_name}".strip()
+                    or "CARE Admin"
+                )
+            ],
             telecom=[
                 *(
                     [ContactPoint(system="phone", value=user_spec.phone_number)]

@@ -248,7 +248,7 @@ class PhrProfileService:
             "transactionId": data.get("transaction_id"),
         }
 
-        path = "/link" if action == "LINK" else "/de-link"
+        path = "/link" if action == "LINK" else "/deLink"
 
         headers = {
             "X-token": f"Bearer {data.get('x_token', '')}",

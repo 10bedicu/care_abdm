@@ -79,11 +79,11 @@ class Request:
     def get(self, path, params=None, headers=None, auth=None):
         url = self.url + path
         headers = self.headers(headers, auth)
+        logger.info(f"GET REQUEST HEADER: {headers}")
 
         response = requests.get(
             url, headers=headers, params=params, timeout=settings.ABDM_REQUEST_TIMEOUT
         )
-
         if response.status_code == 400 or response.status_code == 401:
             result = response.json()
             if "code" in result and result["code"] == "900901":

@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 from functools import reduce
 
@@ -330,6 +331,12 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="consent/request/hip/notify")
     def consent__request__hip__notify(self, request):
+        """
+        This wait time is added to avoid the race condition between this callback and the
+        consent__request__hip__on_init callback. (Adds a delay to the callback so that on-init completes first)
+        """
+
+        time.sleep(2)
         logger.info(f"TESTLOG - CONSENT REQUEST HIP NOTIFY: {request.data}")
         validated_data = self.validate_request(request)
 
@@ -340,7 +347,10 @@ class HIPCallbackViewSet(GenericViewSet):
 
         abha_id = consent_detail.get("patient").get("id")
 
-        if request.headers.get("X-HIP-ID") == get_phr_hf_id():
+        hiu_id = consent_detail.get("hiu", {}).get("id")
+
+        # TODO: Remove this once the HIU ID is updated in the database
+        if hiu_id == get_phr_hf_id():
             abha_number = AbhaNumber.objects.filter(phr_health_id=abha_id).first()
         else:
             abha_number = AbhaNumber.objects.filter(health_id=abha_id).first()

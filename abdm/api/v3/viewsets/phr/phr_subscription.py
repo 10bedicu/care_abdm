@@ -89,7 +89,7 @@ class PhrSubscriptionViewSet(GenericViewSet):
                 {"x_token": self.x_token}
             )
             response["availableLinks"] = transform_phr_links_data(
-                links, include_contexts=False
+                links, include_care_contexts=False
             )
 
         if hips_data:
@@ -281,93 +281,6 @@ class PhrSubscriptionViewSet(GenericViewSet):
         detail=False, methods=["get"], url_path="patient_locker/(?P<locker_id>[^/.]+)"
     )
     def phr_subscription__locker(self, request, locker_id):
-        # TODO: Remove this after testing
-        result = {
-            "lockerId": "ekacare",
-            "lockerName": "Sandbox Test Hospital",
-            "dateCreated": "2025-04-02T18:03:10.491Z",
-            "subscriptions": [
-                {
-                    "subscriptionId": "259efd14-2037-404a-9944-0cdce52ac3a7",
-                    "purpose": {
-                        "text": "Self Requested",
-                        "code": "PATRQT",
-                        "refUri": "www.abdm.gov.in",
-                    },
-                    "dateCreated": "2025-04-02T18:03:08.277Z",
-                    "status": "GRANTED",
-                    "dateGranted": "2025-07-03T12:10:44.663Z",
-                    "patient": {"id": "75224862464787@abdm"},
-                    "requester": {
-                        "id": "ekacare",
-                        "name": "Eka Care",
-                        "type": "HEALTH_LOCKER",
-                    },
-                    "includedSources": [
-                        {
-                            "categories": ["LINK", "DATA"],
-                            "hiTypes": [
-                                "DiagnosticReport",
-                                "Prescription",
-                                "DischargeSummary",
-                                "OPConsultation",
-                                "ImmunizationRecord",
-                                "WellnessRecord",
-                                "HealthDocumentRecord",
-                            ],
-                            "period": {
-                                "from": "2025-04-02T18:04:10.402Z",
-                                "to": "2125-03-09T18:03:08.171Z",
-                            },
-                            "status": "GRANTED",
-                        }
-                    ],
-                }
-            ],
-            "autoApprovals": [
-                {
-                    "id": 70423630,
-                    "autoApprovalId": "ba4f23d9-bc64-420f-ba02-60b2d667c649",
-                    "hiuId": "ekacare",
-                    "patientId": "75224862464787@abdm",
-                    "dateCreated": "2025-04-02T18:03:10.473Z",
-                    "dateModified": "2025-04-02T18:03:10.489Z",
-                    "policy": {
-                        "hiu": {"id": "ekacare", "name": "Eka Care"},
-                        "includedSources": [
-                            {
-                                "hiTypes": [
-                                    "DiagnosticReport",
-                                    "Prescription",
-                                    "DischargeSummary",
-                                    "OPConsultation",
-                                    "ImmunizationRecord",
-                                    "WellnessRecord",
-                                    "HealthDocumentRecord",
-                                ],
-                                "purpose": {
-                                    "text": "Self Requested",
-                                    "code": "PATRQT",
-                                    "refUri": "www.abdm.gov.in",
-                                },
-                                "hip": None,
-                                "period": {
-                                    "from": "2025-04-02T18:04:10.402Z",
-                                    "to": "2125-03-09T18:03:08.171Z",
-                                },
-                            }
-                        ],
-                        "excludedSources": [],
-                        "isApplicableForAllHIPs": True,
-                    },
-                    "isActive": True,
-                }
-            ],
-            "active": True,
-        }
-
-        return Response(result, status=status.HTTP_200_OK)
-
         result = PhrSubscriptionService.phr__subscription__locker(
             {"x_token": self.x_token, "locker_id": locker_id}
         )

@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 from django.core.cache import cache
@@ -60,6 +61,7 @@ from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.questionnaire import QuestionnaireResponse
 
 logger = logging.getLogger(__name__)
+IST = ZoneInfo("Asia/Kolkata")
 
 
 class GatewayService:
@@ -67,6 +69,7 @@ class GatewayService:
 
     @staticmethod
     def handle_error(error: dict[str, Any] | str) -> str:
+        logger.info(f"TESTLOG - HANDLE GATEWAY ERROR: {error!s}")
         if isinstance(error, list):
             return GatewayService.handle_error(error[0])
 
@@ -88,6 +91,15 @@ class GatewayService:
             return "".join(list(map(lambda x: str(x), list(error.values()))))
 
         return "Unknown error occurred at ABDM's end while processing the request. Please try again later."
+
+    @staticmethod
+    def format_datetime_to_ist_abdm(datetime_str):
+        if not datetime_str:
+            return None
+
+        ist_dt = datetime_str.astimezone(IST)
+
+        return ist_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     @staticmethod
     def token__generate_token(
@@ -653,6 +665,8 @@ class GatewayService:
             }
             entries.append(entry)
 
+        logger.info(f"TESTLOG - ENTRIES: {entries}")
+
         payload = {
             "pageNumber": 1,
             "pageCount": 1,
@@ -672,6 +686,8 @@ class GatewayService:
             },
         }
 
+        logger.info(f"TESTLOG - HEALTH INFORMATION TRANSFER PAYLOAD: {payload}")
+
         auth_header = Request("").auth_header()
         headers = {
             "Content-Type": "application/json",
@@ -685,6 +701,11 @@ class GatewayService:
             json=payload,
             headers=headers,
             timeout=20,
+        )
+
+        logger.info(f"TESTLOG - HEALTH INFORMATION TRANSFER RESPONSE: {response.text}")
+        logger.info(
+            f"TESTLOG - HEALTH INFORMATION TRANSFER RESPONSE STATUS CODE: {response.status_code}"
         )
 
         if response.status_code != 202:
@@ -818,7 +839,8 @@ class GatewayService:
                 "patient": {"id": consent.patient_abha.health_id},
                 "hiu": {"id": hiu_id},
                 "requester": {
-                    "name": f"{consent.requester.first_name} {consent.requester.last_name}",
+                    "name": f"{consent.requester.first_name} {consent.requester.last_name}".strip()
+                    or "CARE",
                     "identifier": {
                         "type": "CARE Username",
                         "value": consent.requester.username,
@@ -969,6 +991,7 @@ class GatewayService:
     def data_flow__health_information__request(
         data: DataFlowHealthInformationRequestBody,
     ) -> DataFlowHealthInformationRequestResponse:
+        logger.info(f"TESTLOG - DATA FLOW HEALTH INFORMATION REQUEST: {data}")
         artefact = data.get("artefact")
 
         if not artefact:
@@ -980,10 +1003,12 @@ class GatewayService:
 
         payload = {
             "hiRequest": {
-                "consent": {"id": str(artefact.artefact_id)},
+                "consent": {"id": str(artefact.external_id)},
                 "dateRange": {
-                    "from": artefact.from_time.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                    "to": artefact.to_time.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                    "from": GatewayService.format_datetime_to_ist_abdm(
+                        artefact.from_time
+                    ),
+                    "to": GatewayService.format_datetime_to_ist_abdm(artefact.to_time),
                 },
                 "dataPushUrl": settings.BACKEND_DOMAIN
                 + "/api/abdm/api/v3/hiu/health-information/transfer",
@@ -991,8 +1016,8 @@ class GatewayService:
                     "cryptoAlg": artefact.key_material_algorithm,
                     "curve": artefact.key_material_curve,
                     "dhPublicKey": {
-                        "expiry": artefact.expiry.astimezone(UTC).strftime(
-                            "%Y-%m-%dT%H:%M:%S.000Z"
+                        "expiry": GatewayService.format_datetime_to_ist_abdm(
+                            artefact.expiry
                         ),
                         "parameters": f"{artefact.key_material_curve}/{artefact.key_material_algorithm}",
                         "keyValue": artefact.key_material_public_key,
@@ -1001,6 +1026,11 @@ class GatewayService:
                 },
             },
         }
+
+        logger.info(
+            f"TESTLOG - DATA FLOW HEALTH INFORMATION REQUEST PAYLOAD: {payload}"
+        )
+        # return {}
 
         path = "/data-flow/v3/health-information/request"
         response = GatewayService.request.post(
