@@ -46,8 +46,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 @extend_schema(tags=["ABDM: HIU"])
 class HIUViewSet(GenericViewSet):
-    # permission_classes = (IsAuthenticated,)
-    permission_classes = []
+    permission_classes = (IsAuthenticated,)
 
     serializer_action_classes = {
         "identity__authentication": IdentityAuthenticationSerializer,
