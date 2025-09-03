@@ -28,9 +28,10 @@ from abdm.models import (
     ConsentArtefact,
     HealthFacility,
     Transaction,
+    TransactionStatus,
     TransactionType,
 )
-from abdm.service.helper import uuid
+from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.gateway import GatewayService
 from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import GenderChoices
@@ -103,55 +104,82 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hip/token/on-generate-token")
     def hip__token__on_generate_token(self, request):
-        validated_data = self.validate_request(request)
-
-        cached_data = cache.get(
-            "abdm_link_care_context__"
-            + str(validated_data.get("response").get("requestId"))
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Request for {request.data!s} {request.headers!s}"
         )
 
-        if not cached_data:
-            logger.warning(
-                f"Request ID: {validated_data.get('response').get('requestId')!s} not found in cache"
-            )
+        validated_data = self.validate_request(request)
 
-            return Response(status=status.HTTP_404_NOT_FOUND)
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Validated data for {validated_data}"
+        )
 
-        abha_number = AbhaNumber.objects.filter(
-            abha_number=cached_data.get("abha_number")
-        ).first()
+        hf_id = request.headers.get("X-HIP-ID")
+        health_id = validated_data.get("abhaAddress")
+
+        abha_number = AbhaNumber.objects.filter(health_id=health_id).first()
 
         if not abha_number:
             logger.warning(
-                f"ABHA Number: {cached_data.get('abha_number')} not found in the database"
+                f"ON_GENERATE_TOKEN :: {health_id} not found in the database"
             )
 
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         cache.set(
-            "abdm_link_token__" + abha_number.health_id,
+            f"abdm_link_token__{hf_id}__{health_id}",
             validated_data.get("linkToken"),
             timeout=60 * 30,
         )
 
-        if cached_data.get("purpose") == "LINK_CARECONTEXT":
-            GatewayService.link__carecontext(
-                {
-                    "patient": abha_number.patient,
-                    "care_contexts": cached_data.get("care_contexts", []),
-                    "user": request.user,
-                }
-            )
+        link_care_context_request_cache_keys = cache.keys(
+            f"abdm_link_care_context__{hf_id}__{health_id}__*"
+        )
+
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Link Care Context Request Cache Keys for {link_care_context_request_cache_keys}"
+        )
+
+        for request_cache_key in link_care_context_request_cache_keys:
+            cached_data = cache.get(request_cache_key)
+
+            if cached_data.get("purpose") == "LINK_CARECONTEXT":
+                logger.info(
+                    f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Initiated Care Context Linking for {cached_data.get('reference_id')} {cached_data.get('patient')} {cached_data.get('care_contexts')} {cached_data.get('hf_id')}"
+                )
+
+                GatewayService.link__carecontext(
+                    {
+                        "reference_id": cached_data.get("reference_id"),
+                        "patient": abha_number.patient,
+                        "care_contexts": cached_data.get("care_contexts", []),
+                        "user": request.user,
+                        "hf_id": cached_data.get("hf_id"),
+                    }
+                )
+
+                cache.delete(request_cache_key)
 
         return Response(status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=["POST"], url_path="link/on_carecontext")
     def link__on_carecontext(self, request):
-        self.validate_request(request)
+        logger.info(
+            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Request for {request.data!s} {request.headers!s}"
+        )
 
-        # TODO: delete care context transaction if it failed
+        data = self.validate_request(request)
+        request_id = data.get("response", {}).get("requestId")
 
-        # TODO: handle failed link requests
+        logger.info(f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Validated data for {data}")
+
+        Transaction.objects.filter(reference_id=request_id).update(
+            status=TransactionStatus.COMPLETED
+        )
+
+        logger.info(
+            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Transaction status updated for {request_id} to {TransactionStatus.COMPLETED.label}"
+        )
 
         return Response(status=status.HTTP_202_ACCEPTED)
 
@@ -161,10 +189,10 @@ class HIPCallbackViewSet(GenericViewSet):
     def hip__patient__care_context__discover(self, request):
         validated_data = self.validate_request(request)
 
-        patient_data = validated_data.get("patient")
+        patient_data = validated_data.get("patient", {})
         identifiers = [
-            *patient_data.get("verifiedIdentifiers"),
-            *patient_data.get("unverifiedIdentifiers"),
+            *patient_data.get("verifiedIdentifiers", []),
+            *patient_data.get("unverifiedIdentifiers", []),
         ]
 
         health_id_number = next(
@@ -210,6 +238,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "request_id": request.headers.get("REQUEST-ID"),
                 "patient": patient,
                 "matched_by": [matched_by],
+                "hf_id": request.headers.get("x-hip-id"),
             }
         )
 
@@ -289,6 +318,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "request_id": request.headers.get("REQUEST-ID"),
                 "patient": patient,
                 "care_contexts": cached_data.get("care_contexts"),
+                "hf_id": request.headers.get("x-hip-id"),
             }
         )
 
@@ -464,7 +494,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "+91" + patient_data.get("phoneNumber", "").replace(" ", "")[-10:]
             )
             date_of_birth = datetime.strptime(
-                f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth')}-{patient_data.get('dayOfBirth')}",
+                f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
                 "%Y-%m-%d",
             ).date()
             patient = Patient.objects.create(
@@ -489,7 +519,11 @@ class HIPCallbackViewSet(GenericViewSet):
                 health_id=patient_data.get("abhaAddress"),
                 name=patient_data.get("name"),
                 gender=patient_data.get("gender"),
-                date_of_birth=date_of_birth,
+                date_of_birth=validate_and_format_date(
+                    patient_data.get("yearOfBirth"),
+                    patient_data.get("monthOfBirth"),
+                    patient_data.get("dayOfBirth"),
+                ),
                 address=patient_data.get("address").get("line"),
                 district=patient_data.get("address").get("district"),
                 state=patient_data.get("address").get("state"),

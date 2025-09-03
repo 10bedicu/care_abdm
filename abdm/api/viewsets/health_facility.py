@@ -1,3 +1,5 @@
+import re
+
 from celery import shared_task
 from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import action
@@ -40,14 +42,17 @@ def register_health_facility_as_service(facility_external_id):
         data = response.json()[0]
 
         if "error" in data:
-            if (
-                data["error"].get("code") == "2500"
-                and settings.ABDM_CLIENT_ID in data["error"].get("message")
-                and "already associated" in data["error"].get("message")
-            ):
-                health_facility.registered = True
-                health_facility.save()
-                return [True, None]
+            if settings.ABDM_CLIENT_ID in data["error"].get(
+                "message"
+            ) and "already associated" in data["error"].get("message"):
+                match = re.search(r"service id: (\w+)", data["error"].get("message"))
+
+                if match:
+                    hf_id = match.group(1)
+                    health_facility.hf_id = hf_id
+                    health_facility.registered = True
+                    health_facility.save()
+                    return [True, None]
 
             return [
                 False,
@@ -55,6 +60,8 @@ def register_health_facility_as_service(facility_external_id):
             ]
 
         if "servicesLinked" in data:
+            hf_id = data.get("servicesLinked", {}).get("id")
+            health_facility.hf_id = hf_id
             health_facility.registered = True
             health_facility.save()
             return [True, None]

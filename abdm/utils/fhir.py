@@ -37,7 +37,7 @@ from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.timing import Timing, TimingRepeat
 
 from abdm.models.health_facility import HealthFacility as HealthFacilityModel
-from abdm.service.helper import uuid
+from abdm.service.helper import ABDMAPIException, uuid
 from abdm.settings import plugin_settings as settings
 from care.emr.models.allergy_intolerance import (
     AllergyIntolerance as AllergyIntoleranceModel,
@@ -54,11 +54,15 @@ from care.emr.models.medication_statement import (
 )
 from care.emr.models.observation import Observation as ObservationModel
 from care.emr.models.patient import Patient as PatientModel
+from care.emr.models.questionnaire import (
+    QuestionnaireResponse as QuestionnaireResponseModel,
+)
 from care.emr.resources.allergy_intolerance.spec import AllergyIntoleranceReadSpec
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.emr.resources.condition.spec import ConditionReadSpec
 from care.emr.resources.encounter.spec import EncounterRetrieveSpec
 from care.emr.resources.facility.spec import FacilityRetrieveSpec
+from care.emr.resources.file_upload.spec import FileTypeChoices
 from care.emr.resources.medication.request.spec import (
     DosageInstruction as DosageInstructionSpec,
 )
@@ -149,7 +153,7 @@ class Fhir:
                 ),
             ],
             gender=patient_spec.gender,
-            birthDate=patient.abha_number.date_of_birth,
+            birthDate=patient.abha_number.parsed_date_of_birth,
             address=[
                 Address(
                     line=[patient_spec.address],
@@ -620,13 +624,13 @@ class Fhir:
             type=CodeableConcept(
                 coding=[
                     Coding(
-                        system="https://projecteka.in/sct",
+                        system="http://snomed.info/sct",
                         code="440545006",
                         display="Prescription record",
                     )
                 ]
             ),
-            title="Prescription",
+            title="Prescription Records",
             date=datetime.now(UTC).isoformat(),
             section=[
                 CompositionSection(
@@ -661,13 +665,13 @@ class Fhir:
             type=CodeableConcept(
                 coding=[
                     Coding(
-                        system="https://projecteka.in/sct",
+                        system="http://snomed.info/sct",
                         code="371530004",
                         display="Clinical consultation report",
                     )
                 ]
             ),
-            title="Medications",
+            title="Consultation Report",
             date=datetime.now(UTC).isoformat(),
             section=list(
                 filter(
@@ -783,6 +787,242 @@ class Fhir:
             author=[self._reference(self._organization(encounter.facility))],
         )
 
+    def _discharge_summary_composition(
+        self, encounter: EncounterModel, care_context_id: str
+    ):
+        return Composition(
+            id=care_context_id,
+            identifier=Identifier(value=care_context_id),
+            status="final",
+            type=CodeableConcept(
+                coding=[
+                    Coding(
+                        system="http://snomed.info/sct",
+                        code="373942005",
+                        display="Discharge summary",
+                    )
+                ]
+            ),
+            title="Discharge Summary",
+            date=datetime.now(UTC).isoformat(),
+            section=list(
+                filter(
+                    lambda section: section.entry and len(section.entry) > 0,
+                    [
+                        CompositionSection(
+                            title="Chief Complaints",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="422843007",
+                                        display="Chief complaint section",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                self._reference(self._condition(condition))
+                                for condition in ConditionModel.objects.filter(
+                                    encounter=encounter
+                                )
+                            ],
+                        ),
+                        CompositionSection(
+                            title="Physical Examination",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="425044008",
+                                        display="Physical exam section",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                self._reference(self._observation(observation))
+                                for observation in ObservationModel.objects.filter(
+                                    encounter=encounter
+                                ).exclude(Q(main_code__isnull=True) | Q(main_code={}))
+                            ],
+                        ),
+                        CompositionSection(
+                            title="Allergies",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="722446000",
+                                        display="Allergy record",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                self._reference(self._allergy_intolerance(allergy))
+                                for allergy in AllergyIntoleranceModel.objects.filter(
+                                    encounter=encounter
+                                )
+                            ],
+                        ),
+                        CompositionSection(
+                            title="Medications",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="721912009",
+                                        display="Medication summary document",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                *[
+                                    self._reference(self._medication_request(request))
+                                    for request in MedicationRequestModel.objects.filter(
+                                        encounter=encounter
+                                    )
+                                ],
+                                *[
+                                    self._reference(
+                                        self._medication_statement(statement)
+                                    )
+                                    for statement in MedicationStatementModel.objects.filter(
+                                        encounter=encounter
+                                    )
+                                ],
+                            ],
+                        ),
+                        CompositionSection(
+                            title="Document Reference",
+                            code=CodeableConcept(
+                                coding=[
+                                    Coding(
+                                        system="http://snomed.info/sct",
+                                        code="371530004",
+                                        display="Clinical consultation report",
+                                    )
+                                ]
+                            ),
+                            entry=[
+                                self._reference(self._document_reference(file))
+                                for file in FileUploadModel.objects.filter(
+                                    associating_id=encounter.external_id
+                                )
+                            ],
+                        ),
+                    ],
+                )
+            ),
+            subject=self._reference(self._patient(encounter.patient)),
+            encounter=self._reference(
+                self._encounter(encounter, include_diagnosis=True)
+            ),
+            author=[self._reference(self._organization(encounter.facility))],
+        )
+
+    def _health_document_composition(self, file: FileUploadModel, care_context_id: str):
+        if file.file_type not in (FileTypeChoices.patient, FileTypeChoices.encounter):
+            raise ABDMAPIException(
+                "File type must be either patient or encounter to create health document composition"
+            )
+
+        patient = PatientModel.objects.filter(
+            Q(external_id=file.associating_id)
+            | Q(encounter__external_id=file.associating_id)
+        ).first()
+
+        if not patient:
+            raise ABDMAPIException(
+                "Patient not found for the given file associating_id"
+            )
+
+        encounter = EncounterModel.objects.filter(
+            external_id=file.associating_id
+        ).first()
+
+        return Composition(
+            id=care_context_id,
+            identifier=Identifier(value=care_context_id),
+            status="final",
+            type=CodeableConcept(
+                coding=[
+                    Coding(
+                        system="http://snomed.info/sct",
+                        code="419891008",
+                        display="Record artifact",
+                    )
+                ]
+            ),
+            title="Health Document",
+            date=datetime.now(UTC).isoformat(),
+            section=list(
+                filter(
+                    lambda section: section.entry and len(section.entry) > 0,
+                    [
+                        CompositionSection(
+                            title=file.name,
+                            entry=[self._reference(self._document_reference(file))],
+                        ),
+                    ],
+                )
+            ),
+            subject=self._reference(self._patient(patient)),
+            encounter=self._reference(
+                self._encounter(encounter, include_diagnosis=True)
+            )
+            if encounter
+            else None,
+            author=[self._reference(self._practitioner(file.created_by))],
+        )
+
+    def _wellness_composition(
+        self, questionnaire_response: QuestionnaireResponseModel, care_context_id: str
+    ):
+        observations = ObservationModel.objects.filter(
+            questionnaire_response=questionnaire_response,
+        ).filter(
+            Q(main_code__isnull=False) & ~Q(main_code={})
+            | Q(alternate_coding__isnull=False) & ~Q(alternate_coding=[])
+        )
+
+        if not observations:
+            raise ABDMAPIException(
+                "No observations found for the given questionnaire response"
+            )
+
+        return Composition(
+            id=care_context_id,
+            identifier=Identifier(value=care_context_id),
+            status="final",
+            type=CodeableConcept(text="Wellness Record"),
+            title="Wellness Record",
+            date=datetime.now(UTC).isoformat(),
+            section=list(
+                filter(
+                    lambda section: section.entry and len(section.entry) > 0,
+                    [
+                        CompositionSection(
+                            title="Other Observations",
+                            entry=[
+                                self._reference(self._observation(observation))
+                                for observation in observations
+                            ],
+                        ),
+                    ],
+                )
+            ),
+            subject=self._reference(self._patient(questionnaire_response.patient)),
+            encounter=self._reference(
+                self._encounter(
+                    questionnaire_response.encounter, include_diagnosis=True
+                )
+            )
+            if questionnaire_response.encounter
+            else None,
+            author=[
+                self._reference(self._practitioner(questionnaire_response.created_by))
+            ],
+        )
+
     def _bundle_entry(self, resource: Resource):
         return BundleEntry(fullUrl=self._reference_url(resource), resource=resource)
 
@@ -819,6 +1059,62 @@ class Fhir:
             entry=[
                 self._bundle_entry(
                     self._op_consult_composition(encounter, care_context_id)
+                ),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
+        )
+
+    def create_discharge_summary_record(
+        self, encounter: EncounterModel, care_context_id: str = uuid()
+    ):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(
+                    self._discharge_summary_composition(encounter, care_context_id)
+                ),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
+        )
+
+    def create_health_document_record(
+        self, file: FileUploadModel, care_context_id: str = uuid()
+    ):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(
+                    self._health_document_composition(file, care_context_id)
+                ),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
+        )
+
+    def create_wellness_record(
+        self,
+        questionnaire_response: QuestionnaireResponseModel,
+        care_context_id: str = uuid(),
+    ):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(
+                    self._wellness_composition(questionnaire_response, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
