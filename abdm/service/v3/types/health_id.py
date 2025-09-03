@@ -169,32 +169,6 @@ class EnrollmentEnrolByAadhaarViaBioResponse(TypedDict):
     txnId: str
 
 
-class EnrollmentEnrolByAadhaarViaDemographicsResponse(TypedDict):
-    healthIdNumber: str
-    healthId: str
-    mobile: str
-    firstName: str
-    middleName: str
-    lastName: str
-    name: str
-    yearOfBirth: str
-    dayOfBirth: str
-    monthOfBirth: str
-    gender: Literal["M", "F", "O"]
-    profilePhoto: str
-    stateCode: str
-    districtCode: str
-    pincode: str
-    address: str
-    stateName: str
-    districtName: str
-    kycVerified: str
-    token: str
-    jwtResponse: Token
-    status: Literal["ACTIVE"]
-    new: bool
-
-
 class EnrollmentAuthByAbdmBody(TypedDict):
     scope: list[Literal["abha-enrol", "dl-flow", "mobile-verify", "email-verify"]]
     transaction_id: str
