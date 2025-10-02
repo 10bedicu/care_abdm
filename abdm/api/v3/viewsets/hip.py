@@ -34,7 +34,7 @@ from abdm.models import (
 from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.gateway import GatewayService
 from care.emr.models.patient import Patient
-from care.emr.resources.patient.spec import GenderChoices
+from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,51 @@ class HIPViewSet(GenericViewSet):
             },
             status=status.HTTP_202_ACCEPTED,
         )
+
+    @action(
+        detail=False,
+        methods=["GET"],
+        url_path="patient/fetch-by-token/(?P<token>[^/.]+)",
+    )
+    def patient__fetch_by_token(self, request, token):
+        keys = cache.keys("abdm_patient_share__*")
+        matched_abhas = []
+        for key in keys:
+            try:
+                cached_token = cache.get(key)
+            except Exception:
+                cached_token = None
+            if str(cached_token) == str(token):
+                matched_key = key.decode("utf-8") if hasattr(key, "decode") else key
+                matched_abhas.append(matched_key.replace("abdm_patient_share__", ""))
+
+        if not matched_abhas:
+            return Response(
+                {"detail": "No active token found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        if len(matched_abhas) > 1:
+            return Response(
+                {"detail": "Ambiguous token"}, status=status.HTTP_409_CONFLICT
+            )
+
+        abha_address = matched_abhas[0]
+
+        abha_number = AbhaNumber.objects.filter(health_id=abha_address).first()
+        if not abha_number:
+            return Response(
+                {"detail": "ABHA address not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        patient = abha_number.patient
+        if not patient:
+            return Response(
+                {"detail": "Patient not linked to ABHA"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = PatientPartialSpec.serialize(patient).to_json()
+        return Response(data, status=status.HTTP_200_OK)
 
 
 @extend_schema(tags=["ABDM: HIP Callback"])
@@ -547,7 +592,7 @@ class HIPCallbackViewSet(GenericViewSet):
 
             return Response(status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        token_number = len(cache.client.get_client().keys("abdm_patient_share__*")) + 1
+        token_number = len(cache.keys("abdm_patient_share__*")) + 1
 
         cache.set(
             "abdm_patient_share__" + abha_number.health_id,
