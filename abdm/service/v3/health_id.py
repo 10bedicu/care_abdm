@@ -14,12 +14,18 @@ from abdm.service.v3.types.health_id import (
     EnrollmentAuthByAbdmResponse,
     EnrollmentEnrolAbhaAddressBody,
     EnrollmentEnrolAbhaAddressResponse,
+    EnrollmentEnrolAuthInitViaFaceBody,
+    EnrollmentEnrolAuthInitViaFaceResponse,
     EnrollmentEnrolByAadhaarViaBioBody,
     EnrollmentEnrolByAadhaarViaBioResponse,
     EnrollmentEnrolByAadhaarViaDemographicsBody,
     EnrollmentEnrolByAadhaarViaDemographicsResponse,
+    EnrollmentEnrolByAadhaarViaFaceBody,
+    EnrollmentEnrolByAadhaarViaFaceResponse,
     EnrollmentEnrolByAadhaarViaOtpBody,
     EnrollmentEnrolByAadhaarViaOtpResponse,
+    EnrollmentEnrolCapturePIDViaFaceBody,
+    EnrollmentEnrolCapturePIDViaFaceResponse,
     EnrollmentEnrolSuggestionBody,
     EnrollmentEnrolSuggestionResponse,
     EnrollmentRequestOtpBody,
@@ -84,6 +90,83 @@ class HealthIdService:
                     "fingerPrintAuthPid": base64.b64encode(
                         data.get("fingerprint_pid", "").encode("utf-8")
                     ).decode("utf-8"),
+                    "mobile": data.get("mobile", ""),
+                },
+            },
+            "consent": {"code": "abha-enrollment", "version": "1.4"},
+        }
+
+        path = "/enrollment/enrol/byAadhaar"
+        response = HealthIdService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
+
+    def enrollment__enrol__auth_init__via_face(
+        data: EnrollmentEnrolAuthInitViaFaceBody,
+    ) -> EnrollmentEnrolAuthInitViaFaceResponse:
+        payload = {
+            "scope": ["abha-enrol", "face-auth"],
+        }
+
+        path = "/enrollment/enrol/auth/init"
+        response = HealthIdService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
+
+    @staticmethod
+    def enrollment__enrol__capturePID__via_face(
+        data: EnrollmentEnrolCapturePIDViaFaceBody,
+    ) -> EnrollmentEnrolCapturePIDViaFaceResponse:
+        payload = {
+            "scope": ["abha-enrol", "face-verify"],
+            "txnId": data.get("transaction_id", ""),
+        }
+
+        path = "/enrollment/enrol/capturePID"
+        response = HealthIdService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
+
+    @staticmethod
+    def enrollment__enrol__byAadhaar__via_face(
+        data: EnrollmentEnrolByAadhaarViaFaceBody,
+    ) -> EnrollmentEnrolByAadhaarViaFaceResponse:
+        payload = {
+            "authData": {
+                "authMethods": ["face_auth"],
+                "face": {
+                    "txnId": data.get("transaction_id", ""),
+                    "aadhaar": encrypt_message(data.get("aadhaar", "")),
                     "mobile": data.get("mobile", ""),
                 },
             },
