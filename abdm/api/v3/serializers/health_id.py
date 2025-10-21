@@ -14,6 +14,20 @@ class AbhaCreateVerifyAadhaarBioSerializer(Serializer):
     mobile = CharField(max_length=10, min_length=10, required=True)
 
 
+class AbhaCreateAuthInitViaFaceSerializer(Serializer):
+    pass
+
+
+class AbhaCreateCapturePIDViaFaceSerializer(Serializer):
+    transaction_id = UUIDField(required=True)
+
+
+class AbhaCreateVerifyAadhaarFaceSerializer(Serializer):
+    transaction_id = UUIDField(required=False)
+    aadhaar = CharField(max_length=12, min_length=12, required=True)
+    mobile = CharField(max_length=10, min_length=10, required=True)
+
+
 class AbhaCreateVerifyAadhaarDemographicsSerializer(Serializer):
     aadhaar = CharField(max_length=12, min_length=12, required=True)
     transaction_id = UUIDField(required=False)

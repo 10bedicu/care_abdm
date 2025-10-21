@@ -7,6 +7,7 @@ CREATE_OR_LINK_ABHA_NUMBER = {
             "type": "string",
             "enum": [
                 "create_via_aadhaar_bio",
+                "create_via_aadhaar_face",
                 "create_via_aadhaar_demographics",
                 "create_via_aadhaar_otp",
                 "link_via_otp",
