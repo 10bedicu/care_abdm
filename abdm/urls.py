@@ -3,11 +3,26 @@ from rest_framework.routers import SimpleRouter
 from abdm.api.v3.viewsets.health_id import HealthIdViewSet
 from abdm.api.v3.viewsets.hip import HIPCallbackViewSet, HIPViewSet
 from abdm.api.v3.viewsets.hiu import HIUCallbackViewSet, HIUViewSet
+from abdm.api.v3.viewsets.phr.health_id import PhrAuthViewSet
+from abdm.api.v3.viewsets.phr.phr_consent import PhrConsentViewSet
+from abdm.api.v3.viewsets.phr.phr_gateway import PhrGatewayViewSet
+from abdm.api.v3.viewsets.phr.phr_health_records import PhrHealthRecordsViewSet
+from abdm.api.v3.viewsets.phr.phr_notification import PhrNotificationViewSet
+from abdm.api.v3.viewsets.phr.phr_profile import PhrProfileViewSet
+from abdm.api.v3.viewsets.phr.phr_subscription import (
+    PhrSubscriptionCallbackViewSet,
+    PhrSubscriptionViewSet,
+)
+from abdm.api.v3.viewsets.phr.phr_user_init_linking import (
+    PhrUserInitLinkingCallbackViewSet,
+    PhrUserInitLinkingViewSet,
+)
 from abdm.api.v3.viewsets.utility import UtilityViewSet
 from abdm.api.viewsets.abha_number import AbhaNumberViewSet
 from abdm.api.viewsets.consent import ConsentViewSet
 from abdm.api.viewsets.health_facility import HealthFacilityViewSet
 from abdm.api.viewsets.health_information import HealthInformationViewSet
+from abdm.service.phr_helper import get_phr_hf_id
 
 
 class OptionalSlashRouter(SimpleRouter):
@@ -35,6 +50,60 @@ router.register("v3/health_id", HealthIdViewSet, basename="abdm__v3__health_id")
 router.register("v3/hip", HIPViewSet, basename="abdm__v3__hip")
 router.register("v3/hiu", HIUViewSet, basename="abdm__v3__hiu")
 
+
+if get_phr_hf_id():
+    """
+    PHR Routes are only enabled if the PHR_HF_ID
+    (Health Facility ID for the PHR Flows) is set in the settings.
+    """
+
+    ## PHR Routes
+    router.register(
+        "v3/phr/health_id", PhrAuthViewSet, basename="abdm__v3__phr_health_id"
+    )
+    router.register(
+        "v3/phr/profile", PhrProfileViewSet, basename="abdm__v3__phr_profile"
+    )
+    router.register(
+        "v3/phr/subscription",
+        PhrSubscriptionViewSet,
+        basename="abdm__v3__phr_subscription",
+    )
+    router.register(
+        "v3/phr/consent", PhrConsentViewSet, basename="abdm__v3__phr_consent"
+    )
+    router.register(
+        "v3/phr/notification",
+        PhrNotificationViewSet,
+        basename="abdm__v3__phr_notifications",
+    )
+    router.register(
+        "v3/phr/user_init_linking",
+        PhrUserInitLinkingViewSet,
+        basename="abdm__v3__phr_user_init_linking",
+    )
+    router.register(
+        "v3/phr/gateway", PhrGatewayViewSet, basename="abdm__v3__phr_gateway"
+    )
+    router.register(
+        "v3/phr/health_records",
+        PhrHealthRecordsViewSet,
+        basename="abdm__v3__phr_health_records",
+    )
+
+    ## PHR Callback Routes
+    router.register(
+        "api/v3",
+        PhrSubscriptionCallbackViewSet,
+        basename="abdm__v3__phr_subscription__callback",
+    )
+    router.register(
+        "api/v3",
+        PhrUserInitLinkingCallbackViewSet,
+        basename="abdm__v3__phr_user_init_linking__callback",
+    )
+
+
 ## Utility Routes
 router.register(
     "v3/utility",
@@ -46,5 +115,6 @@ router.register(
 ## Callback Routes
 router.register("api/v3", HIPCallbackViewSet, basename="abdm__v3__hip__callback")
 router.register("api/v3", HIUCallbackViewSet, basename="abdm__v3__hiu__callback")
+
 
 urlpatterns = router.urls

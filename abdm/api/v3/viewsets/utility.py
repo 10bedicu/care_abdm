@@ -5,7 +5,6 @@ from importlib import resources
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
@@ -14,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 @extend_schema(tags=["ABDM: Utility"])
 class UtilityViewSet(GenericViewSet):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = []
 
     def get_state_districts(self):
         try:

@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 from functools import reduce
 
@@ -32,6 +33,7 @@ from abdm.models import (
     TransactionType,
 )
 from abdm.service.helper import uuid, validate_and_format_date
+from abdm.service.phr_helper import get_phr_hf_id
 from abdm.service.v3.gateway import GatewayService
 from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
@@ -233,6 +235,7 @@ class HIPCallbackViewSet(GenericViewSet):
     )
     def hip__patient__care_context__discover(self, request):
         validated_data = self.validate_request(request)
+        logger.info(f"TESTLOG - HIP PATIENT CARE CONTEXT DISCOVER: {validated_data}")
 
         patient_data = validated_data.get("patient", {})
         identifiers = [
@@ -292,6 +295,7 @@ class HIPCallbackViewSet(GenericViewSet):
     @action(detail=False, methods=["POST"], url_path="hip/link/care-context/init")
     def hip__link__care_context__init(self, request):
         validated_data = self.validate_request(request)
+        logger.info(f"TESTLOG - HIP LINK CARE CONTEXT INIT: {validated_data}")
         care_contexts = reduce(
             lambda acc, patient: acc
             + [
@@ -330,6 +334,7 @@ class HIPCallbackViewSet(GenericViewSet):
     @action(detail=False, methods=["POST"], url_path="hip/link/care-context/confirm")
     def hip__link__care_context__confirm(self, request):
         validated_data = self.validate_request(request)
+        logger.info(f"TESTLOG - HIP LINK CARE CONTEXT CONFIRM: {validated_data}")
 
         cached_data = cache.get(
             "abdm_user_initiated_linking__"
@@ -371,6 +376,13 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="consent/request/hip/notify")
     def consent__request__hip__notify(self, request):
+        """
+        This wait time is added to avoid the race condition between this callback and the
+        consent__request__hip__on_init callback. (Adds a delay to the callback so that on-init completes first)
+        """
+
+        time.sleep(2)
+        logger.info(f"TESTLOG - CONSENT REQUEST HIP NOTIFY: {request.data}")
         validated_data = self.validate_request(request)
 
         notification = validated_data.get("notification")
@@ -378,19 +390,26 @@ class HIPCallbackViewSet(GenericViewSet):
         permission = consent_detail.get("permission")
         frequency = permission.get("frequency")
 
-        patient = self.get_patient_by_abha_id(consent_detail.get("patient").get("id"))
+        abha_id = consent_detail.get("patient").get("id")
 
-        if not patient:
+        hiu_id = consent_detail.get("hiu", {}).get("id")
+
+        # TODO: Remove this once the HIU ID is updated in the database
+        if hiu_id == get_phr_hf_id():
+            abha_number = AbhaNumber.objects.filter(phr_health_id=abha_id).first()
+        else:
+            abha_number = AbhaNumber.objects.filter(health_id=abha_id).first()
+
+        if not abha_number:
             logger.warning(
-                f"Patient with ABHA ID: {consent_detail.get('patient').get('id')} not found in the database"
+                f"Patient with ABHA ID: {abha_id} not found in the database, HIP ID: {request.headers.get('X-HIP-ID')}"
             )
-
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         ConsentArtefact.objects.update_or_create(
             consent_id=notification.get("consentId"),
             defaults={
-                "patient_abha": patient.abha_number,
+                "patient_abha": abha_number,
                 "care_contexts": consent_detail.get("careContexts"),
                 "status": notification.get("status"),
                 "purpose": consent_detail.get("purpose").get("code"),
@@ -420,6 +439,8 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hip/health-information/request")
     def hip__health_information__request(self, request):
+        logger.info(f"TESTLOG - HIP HEALTH INFORMATION REQUEST: {request.data}")
+
         validated_data = self.validate_request(request)
 
         hi_request = validated_data.get("hiRequest")

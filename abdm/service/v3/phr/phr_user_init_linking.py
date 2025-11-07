@@ -1,0 +1,149 @@
+from logging import getLogger
+from typing import Any
+
+from abdm.service.helper import (
+    ABDMAPIException,
+    cm_id,
+    timestamp,
+)
+from abdm.service.phr_helper import get_phr_hf_id
+from abdm.service.request import Request
+from abdm.service.v3.types.phr.phr_user_init_linking import (
+    PhrUserInitLinkingCareContextConfirmBody,
+    PhrUserInitLinkingCareContextConfirmResponse,
+    PhrUserInitLinkingCareContextDiscoverBody,
+    PhrUserInitLinkingCareContextDiscoverResponse,
+    PhrUserInitLinkingCareContextInitBody,
+    PhrUserInitLinkingCareContextInitResponse,
+)
+from abdm.settings import plugin_settings as settings
+
+logger = getLogger(__name__)
+
+
+class PhrUserInitLinkingService:
+    request = Request(f"{settings.ABDM_GATEWAY_URL}/user-initiated-linking/v3")
+
+    @staticmethod
+    def handle_error(error: dict[str, Any] | str) -> str:
+        if isinstance(error, list):
+            return PhrUserInitLinkingService.handle_error(error[0])
+
+        if isinstance(error, str):
+            return error
+
+        # { error: { message: "error message" } }
+        if "error" in error:
+            return PhrUserInitLinkingService.handle_error(error["error"])
+
+        # { message: "error message" }
+        if "message" in error:
+            return error["message"]
+
+        # { field_name: "error message" }
+        if isinstance(error, dict) and len(error) >= 1:
+            error.pop("code", None)
+            error.pop("timestamp", None)
+            return "".join(list(map(lambda x: str(x), list(error.values()))))
+
+        return "Unknown error occurred at ABDM's end while processing the request. Please try again later."
+
+    @staticmethod
+    def _make_request(
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        params: dict | None = None,
+        headers: dict | None = None,
+        expected_status: int = 202,
+    ):
+        default_headers = {
+            "TIMESTAMP": timestamp(),
+            "X-CM-ID": cm_id(),
+        }
+        if headers:
+            default_headers.update(headers)
+
+        if method.upper() == "GET":
+            response = PhrUserInitLinkingService.request.get(
+                path, params=params, headers=default_headers
+            )
+        elif method.upper() == "POST":
+            response = PhrUserInitLinkingService.request.post(
+                path, payload, headers=default_headers
+            )
+        else:
+            raise ABDMAPIException(f"Unsupported HTTP method: {method}")
+
+        if response.status_code != expected_status:
+            raise ABDMAPIException(
+                detail=PhrUserInitLinkingService.handle_error(response.json())
+            )
+
+        return response
+
+    @staticmethod
+    def phr__user_initiated_linking__care_context__discover(
+        data: PhrUserInitLinkingCareContextDiscoverBody,
+    ) -> PhrUserInitLinkingCareContextDiscoverResponse:
+        headers = {
+            "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
+            "X-HIU-ID": get_phr_hf_id(),
+            "REQUEST-ID": data.get("request_id"),
+        }
+
+        PhrUserInitLinkingService._make_request(
+            "POST",
+            "/patient/care-context/discover",
+            payload={
+                "hip": data.get("hip"),
+                "unverifiedIdentifiers": data.get("unverified_identifiers"),
+            },
+            headers=headers,
+        )
+
+        return {}
+
+    @staticmethod
+    def phr__user_initiated_linking__care_context__init(
+        data: PhrUserInitLinkingCareContextInitBody,
+    ) -> PhrUserInitLinkingCareContextInitResponse:
+        headers = {
+            "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
+            "X-HIU-ID": get_phr_hf_id(),
+            "REQUEST-ID": data.get("request_id"),
+        }
+
+        PhrUserInitLinkingService._make_request(
+            "POST",
+            "/link/care-context/init",
+            payload={
+                "transactionId": data.get("transaction_id"),
+                "patient": data.get("patient"),
+            },
+            headers=headers,
+        )
+
+        return {}
+
+    @staticmethod
+    def phr__user_initiated_linking__care_context__confirm(
+        data: PhrUserInitLinkingCareContextConfirmBody,
+    ) -> PhrUserInitLinkingCareContextConfirmResponse:
+        headers = {
+            "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
+            "X-HIU-ID": get_phr_hf_id(),
+            "REQUEST-ID": data.get("request_id"),
+        }
+
+        PhrUserInitLinkingService._make_request(
+            "POST",
+            "/link/care-context/confirm",
+            payload={
+                "linkRefNumber": data.get("link_ref_number"),
+                "token": data.get("token"),
+            },
+            headers=headers,
+        )
+
+        return {}

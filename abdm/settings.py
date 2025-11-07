@@ -111,7 +111,7 @@ REQUIRED_SETTINGS = {
 DEFAULTS = {
     "ABDM_CLIENT_ID": "SBX_001",
     "ABDM_CLIENT_SECRET": "xxxx",
-    "ABDM_AUTH_URL": "",
+    "ABDM_AUTH_URL": "https://abdm-auth.coolify.ohc.network",
     "ABDM_GATEWAY_URL": "https://dev.abdm.gov.in/api/hiecm",
     "ABDM_ABHA_URL": "https://abhasbx.abdm.gov.in/abha/api",
     "ABDM_FACILITY_URL": "https://facilitysbx.abdm.gov.in",
@@ -124,6 +124,7 @@ DEFAULTS = {
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
+    "PHR_HF_ID": "IN3210000018",
 }
 
 plugin_settings = PluginSettings(

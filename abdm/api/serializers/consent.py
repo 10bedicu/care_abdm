@@ -1,9 +1,9 @@
 from rest_framework import serializers
 
 from abdm.api.serializers.abha_number import AbhaNumberSerializer
+from abdm.api.serializers.base import EMRPydanticModelField
 from abdm.models.consent import ConsentArtefact, ConsentRequest
 from care.emr.resources.user.spec import UserSpec
-from abdm.api.serializers.base import EMRPydanticModelField
 
 
 class ConsentArtefactSerializer(serializers.ModelSerializer):

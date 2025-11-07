@@ -164,3 +164,6 @@ class ConsentArtefact(Consent):
     key_material_nonce = models.CharField(max_length=100, null=True, blank=True)
 
     signature = models.TextField(null=True, blank=True)
+
+    # TODO: Remove this once the HIU ID later or handle
+    patient_abha_address = models.TextField(null=True, blank=True)

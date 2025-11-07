@@ -1,6 +1,16 @@
 {
     "states": [
         {
+            "state_code": 28,
+            "state_name": "ANDHRA PRADESH",
+            "districts": [
+                {
+                    "district_code": 505,
+                    "district_name": "EAST GODAVARI"
+                }
+            ]
+        },
+        {
             "state_code": 1,
             "state_name": "JAMMU AND KASHMIR",
             "districts": [

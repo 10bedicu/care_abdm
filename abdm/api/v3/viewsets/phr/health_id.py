@@ -1,0 +1,543 @@
+from django.core.cache import cache
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+
+from abdm.api.serializers.abha_number import AbhaNumberSerializer
+from abdm.api.v3.serializers.phr.health_id import (
+    PhrEnrollmentAbhaAddressExistsSerializer,
+    PhrEnrollmentAbhaAddressSuggestionSerializer,
+    PhrEnrollmentEnrolAbhaAddressSerializer,
+    PhrEnrollmentSendOtpSerializer,
+    PhrEnrollmentVerifyOtpSerializer,
+    PhrLoginCheckAuthMethodsSerializer,
+    PhrLoginSendOtpSerializer,
+    PhrLoginVerifySerializer,
+    PhrLoginVerifyUserSerializer,
+    PhrTokenRefreshSerializer,
+)
+from abdm.models import Transaction, TransactionType
+from abdm.service.phr_helper import (
+    cache_phr_tokens,
+    get_phr_temp_tokens,
+    normalize_abha_address,
+    remove_cached_phr_tokens,
+    update_abha_from_profile,
+)
+from abdm.service.v3.phr.health_id import PhrHealthIdService
+from abdm.service.v3.phr.phr_profile import PhrProfileService
+
+PHR_VERIFY_USER_TOKEN_PREFIX = "phr_verify_user_token:"
+PHR_VERIFY_USER_TOKEN_TIMEOUT = 300
+
+
+class PhrAuthViewSet(GenericViewSet):
+    permission_classes = []
+
+    serializer_action_classes = {
+        "phr_enrollment__send_otp": PhrEnrollmentSendOtpSerializer,
+        "phr_enrollment__verify_otp": PhrEnrollmentVerifyOtpSerializer,
+        "phr_enrollment__abha_address_suggestion": PhrEnrollmentAbhaAddressSuggestionSerializer,
+        "phr_enrollment__abha_address_exists": PhrEnrollmentAbhaAddressExistsSerializer,
+        "phr_enrollment__enrol_abha_address": PhrEnrollmentEnrolAbhaAddressSerializer,
+        "phr_login__send_otp": PhrLoginSendOtpSerializer,
+        "phr_login__verify": PhrLoginVerifySerializer,
+        "phr_login__verify__user": PhrLoginVerifyUserSerializer,
+        "phr_login__check_auth_methods": PhrLoginCheckAuthMethodsSerializer,
+        "phr_refresh_token": PhrTokenRefreshSerializer,
+    }
+
+    def get_serializer_class(self):
+        if self.action in self.serializer_action_classes:
+            return self.serializer_action_classes[self.action]
+
+        return super().get_serializer_class()
+
+    def validate_request(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        return serializer.validated_data
+
+    def _build_scope(self, login_hint, otp_system, context):
+        if context == "enrollment" and login_hint != "abha-number":
+            return ["abha-address-enroll", "mobile-verify"]
+
+        base_scope = {
+            "abha-address": ["abha-address-login"],
+            "abha-number": ["abha-login"],
+            "mobile-number": ["abha-address-login"],
+        }.get(login_hint, [])
+
+        auth_scope = {
+            "aadhaar": ["aadhaar-verify"],
+            "abdm": ["mobile-verify"],
+            "password": ["password-verify"],
+        }.get(otp_system, [])
+
+        return base_scope + auth_scope
+
+    @action(detail=False, methods=["post"], url_path="create/send_otp")
+    def phr_enrollment__send_otp(self, request):
+        validated_data = self.validate_request(request)
+
+        login_hint = validated_data.get("type")
+        otp_system = validated_data.get("otp_system")
+
+        scope = self._build_scope(login_hint, otp_system, "enrollment")
+
+        result = PhrHealthIdService.phr__enrollment__request__otp(
+            {
+                "scope": scope,
+                "type": validated_data.get("type"),
+                "value": validated_data.get("value"),
+                "otp_system": validated_data.get("otp_system"),
+            }
+        )
+
+        return Response(
+            {
+                "transaction_id": result.get("txnId"),
+                "detail": result.get("message"),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="create/verify_otp")
+    def phr_enrollment__verify_otp(self, request):
+        validated_data = self.validate_request(request)
+
+        login_hint = validated_data.get("type")
+        otp_system = validated_data.get("otp_system")
+
+        scope = self._build_scope(login_hint, otp_system, "enrollment")
+
+        result = PhrHealthIdService.phr__enrollment__verify__otp(
+            {
+                "scope": scope,
+                "transaction_id": str(validated_data.get("transaction_id")),
+                "otp": validated_data.get("otp"),
+            }
+        )
+
+        cache.set(
+            f"{PHR_VERIFY_USER_TOKEN_PREFIX}{result['txnId']}",
+            result["tokens"]["token"],
+            timeout=PHR_VERIFY_USER_TOKEN_TIMEOUT,
+        )
+
+        accounts = result.get("accounts", [])
+        users = result.get("users", [])
+        health_ids_list = [user.get("abhaAddress") for user in users]
+
+        if result.get("authResult") == "success" and accounts:
+            (abha_number, _) = update_abha_from_profile(
+                accounts[0],
+                abha_key="ABHANumber",
+                health_ids_list=health_ids_list,
+            )
+
+            Transaction.objects.create(
+                reference_id=str(validated_data.get("transaction_id")),
+                type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
+                meta_data={
+                    "abha_number": str(abha_number.external_id),
+                    "method": "link_via_otp",
+                    "type": "abha-number" if login_hint == "abha-number" else "mobile",
+                    "system": otp_system,
+                },
+            )
+
+            return Response(
+                {
+                    "transaction_id": result.get("txnId"),
+                    "detail": result.get("message"),
+                    "users": result.get("users"),
+                    "abha_number": AbhaNumberSerializer(abha_number).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        update_abha_from_profile({}, health_ids_list=health_ids_list)
+
+        return Response(
+            {
+                "transaction_id": result.get("txnId"),
+                "detail": result.get("message"),
+                "users": result.get("users"),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="create/abha_address_suggestion")
+    def phr_enrollment__abha_address_suggestion(self, request):
+        validated_data = self.validate_request(request)
+
+        result = PhrHealthIdService.phr__enrollment__abha_address__suggestion(
+            {
+                "transaction_id": str(validated_data.get("transaction_id")),
+                "first_name": validated_data.get("first_name"),
+                "last_name": validated_data.get("last_name", ""),
+                "year_of_birth": validated_data.get("year_of_birth"),
+                "month_of_birth": validated_data.get("month_of_birth", ""),
+                "day_of_birth": validated_data.get("day_of_birth", ""),
+            }
+        )
+
+        return Response(
+            {
+                "transaction_id": result.get("txnId"),
+                "abha_addresses": result.get("abhaAddressList", []),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="create/abha_address_exists")
+    def phr_enrollment__abha_address_exists(self, request):
+        validated_data = self.validate_request(request)
+
+        abha_address = normalize_abha_address(
+            validated_data.get("abha_address"),
+        )
+
+        exists = PhrHealthIdService.phr__enrollment__abha_address__exists(
+            {
+                "abha_address": abha_address,
+            }
+        )
+
+        return Response(
+            {
+                "exists": exists,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="create/enrol_abha_address")
+    def phr_enrollment__enrol_abha_address(self, request):
+        validated_data = self.validate_request(request)
+
+        phr_details = validated_data.get("phr_details")
+
+        phr_details_camel = {
+            "abhaAddress": normalize_abha_address(phr_details.get("abha_address")),
+            "address": phr_details.get("address"),
+            "dayOfBirth": phr_details.get("day_of_birth", ""),
+            "districtCode": phr_details.get("district_code"),
+            "districtName": phr_details.get("district_name"),
+            "email": phr_details.get("email"),
+            "profilePhoto": phr_details.get("profile_photo", ""),
+            "firstName": phr_details.get("first_name"),
+            "gender": phr_details.get("gender"),
+            "lastName": phr_details.get("last_name", ""),
+            "middleName": phr_details.get("middle_name", ""),
+            "mobile": phr_details.get("mobile"),
+            "monthOfBirth": phr_details.get("month_of_birth", ""),
+            "password": phr_details.get("password"),
+            "pinCode": phr_details.get("pincode"),
+            "stateCode": phr_details.get("state_code"),
+            "stateName": phr_details.get("state_name"),
+            "yearOfBirth": phr_details.get("year_of_birth"),
+        }
+
+        result = PhrHealthIdService.phr__enrollment__enrol__abha_address(
+            {
+                "phr_details": phr_details_camel,
+                "transaction_id": str(validated_data.get("transaction_id")),
+            }
+        )
+
+        profile_result = PhrProfileService.phr__profile(
+            {"x_token": result.get("tokens", {}).get("token")}
+        )
+
+        abha_number, _ = update_abha_from_profile(
+            profile_result,
+            health_ids_list=result.get("phrDetails", {}).get("abhaAddress", []),
+        )
+
+        Transaction.objects.create(
+            reference_id=str(validated_data.get("transaction_id")),
+            type=TransactionType.CREATE_ABHA_ADDRESS,
+            meta_data={
+                "abha_number": str(abha_number.external_id),
+            },
+        )
+
+        cache_phr_tokens(
+            abha_health_id=abha_number.phr_health_id,
+            access_token=result.get("tokens", {}).get("token"),
+            refresh_token=result.get("tokens", {}).get("refreshToken"),
+        )
+
+        return Response(
+            {
+                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "switchProfileEnabled": result.get("tokens", {}).get(
+                    "switchProfileEnabled", True
+                ),
+                **get_phr_temp_tokens(
+                    abha_address=abha_number.phr_health_id, id=abha_number.id
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="login/send_otp")
+    def phr_login__send_otp(self, request):
+        validated_data = self.validate_request(request)
+
+        login_hint = validated_data.get("type")
+        otp_system = validated_data.get("otp_system")
+        value = validated_data.get("value")
+
+        scope = self._build_scope(login_hint, otp_system, "login")
+
+        if login_hint == "abha-address":
+            value = normalize_abha_address(value)
+
+        result = PhrHealthIdService.phr__login__request__otp(
+            {
+                "scope": scope,
+                "type": validated_data.get("type"),
+                "value": value,
+                "otp_system": validated_data.get("otp_system"),
+            }
+        )
+        return Response(
+            {
+                "transaction_id": result.get("txnId"),
+                "detail": result.get("message"),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="login/verify")
+    def phr_login__verify(self, request):
+        validated_data = self.validate_request(request)
+
+        login_hint = validated_data.get("type")
+        verify_system = validated_data.get("verify_system")
+        scope = self._build_scope(login_hint, verify_system, "login")
+
+        if verify_system == "password":
+            result = PhrHealthIdService.phr__login__verify__password(
+                {
+                    "scope": scope,
+                    "abha_address": normalize_abha_address(
+                        validated_data.get("abha_address")
+                    ),
+                    "password": validated_data.get("password"),
+                }
+            )
+        else:
+            result = PhrHealthIdService.phr__login__verify__otp(
+                {
+                    "scope": scope,
+                    "transaction_id": str(validated_data.get("transaction_id")),
+                    "otp": validated_data.get("otp"),
+                }
+            )
+
+        if result.get("authResult") == "failed":
+            return Response(
+                {
+                    "transaction_id": result.get("txnId"),
+                    "detail": result.get("message"),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        users = result.get("users", [])
+        health_ids_list = [user.get("abhaAddress") for user in users]
+
+        if verify_system != "password" and login_hint != "abha-address":
+            cache.set(
+                f"{PHR_VERIFY_USER_TOKEN_PREFIX}{result['txnId']}",
+                result["tokens"]["token"],
+                timeout=PHR_VERIFY_USER_TOKEN_TIMEOUT,
+            )
+
+            update_abha_from_profile({}, health_ids_list=health_ids_list)
+
+            return Response(
+                {
+                    "transaction_id": result.get("txnId"),
+                    "detail": result.get("message"),
+                    "users": result.get("users"),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        tokens = result.get("tokens", {})
+        access_token = tokens.get("token")
+        refresh_token = tokens.get("refreshToken")
+
+        if not access_token:
+            return Response(
+                {
+                    "detail": "Unable to verify credentials. Please try again later.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profile_result = PhrProfileService.phr__profile({"x_token": access_token})
+        abha_number, _ = update_abha_from_profile(
+            profile_result,
+            health_ids_list=health_ids_list,
+        )
+
+        Transaction.objects.create(
+            reference_id=result.get("txnId")
+            or str(validated_data.get("transaction_id")),
+            type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
+            meta_data={
+                "abha_number": str(abha_number.external_id),
+                "method": f"link_via_{verify_system}"
+                if verify_system == "password"
+                else "link_via_otp",
+                "type": "abha-address",
+                "system": verify_system,
+            },
+        )
+
+        cache_phr_tokens(
+            abha_health_id=abha_number.phr_health_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+
+        return Response(
+            {
+                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "switchProfileEnabled": tokens.get("switchProfileEnabled", False),
+                **get_phr_temp_tokens(
+                    abha_address=abha_number.phr_health_id, id=abha_number.id
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="login/verify_user")
+    def phr_login__verify__user(self, request):
+        validated_data = self.validate_request(request)
+
+        t_token = cache.get(
+            f"{PHR_VERIFY_USER_TOKEN_PREFIX}{validated_data.get('transaction_id')}"
+        )
+
+        if not t_token:
+            return Response(
+                {"detail": "Session expired, please try again."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result = PhrHealthIdService.phr__login__verify__user(
+            {
+                "t_token": t_token,
+                "abha_address": normalize_abha_address(
+                    validated_data.get("abha_address", "")
+                ),
+                "transaction_id": str(validated_data.get("transaction_id")),
+            }
+        )
+
+        if not result.get("token"):
+            return Response(
+                {"detail": "User verification failed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profile_result = PhrProfileService.phr__profile(
+            {"x_token": result.get("token")}
+        )
+
+        abha_number, _ = update_abha_from_profile(profile_result)
+
+        login_hint = validated_data.get("type")
+
+        Transaction.objects.create(
+            reference_id=str(validated_data.get("transaction_id")),
+            type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
+            meta_data={
+                "abha_number": str(abha_number.external_id),
+                "method": "link_via_otp",
+                "type": "abha-number" if login_hint == "abha-number" else "mobile",
+                "system": validated_data.get("verify_system"),
+            },
+        )
+
+        cache_phr_tokens(
+            abha_health_id=abha_number.phr_health_id,
+            access_token=result.get("token"),
+            refresh_token=result.get("refreshToken"),
+        )
+
+        return Response(
+            {
+                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "switchProfileEnabled": result.get("switchProfileEnabled", True),
+                **get_phr_temp_tokens(
+                    abha_address=abha_number.phr_health_id, id=abha_number.id
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="login/check_auth_methods")
+    def phr_login__check_auth_methods(self, request):
+        validated_data = self.validate_request(request)
+
+        verify_system = validated_data.get("verify_system")
+
+        result = PhrHealthIdService.phr__login_search_auth_methods(
+            {
+                "abha_address": normalize_abha_address(
+                    validated_data.get("abha_address")
+                ),
+            }
+        )
+
+        auth_methods = result.get("authMethods")
+
+        method_checks = {
+            "password": "PASSWORD",
+            "aadhaar": "AADHAAR_OTP",
+            "abdm": "MOBILE_OTP",
+        }
+
+        required_method = method_checks.get(verify_system)
+        if required_method and required_method not in auth_methods:
+            error_label = method_checks.get(verify_system).replace("_", " ").title()
+            return Response(
+                {
+                    "detail": f"{error_label} method is not supported for this {validated_data.get('abha_address')}. Please try again with a different method.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "auth_methods": auth_methods,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="refresh_token")
+    def phr_refresh_token(self, request):
+        abha_address = request.data.get("abha_address", "")
+
+        try:
+            validated_data = self.validate_request(request)
+            return Response(validated_data, status=status.HTTP_200_OK)
+
+        except (PermissionDenied, ValidationError, TokenError) as e:
+            if abha_address:
+                remove_cached_phr_tokens(abha_health_id=abha_address)
+
+            if isinstance(e, (PermissionDenied, ValidationError)):
+                raise e
+
+            raise InvalidToken(e.args[0]) from e
