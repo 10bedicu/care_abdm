@@ -146,6 +146,9 @@ def create_care_context_on_file_upload_creation(sender, instance: FileUpload, **
 def create_care_context_on_questionnaire_response_creation(
     sender, instance: Observation, created: bool, **kwargs
 ):
+    if not instance.questionnaire_response:
+        return
+
     patient = instance.questionnaire_response.patient
     observations = Observation.objects.filter(
         questionnaire_response=instance.questionnaire_response

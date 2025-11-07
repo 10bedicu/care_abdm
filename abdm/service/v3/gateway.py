@@ -557,6 +557,7 @@ class GatewayService:
             external_public_key=data.get("key_material__public_key"),
             external_nonce=data.get("key_material__nonce"),
         )
+        cipher.generate_key_pair()
 
         entries = []
         for care_context in consent.care_contexts:
@@ -587,7 +588,7 @@ class GatewayService:
 
                 fhir_data = Fhir().create_prescription_record(list(medication_requests))
 
-            if (
+            elif (
                 model == "encounter"
                 and HealthInformationType.OP_CONSULTATION in consent.hi_types
             ):
@@ -600,7 +601,8 @@ class GatewayService:
                     continue
 
                 fhir_data = Fhir().create_op_consult_record(encounter)
-            if (
+
+            elif (
                 model == "encounter"
                 and HealthInformationType.DISCHARGE_SUMMARY in consent.hi_types
             ):
@@ -614,32 +616,6 @@ class GatewayService:
 
                 fhir_data = Fhir().create_discharge_summary_record(encounter)
 
-            if (
-                model == "file_upload"
-                and HealthInformationType.RECORD_ARTIFACT in consent.hi_types
-            ):
-                file_upload = FileUpload.objects.filter(
-                    external_id=param,
-                ).first()
-
-                if not file_upload:
-                    continue
-
-                fhir_data = Fhir().create_health_document_record(file_upload)
-
-            if (
-                model == "questionnaire_response"
-                and HealthInformationType.WELLNESS_RECORD in consent.hi_types
-            ):
-                questionnaire_response = QuestionnaireResponse.objects.filter(
-                    external_id=param,
-                ).first()
-
-                if not questionnaire_response:
-                    continue
-
-                fhir_data = Fhir().create_wellness_record(questionnaire_response)
-
             elif (
                 model == "file_upload"
                 and HealthInformationType.RECORD_ARTIFACT in consent.hi_types
@@ -652,6 +628,19 @@ class GatewayService:
                     continue
 
                 fhir_data = Fhir().create_health_document_record(file_upload)
+
+            elif (
+                model == "questionnaire_response"
+                and HealthInformationType.WELLNESS_RECORD in consent.hi_types
+            ):
+                questionnaire_response = QuestionnaireResponse.objects.filter(
+                    external_id=param,
+                ).first()
+
+                if not questionnaire_response:
+                    continue
+
+                fhir_data = Fhir().create_wellness_record(questionnaire_response)
 
             else:
                 continue
@@ -709,7 +698,7 @@ class GatewayService:
         )
 
         if response.status_code != 202:
-            raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
+            raise ABDMAPIException(detail=GatewayService.handle_error(response.text))
 
         Transaction.objects.create(
             reference_id=data.get("transaction_id"),

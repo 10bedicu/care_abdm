@@ -104,6 +104,9 @@ def hf_id_from_abha_id(health_id: str):
 def cm_id():
     return settings.ABDM_CM_ID
 
+def benefit_name():
+    return settings.ABDM_BENEFIT_NAME
+
 
 def benefit_name():
     return settings.ABDM_BENEFIT_NAME
