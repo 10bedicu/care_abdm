@@ -111,7 +111,7 @@ REQUIRED_SETTINGS = {
 DEFAULTS = {
     "ABDM_CLIENT_ID": "SBX_001",
     "ABDM_CLIENT_SECRET": "xxxx",
-    "ABDM_AUTH_URL": "https://abdm-auth.coolify.ohc.network",
+    "ABDM_AUTH_URL": "",
     "ABDM_GATEWAY_URL": "https://dev.abdm.gov.in/api/hiecm",
     "ABDM_ABHA_URL": "https://abhasbx.abdm.gov.in/abha/api",
     "ABDM_FACILITY_URL": "https://facilitysbx.abdm.gov.in",
@@ -125,6 +125,7 @@ DEFAULTS = {
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
     "PHR_HF_ID": "IN3210000018",
+    "SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,
 }
 
 plugin_settings = PluginSettings(

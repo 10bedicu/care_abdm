@@ -35,6 +35,7 @@ from abdm.models import (
 from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.phr_helper import get_phr_hf_id
 from abdm.service.v3.gateway import GatewayService
+from abdm.settings import plugin_settings as settings
 from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
 
@@ -590,13 +591,29 @@ class HIPCallbackViewSet(GenericViewSet):
                     patient_data.get("monthOfBirth"),
                     patient_data.get("dayOfBirth"),
                 ),
-                address=patient_data.get("address").get("line"),
-                district=patient_data.get("address").get("district"),
-                state=patient_data.get("address").get("state"),
-                pincode=patient_data.get("address").get("pinCode"),
+                address=patient_data.get("address", {}).get("line"),
+                district=patient_data.get("address", {}).get("district"),
+                state=patient_data.get("address", {}).get("state"),
+                pincode=patient_data.get("address", {}).get("pinCode"),
                 mobile=patient_data.get("phoneNumber"),
             )
-
+        else:
+            # update the patient data
+            abha_number.abha_number = patient_data.get("abhaNumber")
+            abha_number.health_id = patient_data.get("abhaAddress")
+            abha_number.name = patient_data.get("name")
+            abha_number.gender = patient_data.get("gender")
+            abha_number.date_of_birth = validate_and_format_date(
+                patient_data.get("yearOfBirth"),
+                patient_data.get("monthOfBirth"),
+                patient_data.get("dayOfBirth"),
+            )
+            abha_number.address = patient_data.get("address", {}).get("line")
+            abha_number.district = patient_data.get("address", {}).get("district")
+            abha_number.state = patient_data.get("address", {}).get("state")
+            abha_number.pincode = patient_data.get("address", {}).get("pinCode")
+            abha_number.mobile = patient_data.get("phoneNumber")
+            abha_number.save()
         # TODO: add the patient to the facility queue
 
         cached_data = cache.get("abdm_patient_share__" + abha_number.health_id)
@@ -618,7 +635,7 @@ class HIPCallbackViewSet(GenericViewSet):
         cache.set(
             "abdm_patient_share__" + abha_number.health_id,
             token_number,
-            timeout=600,
+            timeout=settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
         )
 
         GatewayService.patient_share__on_share(
@@ -627,7 +644,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "abha_address": abha_number.health_id,
                 "context": validated_data.get("metaData").get("context"),
                 "token_number": token_number,
-                "expiry": 600,
+                "expiry": settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
                 "request_id": request.headers.get("REQUEST-ID"),
             }
         )

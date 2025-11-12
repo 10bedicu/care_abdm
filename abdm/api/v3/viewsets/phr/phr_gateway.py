@@ -3,14 +3,17 @@ from logging import getLogger
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
-from abdm.authentication import IsPhrAuthenticated, PhrCustomAuthentication
-from abdm.service.phr_helper import (
-    get_phr_access_token,
-    transform_phr_links_data,
+from abdm.api.v3.serializers.phr.phr_gateway import PhrGatewayPatientShareSerializer
+from abdm.authentication import (
+    ABDMAuthentication,
+    IsPhrAuthenticated,
+    PhrCustomAuthentication,
 )
+from abdm.service.phr_helper import get_phr_access_token, transform_phr_links_data
 from abdm.service.v3.phr.phr_gateway import PhrGatewayService
 
 logger = getLogger(__name__)
@@ -20,6 +23,22 @@ logger = getLogger(__name__)
 class PhrGatewayViewSet(GenericViewSet):
     permission_classes = [IsPhrAuthenticated]
     authentication_classes = [PhrCustomAuthentication]
+
+    serializer_action_classes = {
+        "phr_gateway__patient__share": PhrGatewayPatientShareSerializer,
+    }
+
+    def get_serializer_class(self):
+        if self.action in self.serializer_action_classes:
+            return self.serializer_action_classes[self.action]
+
+        return super().get_serializer_class()
+
+    def validate_request(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        return serializer.validated_data
 
     @property
     def x_token(self):
@@ -80,3 +99,50 @@ class PhrGatewayViewSet(GenericViewSet):
         )
 
         return Response(health_lockers, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="patient/share")
+    def phr_gateway__patient__share(self, request):
+        validated_data = self.validate_request(request)
+
+        PhrGatewayService.phr__gateway__patient_share__share(
+            {
+                "x_token": self.x_token,
+                "hip_id": validated_data.get("hip_id"),
+                "context": validated_data.get("context"),
+                "hpr_id": validated_data.get("hpr_id"),
+                "latitude": validated_data.get("latitude"),
+                "longitude": validated_data.get("longitude"),
+                "abha_address": self.request.user.abha_address,
+            }
+        )
+
+        return Response(status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="patient/tokens")
+    def phr_gateway__patient__tokens(self, request):
+        tokens = (
+            PhrGatewayService.phr__gateway__patient_share__profile__get_token_details(
+                {
+                    "x_token": self.x_token,
+                    "limit": request.query_params.get("limit", 10),
+                }
+            )
+        )
+
+        return Response(tokens, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=["PHR Gateway Callbacks"])
+class PhrGatewayCallbackViewSet(GenericViewSet):
+    permission_classes = (IsAuthenticated,)
+    authentication_classes = [ABDMAuthentication]
+
+    @action(detail=False, methods=["POST"], url_path="hiu/patient/on-share")
+    def phr_gateway__hiu__patient__on_share(self, request):
+        data = request.data
+
+        if data.get("acknowledgement", {}).get("status") == "SUCCESS":
+            # TODO: send push notification to the user
+            pass
+
+        return Response(status=status.HTTP_200_OK)

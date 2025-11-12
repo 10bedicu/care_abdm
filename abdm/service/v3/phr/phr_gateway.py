@@ -1,16 +1,16 @@
 from logging import getLogger
 from typing import Any
 
-from abdm.service.helper import (
-    ABDMAPIException,
-    cm_id,
-    timestamp,
-    uuid,
-)
+from abdm.models.abha_number import AbhaNumber
+from abdm.service.helper import ABDMAPIException, cm_id, timestamp, uuid
 from abdm.service.request import Request
 from abdm.service.v3.types.phr.phr_gateway import (
     PhrGatewayPatientLinksBody,
     PhrGatewayPatientLinksResponse,
+    PhrGatewayPatientShareProfileGetTokenDetailsBody,
+    PhrGatewayPatientShareProfileGetTokenDetailsResponse,
+    PhrGatewayPatientShareShareBody,
+    PhrGatewayPatientShareShareResponse,
     PhrGatewayProviderBody,
     PhrGatewayProviderResponse,
     PhrGatewayProvidersBody,
@@ -131,5 +131,89 @@ class PhrGatewayService:
         response = PhrGatewayService._make_request(
             "GET",
             f"/gateway/v3/health-lockers?name={data.get('name', '')}",
+        )
+        return response.json()
+
+    @staticmethod
+    def phr__gateway__patient_share__share(
+        data: PhrGatewayPatientShareShareBody,
+    ) -> PhrGatewayPatientShareShareResponse:
+        if not data.get("abha_address"):
+            raise ABDMAPIException(detail="ABHA Address is required.")
+
+        if not data.get("hip_id"):
+            raise ABDMAPIException(detail="HIP ID is required.")
+
+        if not data.get("context"):
+            raise ABDMAPIException(detail="Context is required.")
+
+        abha_number = AbhaNumber.objects.filter(
+            phr_health_id=data.get("abha_address")
+        ).first()
+
+        if not abha_number:
+            raise ABDMAPIException(detail="ABHA Number not found.")
+
+        year, month, day = None, None, None
+        if abha_number.date_of_birth:
+            year, month, day = abha_number.date_of_birth.split("-")
+            month = None if month == "00" else month
+            day = None if day == "00" else day
+
+        payload = {
+            "intent": "PROFILE_SHARE",
+            "metaData": {
+                "hipId": data.get("hip_id", ""),
+                "context": data.get("context", ""),
+                "hprId": data.get("hpr_id", None),
+                "latitude": data.get("latitude", None),
+                "longitude": data.get("longitude", None),
+            },
+            "profile": {
+                "patient": {
+                    "abhaNumber": abha_number.abha_number,
+                    "abhaAddress": abha_number.phr_health_id,
+                    "name": abha_number.name,
+                    "gender": abha_number.gender,
+                    "dayOfBirth": day,
+                    "monthOfBirth": month,
+                    "yearOfBirth": year,
+                    "address": {
+                        "line": abha_number.address,
+                        "district": abha_number.district,
+                        "state": abha_number.state,
+                        "pincode": abha_number.pincode,
+                    },
+                    "phoneNumber": abha_number.mobile,
+                }
+            },
+        }
+
+        PhrGatewayService._make_request(
+            "POST",
+            "/patient-share/v3/share",
+            payload=payload,
+            headers={
+                "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
+                "X-HIU-ID": settings.PHR_HF_ID,
+            },
+            expected_status=202,
+        )
+
+        return {}
+
+    @staticmethod
+    def phr__gateway__patient_share__profile__get_token_details(
+        data: PhrGatewayPatientShareProfileGetTokenDetailsBody,
+    ) -> PhrGatewayPatientShareProfileGetTokenDetailsResponse:
+        response = PhrGatewayService._make_request(
+            "GET",
+            "/patient-share/v3/profile/getTokenDetails",
+            headers={
+                "X-AUTH-TOKEN": f"{data.get('x_token', '')}",
+            },
+            params={
+                "limit": data.get("limit", 10),
+            },
         )
         return response.json()

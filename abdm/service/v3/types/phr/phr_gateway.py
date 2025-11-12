@@ -46,3 +46,39 @@ class PhrGatewayProviderBody(TypedDict):
 
 
 PhrGatewayProviderResponse = Provider
+
+
+class PhrGatewayPatientShareShareBody(TypedDict):
+    x_token: str
+    hip_id: str
+    context: str
+    hpr_id: str | None
+    latitude: float | None
+    longitude: float | None
+    abha_address: str
+
+
+class PhrGatewayPatientShareShareResponse(TypedDict):
+    pass
+
+
+class PhrGatewayPatientShareProfileGetTokenDetailsBody(TypedDict):
+    x_token: str
+    limit: int | None
+    page: int | None
+
+
+class Token(TypedDict):
+    id: int
+    patientId: str
+    tokenNumber: str
+    hipId: str
+    hipName: str
+    hipAddress: str
+    expiresIn: str
+    clientId: str
+    dateCreated: str
+    counterCode: str
+
+
+PhrGatewayPatientShareProfileGetTokenDetailsResponse = list[Token]

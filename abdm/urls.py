@@ -5,7 +5,10 @@ from abdm.api.v3.viewsets.hip import HIPCallbackViewSet, HIPViewSet
 from abdm.api.v3.viewsets.hiu import HIUCallbackViewSet, HIUViewSet
 from abdm.api.v3.viewsets.phr.health_id import PhrAuthViewSet
 from abdm.api.v3.viewsets.phr.phr_consent import PhrConsentViewSet
-from abdm.api.v3.viewsets.phr.phr_gateway import PhrGatewayViewSet
+from abdm.api.v3.viewsets.phr.phr_gateway import (
+    PhrGatewayCallbackViewSet,
+    PhrGatewayViewSet,
+)
 from abdm.api.v3.viewsets.phr.phr_health_records import PhrHealthRecordsViewSet
 from abdm.api.v3.viewsets.phr.phr_notification import PhrNotificationViewSet
 from abdm.api.v3.viewsets.phr.phr_profile import PhrProfileViewSet
@@ -92,6 +95,11 @@ if get_phr_hf_id():
     )
 
     ## PHR Callback Routes
+    router.register(
+        "api/v3",
+        PhrGatewayCallbackViewSet,
+        basename="abdm__v3__phr_gateway__callback",
+    )
     router.register(
         "api/v3",
         PhrSubscriptionCallbackViewSet,

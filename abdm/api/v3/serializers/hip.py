@@ -208,9 +208,9 @@ class HipPatientShareSerializer(Serializer):
     class MetaDataSerializer(Serializer):
         hipId = CharField(max_length=50, required=True)
         context = CharField(max_length=50, required=True)
-        hprId = CharField(max_length=50, required=True)
-        latitude = FloatField(required=True)
-        longitude = FloatField(required=True)
+        hprId = CharField(max_length=50, required=False, allow_null=True)
+        latitude = FloatField(required=False, allow_null=True)
+        longitude = FloatField(required=False, allow_null=True)
 
     class ProfileSerializer(Serializer):
         class PatientSerializer(Serializer):
