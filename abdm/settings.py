@@ -125,7 +125,7 @@ DEFAULTS = {
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
     "PHR_HF_ID": "IN3210000018",
-    "SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,
+    "SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 3600,
 }
 
 plugin_settings = PluginSettings(
