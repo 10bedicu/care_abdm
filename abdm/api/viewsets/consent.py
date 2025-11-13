@@ -28,13 +28,10 @@ class ConsentRequestFilter(filters.FilterSet):
             "updated_date",
         )
     )
-    facility = filters.UUIDFilter(
-        field_name="patient_abha__patient__facility__external_id"
-    )
 
     class Meta:
         model = ConsentRequest
-        fields = ["patient", "health_id", "purpose"]
+        fields = ["patient", "health_id", "purpose", "hiu"]
 
 
 @extend_schema(tags=["ABDM: Consent"])
