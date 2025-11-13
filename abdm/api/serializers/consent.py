@@ -25,6 +25,9 @@ class ConsentArtefactSerializer(serializers.ModelSerializer):
 
 class ConsentRequestSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="external_id", read_only=True)
+    encounter_id = serializers.CharField(
+        source="encounter__external_id", read_only=True
+    )
     patient_abha_object = AbhaNumberSerializer(source="patient_abha", read_only=True)
     requester = EMRPydanticModelField(UserSpec, read_only=True)
     consent_artefacts = ConsentArtefactSerializer(many=True, read_only=True)

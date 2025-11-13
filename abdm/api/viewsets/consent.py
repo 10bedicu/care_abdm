@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class ConsentRequestFilter(filters.FilterSet):
     patient = filters.UUIDFilter(field_name="patient_abha__patient__external_id")
+    encounter = filters.UUIDFilter(field_name="encounter__external_id")
     health_id = filters.CharFilter(field_name="patient_abha__health_id")
     ordering = filters.OrderingFilter(
         fields=(
@@ -31,7 +32,7 @@ class ConsentRequestFilter(filters.FilterSet):
 
     class Meta:
         model = ConsentRequest
-        fields = ["patient", "health_id", "purpose", "hiu"]
+        fields = ["patient", "encounter", "health_id", "purpose", "hiu"]
 
 
 @extend_schema(tags=["ABDM: Consent"])
