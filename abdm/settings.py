@@ -125,6 +125,10 @@ DEFAULTS = {
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
     "PHR_HF_ID": "IN3210000018",
+    "ABHA_NUMBER_IDENTIFIER_SYSTEM": {
+        "system": "https://care.ohc.network/abha_number",
+        "display": "ABHA Number",
+    },
     "SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 3600,
 }
 

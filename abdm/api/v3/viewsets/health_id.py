@@ -35,7 +35,8 @@ from abdm.service.helper import (
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
-from care.emr.models.patient import Patient
+from abdm.utils.user import get_or_create_abdm_user
+from care.emr.models.patient import Patient, PatientIdentifier, PatientIdentifierConfig
 from care.security.authorization.base import AuthorizationController
 
 
@@ -119,6 +120,42 @@ class HealthIdViewSet(GenericViewSet):
 
         abha_number.patient = patient
         abha_number.save()
+
+        abdm_user = get_or_create_abdm_user()
+
+        patient_identifier_config, _ = PatientIdentifierConfig.objects.get_or_create(
+            config__system=settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get("system"),
+            facility=None,
+            created_by=abdm_user,
+            defaults={
+                "status": "active",
+                "config": {
+                    "use": "official",
+                    "description": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get(
+                        "display"
+                    ),
+                    "required": False,
+                    "unique": True,
+                    "regex": "",
+                    "system": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get("system"),
+                    "display": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get("display"),
+                    "retrieve_config": {
+                        "retrieve_with_dob": False,
+                        "retrieve_with_year_of_birth": False,
+                        "retrieve_with_otp": False,
+                    },
+                },
+                "facility": None,
+                "created_by": abdm_user,
+            },
+        )
+
+        PatientIdentifier.objects.create(
+            patient=patient,
+            config=patient_identifier_config,
+            value=abha_number.abha_number,
+            created_by=abdm_user,
+        )
 
         hf_care_contexts = generate_care_contexts_for_existing_data(patient)
 
