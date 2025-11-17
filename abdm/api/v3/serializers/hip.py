@@ -31,7 +31,6 @@ class HipTokenOnGenerateTokenSerializer(Serializer):
 
 
 class LinkOnCarecontextSerializer(Serializer):
-
     class ErrorSerializer(Serializer):
         code = CharField(max_length=50, required=True)
         message = CharField(max_length=1000, required=True)
@@ -117,7 +116,6 @@ class ConsentRequestHipNotifySerializer(Serializer):
                 id = CharField(max_length=50, required=True)
 
             class PermissionSerializer(Serializer):
-
                 class DateRangeSerializer(Serializer):
                     fromTime = DateTimeField(source="from", required=True)
                     toTime = DateTimeField(source="to", required=True)
@@ -210,9 +208,9 @@ class HipPatientShareSerializer(Serializer):
     class MetaDataSerializer(Serializer):
         hipId = CharField(max_length=50, required=True)
         context = CharField(max_length=50, required=True)
-        hprId = CharField(max_length=50, required=True)
-        latitude = FloatField(required=True)
-        longitude = FloatField(required=True)
+        hprId = CharField(max_length=50, required=False, allow_null=True)
+        latitude = FloatField(required=False, allow_null=True)
+        longitude = FloatField(required=False, allow_null=True)
 
     class ProfileSerializer(Serializer):
         class PatientSerializer(Serializer):
@@ -245,3 +243,7 @@ class HipPatientShareSerializer(Serializer):
     intent = ChoiceField(choices=["PROFILE_SHARE"], required=True)
     metaData = MetaDataSerializer(required=True)
     profile = ProfileSerializer(required=True)
+
+
+class HipPatientFetchByTokenSerializer(Serializer):
+    token = CharField(max_length=10, required=True)

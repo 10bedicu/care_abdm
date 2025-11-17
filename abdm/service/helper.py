@@ -62,6 +62,7 @@ def encrypt_message(message: str):
 
     return b64encode(encrypted_message).decode()
 
+
 def hf_id_from_encounter(encounter: Encounter):
     if not encounter or not hasattr(encounter, "facility"):
         return None
@@ -72,6 +73,7 @@ def hf_id_from_encounter(encounter: Encounter):
         return None
 
     return facility.healthfacility.hf_id
+
 
 def hf_id_from_abha_id(health_id: str):
     abha_number = AbhaNumber.objects.filter(
@@ -97,6 +99,9 @@ def hf_id_from_abha_id(health_id: str):
 
 def cm_id():
     return settings.ABDM_CM_ID
+
+def benefit_name():
+    return settings.ABDM_BENEFIT_NAME
 
 
 def benefit_name():
@@ -253,7 +258,7 @@ def create_encounter_care_context(encounter: Encounter):
 
     return {
         "reference": f"v2::encounter::{encounter.external_id}",
-        "display": f"Encounter on {encounter.created_date}",
+        "display": f"Encounter on {encounter.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
         "hi_type": HealthInformationType.DISCHARGE_SUMMARY
         if is_admission
         else HealthInformationType.OP_CONSULTATION,
@@ -263,7 +268,7 @@ def create_encounter_care_context(encounter: Encounter):
 def create_file_upload_care_context(file_upload: FileUpload):
     return {
         "reference": f"v2::file_upload::{file_upload.external_id}",
-        "display": f"File Uploaded on {file_upload.created_date}",
+        "display": f"File Uploaded on {file_upload.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
         "hi_type": HealthInformationType.RECORD_ARTIFACT,
     }
 
@@ -273,6 +278,6 @@ def create_questionnaire_response_care_context(
 ):
     return {
         "reference": f"v2::questionnaire_response::{questionnaire_response.external_id}",
-        "display": f"Observations Added on {questionnaire_response.created_date}",
+        "display": f"Observations Added on {questionnaire_response.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
         "hi_type": HealthInformationType.WELLNESS_RECORD,
     }

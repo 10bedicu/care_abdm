@@ -154,6 +154,54 @@ class EnrollmentEnrolByAadhaarViaDemographicsResponse(TypedDict):
     new: bool
 
 
+class EnrollmentEnrolByAadhaarViaBioBody(TypedDict):
+    transaction_id: str
+    aadhaar: str
+    fingerprint_pid: str
+    mobile: str
+
+
+class EnrollmentEnrolByAadhaarViaBioResponse(TypedDict):
+    ABHAProfile: ABHAProfile
+    isNew: bool
+    message: str
+    tokens: Token
+    txnId: str
+
+
+class EnrollmentEnrolAuthInitViaFaceBody(TypedDict):
+    pass
+
+
+class EnrollmentEnrolAuthInitViaFaceResponse(TypedDict):
+    message: str
+    txnId: str
+
+
+class EnrollmentEnrolCapturePIDViaFaceBody(TypedDict):
+    transaction_id: str
+
+
+class EnrollmentEnrolCapturePIDViaFaceResponse(TypedDict):
+    status: Literal["PENDING", "VERIFIED", "FAILED", "COMPLETED"]
+    message: str
+    txnId: str | None
+
+
+class EnrollmentEnrolByAadhaarViaFaceBody(TypedDict):
+    transaction_id: str
+    aadhaar: str
+    mobile: str
+
+
+class EnrollmentEnrolByAadhaarViaFaceResponse(TypedDict):
+    ABHAProfile: ABHAProfile
+    isNew: bool
+    message: str
+    tokens: Token
+    txnId: str
+
+
 class EnrollmentAuthByAbdmBody(TypedDict):
     scope: list[Literal["abha-enrol", "dl-flow", "mobile-verify", "email-verify"]]
     transaction_id: str

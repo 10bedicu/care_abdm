@@ -65,6 +65,10 @@ def retry_failed_care_contexts():
         for i in range(0, len(care_contexts), CARE_CONTEXT_BATCH_SIZE):
             batch = care_contexts[i : i + CARE_CONTEXT_BATCH_SIZE]
             try:
+                logger.info(
+                    f"ABDM_DEBUG__RETRY_CARE_CONTEXT_LINKING :: Initiated Care Context Linking for {batch!s} {patient!s} {transaction.meta_data.get('hf_id')}"
+                )
+
                 GatewayService.link__carecontext(
                     {
                         "patient": patient,

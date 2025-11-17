@@ -39,6 +39,12 @@ class Consent(BaseModel):
     patient_abha = models.ForeignKey(
         AbhaNumber, on_delete=models.PROTECT, to_field="health_id"
     )
+    encounter = models.ForeignKey(
+        "emr.Encounter",
+        on_delete=models.PROTECT,
+        to_field="external_id",
+        null=True,
+    )
 
     care_contexts = models.JSONField(
         default=list, validators=[JSONFieldSchemaValidator(CARE_CONTEXTS)]

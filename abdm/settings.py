@@ -128,6 +128,7 @@ DEFAULTS = {
         "system": "https://care.ohc.network/abha_number",
         "display": "Abha Number",
     },
+    "SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 3600,
 }
 
 plugin_settings = PluginSettings(

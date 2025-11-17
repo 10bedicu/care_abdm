@@ -28,12 +28,14 @@ from abdm.models import (
     ConsentArtefact,
     HealthFacility,
     Transaction,
+    TransactionStatus,
     TransactionType,
 )
 from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.gateway import GatewayService
+from abdm.settings import plugin_settings as settings
 from care.emr.models.patient import Patient
-from care.emr.resources.patient.spec import GenderChoices
+from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,51 @@ class HIPViewSet(GenericViewSet):
             },
             status=status.HTTP_202_ACCEPTED,
         )
+
+    @action(
+        detail=False,
+        methods=["GET"],
+        url_path="patient/fetch-by-token/(?P<token>[^/.]+)",
+    )
+    def patient__fetch_by_token(self, request, token):
+        keys = cache.keys("abdm_patient_share__*")
+        matched_abhas = []
+        for key in keys:
+            try:
+                cached_token = cache.get(key)
+            except Exception:
+                cached_token = None
+            if str(cached_token) == str(token):
+                matched_key = key.decode("utf-8") if hasattr(key, "decode") else key
+                matched_abhas.append(matched_key.replace("abdm_patient_share__", ""))
+
+        if not matched_abhas:
+            return Response(
+                {"detail": "No active token found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        if len(matched_abhas) > 1:
+            return Response(
+                {"detail": "Ambiguous token"}, status=status.HTTP_409_CONFLICT
+            )
+
+        abha_address = matched_abhas[0]
+
+        abha_number = AbhaNumber.objects.filter(health_id=abha_address).first()
+        if not abha_number:
+            return Response(
+                {"detail": "ABHA address not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        patient = abha_number.patient
+        if not patient:
+            return Response(
+                {"detail": "Patient not linked to ABHA"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = PatientPartialSpec.serialize(patient).to_json()
+        return Response(data, status=status.HTTP_200_OK)
 
 
 @extend_schema(tags=["ABDM: HIP Callback"])
@@ -103,7 +150,15 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hip/token/on-generate-token")
     def hip__token__on_generate_token(self, request):
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Request for {request.data!s} {request.headers!s}"
+        )
+
         validated_data = self.validate_request(request)
+
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Validated data for {validated_data}"
+        )
 
         hf_id = request.headers.get("X-HIP-ID")
         health_id = validated_data.get("abhaAddress")
@@ -127,10 +182,18 @@ class HIPCallbackViewSet(GenericViewSet):
             f"abdm_link_care_context__{hf_id}__{health_id}__*"
         )
 
+        logger.info(
+            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Link Care Context Request Cache Keys for {link_care_context_request_cache_keys}"
+        )
+
         for request_cache_key in link_care_context_request_cache_keys:
             cached_data = cache.get(request_cache_key)
 
             if cached_data.get("purpose") == "LINK_CARECONTEXT":
+                logger.info(
+                    f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Initiated Care Context Linking for {cached_data.get('reference_id')} {cached_data.get('patient')} {cached_data.get('care_contexts')} {cached_data.get('hf_id')}"
+                )
+
                 GatewayService.link__carecontext(
                     {
                         "reference_id": cached_data.get("reference_id"),
@@ -147,11 +210,22 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="link/on_carecontext")
     def link__on_carecontext(self, request):
-        self.validate_request(request)
+        logger.info(
+            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Request for {request.data!s} {request.headers!s}"
+        )
 
-        # TODO: delete care context transaction if it failed
+        data = self.validate_request(request)
+        request_id = data.get("response", {}).get("requestId")
 
-        # TODO: handle failed link requests
+        logger.info(f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Validated data for {data}")
+
+        Transaction.objects.filter(reference_id=request_id).update(
+            status=TransactionStatus.COMPLETED
+        )
+
+        logger.info(
+            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Transaction status updated for {request_id} to {TransactionStatus.COMPLETED.label}"
+        )
 
         return Response(status=status.HTTP_202_ACCEPTED)
 
@@ -190,7 +264,7 @@ class HIPCallbackViewSet(GenericViewSet):
                         date_of_birth__year__gte=patient_data.get("yearOfBirth") - 5,
                         date_of_birth__year__lte=patient_data.get("yearOfBirth") + 5,
                     )
-                    | Q(year_of_birth__gte=patient_data.get("yearOfBirth")) - 5,
+                    | Q(year_of_birth__gte=patient_data.get("yearOfBirth") - 5),
                     year_of_birth__lte=patient_data.get("yearOfBirth") + 5,
                     gender={"M": 1, "F": 2, "O": 3}.get(patient_data.get("gender"), 3),
                     similarity__gt=0.3,
@@ -441,14 +515,28 @@ class HIPCallbackViewSet(GenericViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         patient_data = validated_data.get("profile").get("patient")
-        abha_number = AbhaNumber.objects.filter(
-            Q(abha_number=patient_data.get("abhaNumber"))
-            | Q(health_id=patient_data.get("abhaAddress"))
-        ).first()
-        # TODO: consider the case of existing patient without abha number
+        (abha_number, created) = AbhaNumber.objects.update_or_create(
+            abha_number=patient_data.get("abhaNumber"),
+            defaults={
+                "abha_number": patient_data.get("abhaNumber"),
+                "health_id": patient_data.get("abhaAddress"),
+                "name": patient_data.get("name"),
+                "gender": patient_data.get("gender"),
+                "date_of_birth": validate_and_format_date(
+                    patient_data.get("yearOfBirth"),
+                    patient_data.get("monthOfBirth"),
+                    patient_data.get("dayOfBirth"),
+                ),
+                "address": patient_data.get("address", {}).get("line"),
+                "district": patient_data.get("address", {}).get("district"),
+                "state": patient_data.get("address", {}).get("state"),
+                "pincode": patient_data.get("address", {}).get("pinCode"),
+                "mobile": patient_data.get("phoneNumber"),
+            },
+        )
 
         is_existing_patient = True
-        if not abha_number:
+        if not abha_number.patient:
             is_existing_patient = False
 
             full_address = ", ".join(
@@ -469,6 +557,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
                 "%Y-%m-%d",
             ).date()
+            # TODO: consider the case of existing patient without abha number
             patient = Patient.objects.create(
                 name=patient_data.get("name"),
                 gender={
@@ -484,29 +573,11 @@ class HIPCallbackViewSet(GenericViewSet):
                 pincode=patient_data.get("address").get("pinCode"),
                 geo_organization=None,
             )
-
-            abha_number = AbhaNumber.objects.create(
-                patient=patient,
-                abha_number=patient_data.get("abhaNumber"),
-                health_id=patient_data.get("abhaAddress"),
-                name=patient_data.get("name"),
-                gender=patient_data.get("gender"),
-                date_of_birth=validate_and_format_date(
-                    patient_data.get("yearOfBirth"),
-                    patient_data.get("monthOfBirth"),
-                    patient_data.get("dayOfBirth"),
-                ),
-                address=patient_data.get("address").get("line"),
-                district=patient_data.get("address").get("district"),
-                state=patient_data.get("address").get("state"),
-                pincode=patient_data.get("address").get("pinCode"),
-                mobile=patient_data.get("phoneNumber"),
-            )
+            abha_number.patient = patient
+            abha_number.save()
 
         # TODO: add the patient to the facility queue
-
         cached_data = cache.get("abdm_patient_share__" + abha_number.health_id)
-
         if cached_data:
             GatewayService.patient_share__on_share(
                 {
@@ -519,12 +590,11 @@ class HIPCallbackViewSet(GenericViewSet):
 
             return Response(status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        token_number = len(cache.client.get_client().keys("abdm_patient_share__*")) + 1
-
+        token_number = len(cache.keys("abdm_patient_share__*")) + 1
         cache.set(
             "abdm_patient_share__" + abha_number.health_id,
             token_number,
-            timeout=600,
+            timeout=settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
         )
 
         GatewayService.patient_share__on_share(
@@ -533,7 +603,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "abha_address": abha_number.health_id,
                 "context": validated_data.get("metaData").get("context"),
                 "token_number": token_number,
-                "expiry": 600,
+                "expiry": settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
                 "request_id": request.headers.get("REQUEST-ID"),
             }
         )
