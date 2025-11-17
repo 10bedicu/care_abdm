@@ -58,7 +58,7 @@ def create_patient_identifiers_for_existing_abha(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('abdm', '0020_merge_20250620_1504'),
+        ('abdm', '0022_consentartefact_encounter_consentrequest_encounter'),
     ]
 
     operations = [
