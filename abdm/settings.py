@@ -124,7 +124,11 @@ DEFAULTS = {
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
-    "SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 3600,
+    "ABHA_NUMBER_IDENTIFIER_SYSTEM": {
+        "system": "https://care.ohc.network/abha_number",
+        "display": "ABHA Number",
+    },
+    "SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,
 }
 
 plugin_settings = PluginSettings(
