@@ -382,7 +382,9 @@ class HIPCallbackViewSet(GenericViewSet):
         consent__request__hip__on_init callback. (Adds a delay to the callback so that on-init completes first)
         """
 
-        time.sleep(2)
+        # TODO: Remove this, and use celery to delay the callback if the on-init callback is not completed yet
+        # TODO: Have 3 retries with exponential backoff
+        time.sleep(10)
         logger.info(f"TESTLOG - CONSENT REQUEST HIP NOTIFY: {request.data}")
         validated_data = self.validate_request(request)
 
