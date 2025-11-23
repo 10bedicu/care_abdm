@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 from functools import reduce
 
@@ -237,8 +238,8 @@ class HIPCallbackViewSet(GenericViewSet):
 
         patient_data = validated_data.get("patient", {})
         identifiers = [
-            *patient_data.get("verifiedIdentifiers", []),
-            *patient_data.get("unverifiedIdentifiers", []),
+            *(patient_data.get("verifiedIdentifiers", []) or []),
+            *(patient_data.get("unverifiedIdentifiers", []) or []),
         ]
 
         health_id_number = next(
@@ -372,6 +373,8 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="consent/request/hip/notify")
     def consent__request__hip__notify(self, request):
+        time.sleep(10)
+
         validated_data = self.validate_request(request)
 
         notification = validated_data.get("notification")
