@@ -37,6 +37,11 @@ from abdm.service.v3.gateway import GatewayService
 from abdm.settings import plugin_settings as settings
 from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
+from care.facility.models.facility import Facility
+from care_abdm.abdm.utils.token import (
+    get_or_create_scan_and_share_token,
+    get_scan_and_share_token_by_token_number,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,46 +62,44 @@ class HIPViewSet(GenericViewSet):
     @action(
         detail=False,
         methods=["GET"],
-        url_path="patient/fetch-by-token/(?P<token>[^/.]+)",
+        url_path="patient/fetch-by-token",
     )
-    def patient__fetch_by_token(self, request, token):
-        keys = cache.keys("abdm_patient_share__*")
-        matched_abhas = []
-        for key in keys:
-            try:
-                cached_token = cache.get(key)
-            except Exception:
-                cached_token = None
-            if str(cached_token) == str(token):
-                matched_key = key.decode("utf-8") if hasattr(key, "decode") else key
-                matched_abhas.append(matched_key.replace("abdm_patient_share__", ""))
+    def patient__fetch_by_token(self, request):
+        token = request.query_params.get("token")
+        facility_id = request.query_params.get("facility_id")
 
-        if not matched_abhas:
+        if not token or not facility_id:
             return Response(
-                {"detail": "No active token found"}, status=status.HTTP_404_NOT_FOUND
+                {"detail": "Token and facility are required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if len(matched_abhas) > 1:
+        try:
+            token_number = int(token)
+        except ValueError:
             return Response(
-                {"detail": "Ambiguous token"}, status=status.HTTP_409_CONFLICT
+                {"detail": "Token must be an integer"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        abha_address = matched_abhas[0]
-
-        abha_number = AbhaNumber.objects.filter(health_id=abha_address).first()
-        if not abha_number:
+        facility = Facility.objects.filter(external_id=facility_id).first()
+        if not facility:
             return Response(
-                {"detail": "ABHA address not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-
-        patient = abha_number.patient
-        if not patient:
-            return Response(
-                {"detail": "Patient not linked to ABHA"},
+                {"detail": "Facility not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        data = PatientPartialSpec.serialize(patient).to_json()
+        token = get_scan_and_share_token_by_token_number(
+            token_number=token_number, facility=facility
+        )
+
+        if not token:
+            return Response(
+                {"detail": "Token not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = PatientPartialSpec.serialize(token.patient).to_json()
         return Response(data, status=status.HTTP_200_OK)
 
 
@@ -579,25 +582,8 @@ class HIPCallbackViewSet(GenericViewSet):
             abha_number.patient = patient
             abha_number.save()
 
-        # TODO: add the patient to the facility queue
-        cached_data = cache.get("abdm_patient_share__" + abha_number.health_id)
-        if cached_data:
-            GatewayService.patient_share__on_share(
-                {
-                    "status": "FAILED",
-                    "abha_address": abha_number.health_id,
-                    "context": validated_data.get("metaData").get("context"),
-                    "request_id": request.headers.get("REQUEST-ID"),
-                }
-            )
-
-            return Response(status=status.HTTP_429_TOO_MANY_REQUESTS)
-
-        token_number = len(cache.keys("abdm_patient_share__*")) + 1
-        cache.set(
-            "abdm_patient_share__" + abha_number.health_id,
-            token_number,
-            timeout=settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
+        token = get_or_create_scan_and_share_token(
+            abha_number.patient, health_facility.facility
         )
 
         GatewayService.patient_share__on_share(
@@ -605,7 +591,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "status": "SUCCESS",
                 "abha_address": abha_number.health_id,
                 "context": validated_data.get("metaData").get("context"),
-                "token_number": token_number,
+                "token_number": token.number,
                 "expiry": settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
                 "request_id": request.headers.get("REQUEST-ID"),
             }
@@ -617,7 +603,7 @@ class HIPCallbackViewSet(GenericViewSet):
             meta_data={
                 "abha_number": str(abha_number.external_id),
                 "is_existing_patient": is_existing_patient,
-                "token": str(token_number),
+                "token": str(token.external_id),
             },
         )
 
