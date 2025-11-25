@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 from functools import reduce
 
@@ -33,6 +34,7 @@ from abdm.models import (
 )
 from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.gateway import GatewayService
+from abdm.settings import plugin_settings as settings
 from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
 
@@ -236,8 +238,8 @@ class HIPCallbackViewSet(GenericViewSet):
 
         patient_data = validated_data.get("patient", {})
         identifiers = [
-            *patient_data.get("verifiedIdentifiers", []),
-            *patient_data.get("unverifiedIdentifiers", []),
+            *(patient_data.get("verifiedIdentifiers", []) or []),
+            *(patient_data.get("unverifiedIdentifiers", []) or []),
         ]
 
         health_id_number = next(
@@ -263,7 +265,7 @@ class HIPCallbackViewSet(GenericViewSet):
                         date_of_birth__year__gte=patient_data.get("yearOfBirth") - 5,
                         date_of_birth__year__lte=patient_data.get("yearOfBirth") + 5,
                     )
-                    | Q(year_of_birth__gte=patient_data.get("yearOfBirth")) - 5,
+                    | Q(year_of_birth__gte=patient_data.get("yearOfBirth") - 5),
                     year_of_birth__lte=patient_data.get("yearOfBirth") + 5,
                     gender={"M": 1, "F": 2, "O": 3}.get(patient_data.get("gender"), 3),
                     similarity__gt=0.3,
@@ -371,6 +373,8 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="consent/request/hip/notify")
     def consent__request__hip__notify(self, request):
+        time.sleep(10)
+
         validated_data = self.validate_request(request)
 
         notification = validated_data.get("notification")
@@ -514,14 +518,28 @@ class HIPCallbackViewSet(GenericViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         patient_data = validated_data.get("profile").get("patient")
-        abha_number = AbhaNumber.objects.filter(
-            Q(abha_number=patient_data.get("abhaNumber"))
-            | Q(health_id=patient_data.get("abhaAddress"))
-        ).first()
-        # TODO: consider the case of existing patient without abha number
+        (abha_number, created) = AbhaNumber.objects.update_or_create(
+            abha_number=patient_data.get("abhaNumber"),
+            defaults={
+                "abha_number": patient_data.get("abhaNumber"),
+                "health_id": patient_data.get("abhaAddress"),
+                "name": patient_data.get("name"),
+                "gender": patient_data.get("gender"),
+                "date_of_birth": validate_and_format_date(
+                    patient_data.get("yearOfBirth"),
+                    patient_data.get("monthOfBirth"),
+                    patient_data.get("dayOfBirth"),
+                ),
+                "address": patient_data.get("address", {}).get("line"),
+                "district": patient_data.get("address", {}).get("district"),
+                "state": patient_data.get("address", {}).get("state"),
+                "pincode": patient_data.get("address", {}).get("pinCode"),
+                "mobile": patient_data.get("phoneNumber"),
+            },
+        )
 
         is_existing_patient = True
-        if not abha_number:
+        if not abha_number.patient:
             is_existing_patient = False
 
             full_address = ", ".join(
@@ -542,6 +560,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
                 "%Y-%m-%d",
             ).date()
+            # TODO: consider the case of existing patient without abha number
             patient = Patient.objects.create(
                 name=patient_data.get("name"),
                 gender={
@@ -557,29 +576,11 @@ class HIPCallbackViewSet(GenericViewSet):
                 pincode=patient_data.get("address").get("pinCode"),
                 geo_organization=None,
             )
-
-            abha_number = AbhaNumber.objects.create(
-                patient=patient,
-                abha_number=patient_data.get("abhaNumber"),
-                health_id=patient_data.get("abhaAddress"),
-                name=patient_data.get("name"),
-                gender=patient_data.get("gender"),
-                date_of_birth=validate_and_format_date(
-                    patient_data.get("yearOfBirth"),
-                    patient_data.get("monthOfBirth"),
-                    patient_data.get("dayOfBirth"),
-                ),
-                address=patient_data.get("address").get("line"),
-                district=patient_data.get("address").get("district"),
-                state=patient_data.get("address").get("state"),
-                pincode=patient_data.get("address").get("pinCode"),
-                mobile=patient_data.get("phoneNumber"),
-            )
+            abha_number.patient = patient
+            abha_number.save()
 
         # TODO: add the patient to the facility queue
-
         cached_data = cache.get("abdm_patient_share__" + abha_number.health_id)
-
         if cached_data:
             GatewayService.patient_share__on_share(
                 {
@@ -593,11 +594,10 @@ class HIPCallbackViewSet(GenericViewSet):
             return Response(status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         token_number = len(cache.keys("abdm_patient_share__*")) + 1
-
         cache.set(
             "abdm_patient_share__" + abha_number.health_id,
             token_number,
-            timeout=600,
+            timeout=settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
         )
 
         GatewayService.patient_share__on_share(
@@ -606,7 +606,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "abha_address": abha_number.health_id,
                 "context": validated_data.get("metaData").get("context"),
                 "token_number": token_number,
-                "expiry": 600,
+                "expiry": settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
                 "request_id": request.headers.get("REQUEST-ID"),
             }
         )
