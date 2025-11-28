@@ -17,10 +17,13 @@ logger = logging.getLogger(__name__)
 class Request:
     def __init__(self, base_url):
         self.url = base_url
+        logger.info(f"Initialized Request class with base_url: {base_url}")
 
     def user_header(self, user_token):
         if not user_token:
+            logger.debug("No user token provided, skipping user header")
             return {}
+        logger.debug("User token provided, adding X-Token header")
         return {"X-Token": "Bearer " + user_token}
 
     def auth_header(self):
@@ -28,6 +31,7 @@ class Request:
 
         token = cache.get(ABDM_TOKEN_CACHE_KEY)
         if not token:
+            logger.info("Missing session token, fetching new one")
             data = json.dumps(
                 {
                     "clientId": settings.ABDM_CLIENT_ID,
@@ -43,9 +47,12 @@ class Request:
                 "X-CM-ID": cm_id(),
             }
 
+            logger.debug(f"Fetching token from: {ABDM_TOKEN_URL}")
             response = requests.post(
                 ABDM_TOKEN_URL, data=data, headers=headers, timeout=settings.ABDM_REQUEST_TIMEOUT
             )
+
+            logger.debug(f"Token fetch response status: {response.status_code}")
 
             if response.status_code < 300:
                 if response.headers["Content-Type"] != "application/json":
@@ -58,9 +65,14 @@ class Request:
                 expires_in = data["expiresIn"]
 
                 cache.set(ABDM_TOKEN_CACHE_KEY, token, expires_in)
+                logger.info(
+                    f"Successfully fetched and cached token, expires in {expires_in} seconds"
+                )
             else:
                 logger.error(f"Error while fetching token: {response.text}")
                 return None
+        else:
+            logger.debug("Using cached authentication token")
 
         return {"Authorization": f"Bearer {token}"}
 
@@ -77,13 +89,22 @@ class Request:
         url = self.url + path
         headers = self.headers(headers, auth)
 
+        logger.info(f"Making GET request to: {url}")
+        if params:
+            logger.debug(f"GET request params: {params}")
+
         response = requests.get(url, headers=headers, params=params, timeout=settings.ABDM_REQUEST_TIMEOUT)
 
-        if response.status_code == 400 or response.status_code == 401:
+        logger.debug(f"GET response status: {response.status_code}")
+
+        if response.status_code in (400, 401):
             result = response.json()
             if "code" in result and result["code"] == "900901":
+                logger.warning(
+                    "Received 900901 error code, invalidating token cache and retrying"
+                )
                 cache.delete(ABDM_TOKEN_CACHE_KEY)
-                return self.post(path, params, headers, auth)
+                return self.get(path, params, headers, auth)
 
         return self._handle_response(response)
 
@@ -92,11 +113,20 @@ class Request:
         payload = json.dumps(data)
         headers = self.headers(headers, auth)
 
+        logger.info(f"Making POST request to: {url}")
+        if data:
+            logger.debug(f"POST request data: {payload}")
+
         response = requests.post(url, data=payload, headers=headers, timeout=settings.ABDM_REQUEST_TIMEOUT)
 
-        if response.status_code == 400 or response.status_code == 401:
+        logger.debug(f"POST response status: {response.status_code}")
+
+        if response.status_code in (400, 401):
             result = response.json()
             if "code" in result and result["code"] == "900901":
+                logger.warning(
+                    "Received 900901 error code, invalidating token cache and retrying"
+                )
                 cache.delete(ABDM_TOKEN_CACHE_KEY)
                 return self.post(path, data, headers, auth)
 
@@ -105,13 +135,26 @@ class Request:
     def _handle_response(self, response: requests.Response):
         def custom_json():
             try:
-                return json.loads(response.text)
+                parsed_json = json.loads(response.text)
+                logger.debug("Successfully parsed JSON response")
+                return parsed_json
             except json.JSONDecodeError as json_err:
-                logger.error(f"JSON Decode error: {json_err}")
+                logger.error(
+                    f"JSON Decode error: {json_err}, response text: {response.text}"
+                )
                 return {"error": response.text}
             except Exception as err:
-                logger.error(f"Unknown error while decoding json: {err}")
+                logger.error(
+                    f"Unknown error while decoding json: {err}, response text: {response.text}"
+                )
                 return {}
+
+        if response.status_code >= 400:
+            logger.warning(
+                f"Request failed with status {response.status_code}: {response.text}"
+            )
+        else:
+            logger.debug(f"Request successful with status {response.status_code}")
 
         response.json = custom_json
         return response
