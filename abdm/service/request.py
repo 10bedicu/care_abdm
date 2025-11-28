@@ -10,6 +10,7 @@ ABDM_TOKEN_URL = settings.ABDM_AUTH_URL or (
     settings.ABDM_GATEWAY_URL + "/gateway/v3/sessions"
 )
 ABDM_TOKEN_CACHE_KEY = "abdm_token"
+MAX_RETRY_COUNT = 1
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class Request:
             **(self.auth_header() or {}),
         }
 
-    def get(self, path, params=None, headers=None, auth=None):
+    def get(self, path, params=None, headers=None, auth=None, retry_count=0):
         url = self.url + path
         headers = self.headers(headers, auth)
 
@@ -97,18 +98,18 @@ class Request:
 
         logger.debug(f"GET response status: {response.status_code}")
 
-        if response.status_code in (400, 401):
+        if response.status_code in (400, 401) and retry_count < MAX_RETRY_COUNT + 1:
             result = response.json()
             if "code" in result and result["code"] == "900901":
                 logger.warning(
                     "Received 900901 error code, invalidating token cache and retrying"
                 )
                 cache.delete(ABDM_TOKEN_CACHE_KEY)
-                return self.get(path, params, headers, auth)
+                return self.get(path, params, headers, auth, retry_count + 1)
 
         return self._handle_response(response)
 
-    def post(self, path, data=None, headers=None, auth=None):
+    def post(self, path, data=None, headers=None, auth=None, retry_count=0):
         url = self.url + path
         payload = json.dumps(data)
         headers = self.headers(headers, auth)
@@ -121,14 +122,14 @@ class Request:
 
         logger.debug(f"POST response status: {response.status_code}")
 
-        if response.status_code in (400, 401):
+        if response.status_code in (400, 401) and retry_count < MAX_RETRY_COUNT + 1:
             result = response.json()
             if "code" in result and result["code"] == "900901":
                 logger.warning(
                     "Received 900901 error code, invalidating token cache and retrying"
                 )
                 cache.delete(ABDM_TOKEN_CACHE_KEY)
-                return self.post(path, data, headers, auth)
+                return self.post(path, data, headers, auth, retry_count + 1)
 
         return self._handle_response(response)
 
