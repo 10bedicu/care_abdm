@@ -39,8 +39,8 @@ class Migration(migrations.Migration):
                 to="facility.patientregistration",
             ),
         ),
-        migrations.RunPython(
-            code=reverse_patient_abhanumber_relation,
-            reverse_code=migrations.RunPython.noop,
-        ),
+        # migrations.RunPython(
+        #     code=reverse_patient_abhanumber_relation,
+        #     reverse_code=migrations.RunPython.noop,
+        # ),
     ]
