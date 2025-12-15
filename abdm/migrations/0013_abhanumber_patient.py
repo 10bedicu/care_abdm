@@ -31,16 +31,16 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="abhanumber",
             name="patient",
-            field=models.OneToOneField(
+            field=models.BigIntegerField(
                 blank=True,
                 null=True,
-                on_delete=django.db.models.deletion.PROTECT,
-                related_name="abha_number",
-                to="facility.patientregistration",
+                # on_delete=django.db.models.deletion.PROTECT,
+                # related_name="abha_number",
+                # to="facility.patientregistration",
             ),
         ),
-        migrations.RunPython(
-            code=reverse_patient_abhanumber_relation,
-            reverse_code=migrations.RunPython.noop,
-        ),
+        # migrations.RunPython(
+        #     code=reverse_patient_abhanumber_relation,
+        #     reverse_code=migrations.RunPython.noop,
+        # ),
     ]

@@ -2,15 +2,13 @@ from rest_framework import serializers
 
 from abdm.api.serializers.base import EMRPydanticModelField
 from abdm.models import AbhaNumber
-from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import PatientRetrieveSpec
-from care.utils.serializers.fields import ExternalIdSerializerField
 
 
 class AbhaNumberSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="external_id", read_only=True)
-    patient = ExternalIdSerializerField(
-        queryset=Patient.objects.all(), required=False, allow_null=True
+    patient = serializers.UUIDField(
+        source="patient.external_id", required=False, allow_null=True
     )
     patient_object = EMRPydanticModelField(
         PatientRetrieveSpec,
