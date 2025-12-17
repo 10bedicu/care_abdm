@@ -140,8 +140,11 @@ def generate_care_contexts_for_existing_data(
         encounters = encounters.filter(facility__healthfacility__hf_id=hf_id)
 
     for encounter in encounters:
-        encounter_care_contexts = []
+        facility = encounter.facility
+        if not hasattr(facility, "healthfacility"):
+            continue
 
+        encounter_care_contexts = []
         encounter_care_contexts.append(create_encounter_care_context(encounter))
 
         medication_requests = (
@@ -181,11 +184,6 @@ def generate_care_contexts_for_existing_data(
                 encounter_care_contexts.append(
                     create_questionnaire_response_care_context(response)
                 )
-
-        facility = encounter.facility
-        if not hasattr(facility, "healthfacility"):
-            # TODO: create transaction to log failed transaction for care_context
-            pass
 
         hf_id = facility.healthfacility.hf_id
         if hf_id in care_contexts:
