@@ -38,7 +38,7 @@ from abdm.settings import plugin_settings as settings
 from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
 from care.facility.models.facility import Facility
-from care_abdm.abdm.utils.token import (
+from abdm.utils.token import (
     get_or_create_scan_and_share_token,
     get_scan_and_share_token_by_token_number,
 )

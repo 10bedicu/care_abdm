@@ -7,7 +7,7 @@ from care.emr.models.scheduling.token import Token, TokenCategory, TokenQueue
 from care.emr.resources.scheduling.schedule.spec import SchedulableResourceTypeOptions
 from care.emr.resources.scheduling.token.spec import TokenStatusOptions
 from care.facility.models.facility import Facility
-from care_abdm.abdm.utils.user import get_or_create_abdm_user
+from abdm.utils.user import get_or_create_abdm_user
 
 
 def get_or_create_token_queue(facility: Facility):
