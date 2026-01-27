@@ -15,7 +15,6 @@ from abdm.models.json_schema import CARE_CONTEXTS
 from abdm.settings import plugin_settings as settings
 from abdm.utils.cipher import Cipher
 from care.emr.models.file_upload import FileUpload
-from care.emr.resources.file_upload.spec import FileCategoryChoices, FileTypeChoices
 from care.users.models import User
 from care.utils.models.base import BaseModel
 from care.utils.models.validators import JSONFieldSchemaValidator
@@ -119,6 +118,8 @@ class ConsentArtefact(Consent):
         return self.consent_id
 
     def save(self, *args, **kwargs):
+        from care.emr.resources.file_upload.spec import FileCategoryChoices, FileTypeChoices
+
         if self.key_material_private_key is None:
             cipher = Cipher("", "")
             key_material = cipher.generate_key_pair()
