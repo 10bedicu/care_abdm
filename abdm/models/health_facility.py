@@ -3,7 +3,6 @@ from django.db import models, transaction
 from django.db.models import F, Func, Value
 
 from abdm.models.transaction import Transaction, TransactionStatus, TransactionType
-from abdm.service.helper import ABDMAPIException
 from care.utils.models.base import BaseModel
 
 
@@ -44,6 +43,8 @@ class HealthFacility(BaseModel):
         return total_updated
 
     def save(self, *args, **kwargs):
+        from abdm.service.helper import ABDMAPIException
+
         with transaction.atomic():
             if self.pk:
                 old_instance = HealthFacility.objects.get(pk=self.pk)
