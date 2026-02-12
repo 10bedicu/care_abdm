@@ -23,7 +23,6 @@ from abdm.api.v3.serializers.hip import (
     HipTokenOnGenerateTokenSerializer,
     LinkOnCarecontextSerializer,
 )
-from abdm.authentication import ABDMAuthentication
 from abdm.models import (
     AbhaNumber,
     ConsentArtefact,
@@ -32,16 +31,21 @@ from abdm.models import (
     TransactionStatus,
     TransactionType,
 )
-from abdm.service.helper import uuid, validate_and_format_date
+from abdm.service.helper import (
+    forward_request_to_secondary_instance,
+    uuid,
+    validate_and_format_date,
+)
 from abdm.service.v3.gateway import GatewayService
 from abdm.settings import plugin_settings as settings
-from care.emr.models.patient import Patient
-from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
-from care.facility.models.facility import Facility
 from abdm.utils.token import (
     get_or_create_scan_and_share_token,
     get_scan_and_share_token_by_token_number,
 )
+from care.emr.models.patient import Patient
+from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
+from care.facility.models.facility import Facility
+from care_abdm.abdm.authentication import ABDMAuthentication
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +158,12 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hip/token/on-generate-token")
     def hip__token__on_generate_token(self, request):
+        request_id = request.headers.get("REQUEST-ID")
+        request_id_in_cache = cache.get(f"abdm_generate_token_request__{request_id}")
+        if not request_id_in_cache and settings.ABDM_SECONDARY_CARE_ABDM_INSTANCE:
+            response = forward_request_to_secondary_instance(request)
+            return Response(response.json(), status=response.status_code)
+
         logger.info(
             f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Request for {request.data!s} {request.headers!s}"
         )
@@ -298,11 +308,13 @@ class HIPCallbackViewSet(GenericViewSet):
     def hip__link__care_context__init(self, request):
         validated_data = self.validate_request(request)
         care_contexts = reduce(
-            lambda acc, patient: acc
-            + [
-                context.get("referenceNumber")
-                for context in patient.get("careContexts", [])
-            ],
+            lambda acc, patient: (
+                acc
+                + [
+                    context.get("referenceNumber")
+                    for context in patient.get("careContexts", [])
+                ]
+            ),
             validated_data.get("patient", []),
             [],
         )

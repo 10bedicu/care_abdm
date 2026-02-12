@@ -133,6 +133,12 @@ class GatewayService:
             timeout=60 * 60,
         )
 
+        cache.set(
+            f"abdm_generate_token_request__{request_id}",
+            timestamp(),
+            timeout=60 * 60,
+        )
+
         last_generate_token_request = cache.get(
             f"abdm_generate_token__{hf_id}__{abha_number.health_id}"
         )

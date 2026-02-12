@@ -50,7 +50,10 @@ class Request:
 
             logger.debug(f"Fetching token from: {ABDM_TOKEN_URL}")
             response = requests.post(
-                ABDM_TOKEN_URL, data=data, headers=headers, timeout=settings.ABDM_REQUEST_TIMEOUT
+                ABDM_TOKEN_URL,
+                data=data,
+                headers=headers,
+                timeout=settings.ABDM_REQUEST_TIMEOUT,
             )
 
             logger.debug(f"Token fetch response status: {response.status_code}")
@@ -94,7 +97,9 @@ class Request:
         if params:
             logger.debug(f"GET request params: {params}")
 
-        response = requests.get(url, headers=headers, params=params, timeout=settings.ABDM_REQUEST_TIMEOUT)
+        response = requests.get(
+            url, headers=headers, params=params, timeout=settings.ABDM_REQUEST_TIMEOUT
+        )
 
         logger.debug(f"GET response status: {response.status_code}")
 
@@ -118,7 +123,9 @@ class Request:
         if data:
             logger.debug(f"POST request data: {payload}")
 
-        response = requests.post(url, data=payload, headers=headers, timeout=settings.ABDM_REQUEST_TIMEOUT)
+        response = requests.post(
+            url, data=payload, headers=headers, timeout=settings.ABDM_REQUEST_TIMEOUT
+        )
 
         logger.debug(f"POST response status: {response.status_code}")
 
