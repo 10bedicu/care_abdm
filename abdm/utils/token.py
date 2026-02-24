@@ -63,12 +63,12 @@ def get_or_create_scan_and_share_token_category(facility: Facility):
     token_category, _ = TokenCategory.objects.get_or_create(
         facility=facility,
         resource_type=SchedulableResourceTypeOptions.healthcare_service.value,
-        shorthand="scan_and_share",
+        shorthand="ABDM",
         created_by=abdm_user,
         defaults={
             "facility": facility,
             "resource_type": SchedulableResourceTypeOptions.healthcare_service.value,
-            "shorthand": "scan_and_share",
+            "shorthand": "ABDM",
             "created_by": abdm_user,
             "name": "Scan and Share",
         },
