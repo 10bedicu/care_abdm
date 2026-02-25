@@ -42,7 +42,7 @@ from abdm.utils.token import (
 from abdm.utils.user import get_or_create_abdm_user
 from care.emr.locks.billing import PatientCreateLock
 from care.emr.models.patient import Patient, PatientIdentifier, PatientIdentifierConfig
-from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
+from care.emr.resources.patient.spec import GenderChoices, PatientRetrieveSpec
 from care.emr.resources.patient_identifier.default_expression_evaluator import (
     evaluate_patient_instance_default_values,
 )
@@ -104,7 +104,7 @@ class HIPViewSet(GenericViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        data = PatientPartialSpec.serialize(token.patient).to_json()
+        data = PatientRetrieveSpec.serialize(token.patient).to_json()
         return Response(data, status=status.HTTP_200_OK)
 
 
