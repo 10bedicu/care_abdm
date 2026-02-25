@@ -153,6 +153,8 @@ class HealthIdViewSet(GenericViewSet):
             value=abha_number.abha_number,
             created_by=abdm_user,
         )
+        patient.build_instance_identifiers()
+        patient.save()
 
         hf_care_contexts = generate_care_contexts_for_existing_data(patient)
 
