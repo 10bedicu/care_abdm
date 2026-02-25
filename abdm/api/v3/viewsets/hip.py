@@ -588,8 +588,6 @@ class HIPCallbackViewSet(GenericViewSet):
                     geo_organization=None,
                 )
                 evaluate_patient_instance_default_values(patient)
-                patient.build_instance_identifiers()
-                patient.save()
 
                 abha_number.patient = patient
                 abha_number.save()
