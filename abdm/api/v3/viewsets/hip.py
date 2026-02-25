@@ -35,13 +35,14 @@ from abdm.models import (
 from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.gateway import GatewayService
 from abdm.settings import plugin_settings as settings
-from care.emr.models.patient import Patient
-from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
-from care.facility.models.facility import Facility
 from abdm.utils.token import (
     get_or_create_scan_and_share_token,
     get_scan_and_share_token_by_token_number,
 )
+from abdm.utils.user import get_or_create_abdm_user
+from care.emr.models.patient import Patient, PatientIdentifier, PatientIdentifierConfig
+from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
+from care.facility.models.facility import Facility
 
 logger = logging.getLogger(__name__)
 
@@ -298,11 +299,13 @@ class HIPCallbackViewSet(GenericViewSet):
     def hip__link__care_context__init(self, request):
         validated_data = self.validate_request(request)
         care_contexts = reduce(
-            lambda acc, patient: acc
-            + [
-                context.get("referenceNumber")
-                for context in patient.get("careContexts", [])
-            ],
+            lambda acc, patient: (
+                acc
+                + [
+                    context.get("referenceNumber")
+                    for context in patient.get("careContexts", [])
+                ]
+            ),
             validated_data.get("patient", []),
             [],
         )
@@ -584,6 +587,48 @@ class HIPCallbackViewSet(GenericViewSet):
 
         token = get_or_create_scan_and_share_token(
             abha_number.patient, health_facility.facility
+        )
+
+        abdm_user = get_or_create_abdm_user()
+
+        patient_identifier_config, _ = PatientIdentifierConfig.objects.get_or_create(
+            config__system=settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get("system"),
+            facility=None,
+            created_by=abdm_user,
+            defaults={
+                "status": "active",
+                "config": {
+                    "use": "official",
+                    "description": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get(
+                        "display"
+                    ),
+                    "required": False,
+                    "unique": True,
+                    "regex": "",
+                    "system": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get("system"),
+                    "display": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get("display"),
+                    "retrieve_config": {
+                        "retrieve_with_dob": False,
+                        "retrieve_with_year_of_birth": False,
+                        "retrieve_with_otp": False,
+                    },
+                },
+                "facility": None,
+                "created_by": abdm_user,
+            },
+        )
+
+        PatientIdentifier.objects.get_or_create(
+            patient=patient,
+            config=patient_identifier_config,
+            value=abha_number.abha_number,
+            created_by=abdm_user,
+            defaults={
+                "patient": patient,
+                "config": patient_identifier_config,
+                "value": abha_number.abha_number,
+                "created_by": abdm_user,
+            },
         )
 
         GatewayService.patient_share__on_share(
