@@ -124,10 +124,8 @@ DEFAULTS = {
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
-    "ABHA_NUMBER_IDENTIFIER_SYSTEM": {
-        "system": "https://care.ohc.network/abha_number",
-        "display": "ABHA Number",
-    },
+    "ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM": "https://care.ohc.network/abha_number",
+    "ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY": "ABHA Number",
     "SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,
 }
 

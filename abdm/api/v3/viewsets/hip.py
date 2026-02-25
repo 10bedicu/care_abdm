@@ -592,21 +592,19 @@ class HIPCallbackViewSet(GenericViewSet):
         abdm_user = get_or_create_abdm_user()
 
         patient_identifier_config, _ = PatientIdentifierConfig.objects.get_or_create(
-            config__system=settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get("system"),
+            config__system=settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
             facility=None,
             created_by=abdm_user,
             defaults={
                 "status": "active",
                 "config": {
                     "use": "official",
-                    "description": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get(
-                        "display"
-                    ),
+                    "description": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
                     "required": False,
                     "unique": True,
                     "regex": "",
-                    "system": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get("system"),
-                    "display": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM.get("display"),
+                    "system": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+                    "display": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
                     "retrieve_config": {
                         "retrieve_with_dob": False,
                         "retrieve_with_year_of_birth": False,
