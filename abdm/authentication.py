@@ -16,11 +16,14 @@ logger = logging.getLogger(__name__)
 
 class ABDMAuthentication(JWTAuthentication):
     def open_id_authenticate(self, url, token):
-        public_key = requests.get(url, headers={
-            "REQUEST-ID": uuid(),
-            "TIMESTAMP": timestamp(),
-            "X-CM-ID": cm_id()
-        })
+        public_key = requests.get(
+            url,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-CM-ID": cm_id(),
+            },
+        )
         jwk = public_key.json()["keys"][0]
         public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
         return jwt.decode(
@@ -61,7 +64,6 @@ class ABDMAuthentication(JWTAuthentication):
                 password=f"{password}123",
                 gender=3,
                 phone_number="917777777777",
-                user_type=User.TYPE_VALUE_MAP["Volunteer"],
                 verified=True,
                 date_of_birth=datetime.now().date(),
             )
