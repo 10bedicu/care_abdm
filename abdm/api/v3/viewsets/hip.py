@@ -40,8 +40,12 @@ from abdm.utils.token import (
     get_scan_and_share_token_by_token_number,
 )
 from abdm.utils.user import get_or_create_abdm_user
+from care.emr.locks.billing import PatientCreateLock
 from care.emr.models.patient import Patient, PatientIdentifier, PatientIdentifierConfig
 from care.emr.resources.patient.spec import GenderChoices, PatientPartialSpec
+from care.emr.resources.patient_identifier.default_expression_evaluator import (
+    evaluate_patient_instance_default_values,
+)
 from care.facility.models.facility import Facility
 
 logger = logging.getLogger(__name__)
@@ -566,22 +570,27 @@ class HIPCallbackViewSet(GenericViewSet):
                 f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
                 "%Y-%m-%d",
             ).date()
-            # TODO: consider the case of existing patient without abha number
-            patient = Patient.objects.create(
-                name=patient_data.get("name"),
-                gender={
-                    "M": GenderChoices.male,
-                    "F": GenderChoices.female,
-                    "O": GenderChoices.non_binary,
-                }.get(patient_data.get("gender"), "O"),
-                date_of_birth=date_of_birth,
-                phone_number=phone_number,
-                emergency_phone_number=phone_number,
-                address=full_address,
-                permanent_address=full_address,
-                pincode=patient_data.get("address").get("pinCode"),
-                geo_organization=None,
-            )
+            with PatientCreateLock():
+                # TODO: consider the case of existing patient without abha number
+                patient = Patient.objects.create(
+                    name=patient_data.get("name"),
+                    gender={
+                        "M": GenderChoices.male,
+                        "F": GenderChoices.female,
+                        "O": GenderChoices.non_binary,
+                    }.get(patient_data.get("gender"), "O"),
+                    date_of_birth=date_of_birth,
+                    phone_number=phone_number,
+                    emergency_phone_number=phone_number,
+                    address=full_address,
+                    permanent_address=full_address,
+                    pincode=patient_data.get("address").get("pinCode"),
+                    geo_organization=None,
+                )
+                evaluate_patient_instance_default_values(patient)
+                patient.build_instance_identifiers()
+                patient.save()
+
             abha_number.patient = patient
             abha_number.save()
 
@@ -628,6 +637,8 @@ class HIPCallbackViewSet(GenericViewSet):
                 "created_by": abdm_user,
             },
         )
+        patient.build_instance_identifiers()
+        patient.save()
 
         GatewayService.patient_share__on_share(
             {
