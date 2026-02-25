@@ -591,13 +591,15 @@ class HIPCallbackViewSet(GenericViewSet):
 
         abdm_user = get_or_create_abdm_user()
 
-        patient_identifier_config, _ = PatientIdentifierConfig.objects.get_or_create(
+        patient_identifier_config = PatientIdentifierConfig.objects.filter(
             config__system=settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-            facility=None,
-            created_by=abdm_user,
-            defaults={
-                "status": "active",
-                "config": {
+        ).first()
+        if not patient_identifier_config:
+            patient_identifier_config = PatientIdentifierConfig.objects.create(
+                status="active",
+                facility=None,
+                created_by=abdm_user,
+                config={
                     "use": "official",
                     "description": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
                     "required": False,
@@ -611,10 +613,7 @@ class HIPCallbackViewSet(GenericViewSet):
                         "retrieve_with_otp": False,
                     },
                 },
-                "facility": None,
-                "created_by": abdm_user,
-            },
-        )
+            )
 
         PatientIdentifier.objects.get_or_create(
             patient=patient,
