@@ -547,9 +547,10 @@ class HIPCallbackViewSet(GenericViewSet):
                 "mobile": patient_data.get("phoneNumber"),
             },
         )
+        patient = abha_number.patient
 
         is_existing_patient = True
-        if not abha_number.patient:
+        if not patient:
             is_existing_patient = False
 
             full_address = ", ".join(
@@ -592,9 +593,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 abha_number.patient = patient
                 abha_number.save()
 
-        token = get_or_create_scan_and_share_token(
-            abha_number.patient, health_facility.facility
-        )
+        token = get_or_create_scan_and_share_token(patient, health_facility.facility)
 
         abdm_user = get_or_create_abdm_user()
 
@@ -623,12 +622,12 @@ class HIPCallbackViewSet(GenericViewSet):
             )
 
         PatientIdentifier.objects.get_or_create(
-            patient=abha_number.patient,
+            patient=patient,
             config=patient_identifier_config,
             value=abha_number.abha_number,
             created_by=abdm_user,
             defaults={
-                "patient": abha_number.patient,
+                "patient": patient,
                 "config": patient_identifier_config,
                 "value": abha_number.abha_number,
                 "created_by": abdm_user,
