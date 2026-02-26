@@ -628,7 +628,7 @@ class HIPCallbackViewSet(GenericViewSet):
             value=abha_number.abha_number,
             created_by=abdm_user,
             defaults={
-                "patient": patient,
+                "patient": abha_number.patient,
                 "config": patient_identifier_config,
                 "value": abha_number.abha_number,
                 "created_by": abdm_user,
