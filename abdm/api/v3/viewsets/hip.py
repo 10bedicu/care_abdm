@@ -623,7 +623,7 @@ class HIPCallbackViewSet(GenericViewSet):
             )
 
         PatientIdentifier.objects.get_or_create(
-            patient=patient,
+            patient=abha_number.patient,
             config=patient_identifier_config,
             value=abha_number.abha_number,
             created_by=abdm_user,
