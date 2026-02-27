@@ -1,5 +1,8 @@
 from datetime import UTC, datetime
 
+from django.db import transaction
+
+from abdm.utils.user import get_or_create_abdm_user
 from care.emr.models.healthcare_service import HealthcareService
 from care.emr.models.patient import Patient
 from care.emr.models.scheduling.schedule import SchedulableResource
@@ -7,7 +10,7 @@ from care.emr.models.scheduling.token import Token, TokenCategory, TokenQueue
 from care.emr.resources.scheduling.schedule.spec import SchedulableResourceTypeOptions
 from care.emr.resources.scheduling.token.spec import TokenStatusOptions
 from care.facility.models.facility import Facility
-from abdm.utils.user import get_or_create_abdm_user
+from care.utils.lock import Lock
 
 
 def get_or_create_token_queue(facility: Facility):
@@ -96,18 +99,20 @@ def get_or_create_scan_and_share_token(patient: Patient, facility: Facility):
     ).first()
 
     if not token:
-        number = (
-            Token.objects.filter(queue=token_queue, category=token_category).count() + 1
-        )
-        token = Token.objects.create(
-            facility=facility,
-            patient=patient,
-            queue=token_queue,
-            number=number,
-            status=TokenStatusOptions.CREATED.value,
-            category=token_category,
-            created_by=abdm_user,
-        )
+        with Lock(f"booking:token:{token_queue.id}"), transaction.atomic():
+            number = (
+                Token.objects.filter(queue=token_queue, category=token_category).count()
+                + 1
+            )
+            token = Token.objects.create(
+                facility=facility,
+                patient=patient,
+                queue=token_queue,
+                number=number,
+                status=TokenStatusOptions.CREATED.value,
+                category=token_category,
+                created_by=abdm_user,
+            )
 
     return token
 
