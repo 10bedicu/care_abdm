@@ -598,7 +598,7 @@ class HIPCallbackViewSet(GenericViewSet):
         abdm_user = get_or_create_abdm_user()
 
         patient_identifier_config = PatientIdentifierConfig.objects.filter(
-            config__system=settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+            config__system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
         ).first()
         if not patient_identifier_config:
             patient_identifier_config = PatientIdentifierConfig.objects.create(
@@ -607,12 +607,12 @@ class HIPCallbackViewSet(GenericViewSet):
                 created_by=abdm_user,
                 config={
                     "use": "official",
-                    "description": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                    "description": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
                     "required": False,
                     "unique": True,
                     "regex": "",
-                    "system": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                    "display": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                    "system": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+                    "display": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
                     "retrieve_config": {
                         "retrieve_with_dob": False,
                         "retrieve_with_year_of_birth": False,
@@ -642,7 +642,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 "abha_address": abha_number.health_id,
                 "context": validated_data.get("metaData").get("context"),
                 "token_number": token.number,
-                "expiry": settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
+                "expiry": settings.ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
                 "request_id": request.headers.get("REQUEST-ID"),
             }
         )

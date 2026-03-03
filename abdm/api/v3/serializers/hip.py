@@ -19,6 +19,7 @@ from abdm.models import (
     Purpose,
     Status,
 )
+from abdm.settings import plugin_settings as settings
 
 
 class HipTokenOnGenerateTokenSerializer(Serializer):
@@ -228,7 +229,10 @@ class HipPatientShareSerializer(Serializer):
                     max_length=50, required=False, allow_blank=True, allow_null=True
                 )
 
-            abhaNumber = CharField(max_length=50, required=True)
+            abhaNumber = CharField(
+                max_length=50,
+                required=not settings.ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT,
+            )
             abhaAddress = CharField(max_length=50, required=True)
             name = CharField(max_length=50, required=True)
             gender = ChoiceField(choices=["M", "F", "O"], required=True)
