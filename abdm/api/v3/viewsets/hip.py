@@ -504,7 +504,18 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hip/patient/share")
     def hip__patient__share(self, request):
-        validated_data = self.validate_request(request)
+        try:
+            validated_data = self.validate_request(request)
+        except Exception:
+            GatewayService.patient_share__on_share(
+                {
+                    "error": {
+                        "message": "Bad Request, invalid request Body",
+                        "code": "ABDM-9999",
+                    },
+                    "request_id": request.headers.get("REQUEST-ID"),
+                }
+            )
 
         hip_id = validated_data.get("metaData").get("hipId")
         health_facility = HealthFacility.objects.filter(hf_id=hip_id).first()
@@ -516,11 +527,10 @@ class HIPCallbackViewSet(GenericViewSet):
 
             GatewayService.patient_share__on_share(
                 {
-                    "status": "FAILED",
-                    "abha_address": validated_data.get("profile")
-                    .get("patient")
-                    .get("abhaAddress"),
-                    "context": validated_data.get("metaData").get("context"),
+                    "error": {
+                        "message": "HIP is not available",
+                        "code": "ABDM-9999",
+                    },
                     "request_id": request.headers.get("REQUEST-ID"),
                 }
             )
@@ -638,11 +648,13 @@ class HIPCallbackViewSet(GenericViewSet):
 
         GatewayService.patient_share__on_share(
             {
-                "status": "SUCCESS",
-                "abha_address": abha_number.health_id,
-                "context": validated_data.get("metaData").get("context"),
-                "token_number": token.number,
-                "expiry": settings.ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
+                "acknowledgement": {
+                    "status": "SUCCESS",
+                    "abha_address": abha_number.health_id,
+                    "context": validated_data.get("metaData").get("context"),
+                    "token_number": token.number,
+                    "expiry": settings.ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
+                },
                 "request_id": request.headers.get("REQUEST-ID"),
             }
         )
