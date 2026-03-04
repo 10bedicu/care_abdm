@@ -1010,18 +1010,32 @@ class GatewayService:
     def patient_share__on_share(
         data: PatientShareOnShareBody,
     ) -> PatientShareOnShareResponse:
+        acknowledgement = data.get("acknowledgement")
+        error = data.get("error")
+
+        if not acknowledgement and not error:
+            raise ABDMAPIException(detail="Provide an acknowledgement or error")
+
         payload = {
-            "acknowledgement": {
-                "status": data.get("status"),
-                "abhaAddress": data.get("abha_address"),
-                "profile": {
-                    "context": data.get("context"),
-                    "tokenNumber": data.get("token_number"),
-                    "expiry": data.get("expiry"),
-                },
-            },
             "response": {"requestId": data.get("request_id")},
         }
+
+        if acknowledgement:
+            payload["acknowledgement"] = {
+                "status": acknowledgement.get("status"),
+                "abhaAddress": acknowledgement.get("abha_address"),
+                "profile": {
+                    "context": acknowledgement.get("context"),
+                    "tokenNumber": acknowledgement.get("token_number"),
+                    "expiry": acknowledgement.get("expiry"),
+                },
+            }
+
+        if error:
+            payload["error"] = {
+                "message": error.get("message"),
+                "code": error.get("code"),
+            }
 
         path = "/patient-share/v3/on-share"
         response = GatewayService.request.post(
