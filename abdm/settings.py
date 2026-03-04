@@ -121,12 +121,13 @@ DEFAULTS = {
     "ABDM_CM_ID": "sbx",
     "ABDM_BENEFIT_NAME": "",
     "ABDM_REQUEST_TIMEOUT": 30,
+    "ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM": "https://care.ohc.network/abha_number",
+    "ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY": "ABHA Number",
+    "ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,
+    "ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT": True,
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
-    "ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM": "https://care.ohc.network/abha_number",
-    "ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY": "ABHA Number",
-    "SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,
 }
 
 plugin_settings = PluginSettings(

@@ -504,7 +504,18 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hip/patient/share")
     def hip__patient__share(self, request):
-        validated_data = self.validate_request(request)
+        try:
+            validated_data = self.validate_request(request)
+        except Exception:
+            GatewayService.patient_share__on_share(
+                {
+                    "error": {
+                        "message": "Bad Request, invalid request Body",
+                        "code": "ABDM-9999",
+                    },
+                    "request_id": request.headers.get("REQUEST-ID"),
+                }
+            )
 
         hip_id = validated_data.get("metaData").get("hipId")
         health_facility = HealthFacility.objects.filter(hf_id=hip_id).first()
@@ -516,11 +527,10 @@ class HIPCallbackViewSet(GenericViewSet):
 
             GatewayService.patient_share__on_share(
                 {
-                    "status": "FAILED",
-                    "abha_address": validated_data.get("profile")
-                    .get("patient")
-                    .get("abhaAddress"),
-                    "context": validated_data.get("metaData").get("context"),
+                    "error": {
+                        "message": "HIP is not available",
+                        "code": "ABDM-9999",
+                    },
                     "request_id": request.headers.get("REQUEST-ID"),
                 }
             )
@@ -598,7 +608,7 @@ class HIPCallbackViewSet(GenericViewSet):
         abdm_user = get_or_create_abdm_user()
 
         patient_identifier_config = PatientIdentifierConfig.objects.filter(
-            config__system=settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+            config__system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
         ).first()
         if not patient_identifier_config:
             patient_identifier_config = PatientIdentifierConfig.objects.create(
@@ -607,12 +617,12 @@ class HIPCallbackViewSet(GenericViewSet):
                 created_by=abdm_user,
                 config={
                     "use": "official",
-                    "description": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                    "description": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
                     "required": False,
                     "unique": True,
                     "regex": "",
-                    "system": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                    "display": settings.ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                    "system": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+                    "display": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
                     "retrieve_config": {
                         "retrieve_with_dob": False,
                         "retrieve_with_year_of_birth": False,
@@ -638,11 +648,13 @@ class HIPCallbackViewSet(GenericViewSet):
 
         GatewayService.patient_share__on_share(
             {
-                "status": "SUCCESS",
-                "abha_address": abha_number.health_id,
-                "context": validated_data.get("metaData").get("context"),
-                "token_number": token.number,
-                "expiry": settings.SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
+                "acknowledgement": {
+                    "status": "SUCCESS",
+                    "abha_address": abha_number.health_id,
+                    "context": validated_data.get("metaData").get("context"),
+                    "token_number": token.number,
+                    "expiry": settings.ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
+                },
                 "request_id": request.headers.get("REQUEST-ID"),
             }
         )
