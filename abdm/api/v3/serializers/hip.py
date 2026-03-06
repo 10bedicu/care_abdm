@@ -231,6 +231,7 @@ class HipPatientShareSerializer(Serializer):
 
             abhaNumber = CharField(
                 max_length=50,
+                allow_null=settings.ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT,
                 required=not settings.ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT,
             )
             abhaAddress = CharField(max_length=50, required=True)
