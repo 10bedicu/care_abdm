@@ -517,6 +517,8 @@ class HIPCallbackViewSet(GenericViewSet):
                 }
             )
 
+            return Response(status=status.HTTP_200_OK)
+
         hip_id = validated_data.get("metaData").get("hipId")
         health_facility = HealthFacility.objects.filter(hf_id=hip_id).first()
 
@@ -605,44 +607,45 @@ class HIPCallbackViewSet(GenericViewSet):
 
         token = get_or_create_scan_and_share_token(patient, health_facility.facility)
 
-        abdm_user = get_or_create_abdm_user()
+        if abha_number.abha_number:
+            abdm_user = get_or_create_abdm_user()
 
-        patient_identifier_config = PatientIdentifierConfig.objects.filter(
-            config__system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-        ).first()
-        if not patient_identifier_config:
-            patient_identifier_config = PatientIdentifierConfig.objects.create(
-                status="active",
-                facility=None,
-                created_by=abdm_user,
-                config={
-                    "use": "official",
-                    "description": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                    "required": False,
-                    "unique": True,
-                    "regex": "",
-                    "system": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                    "display": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                    "retrieve_config": {
-                        "retrieve_with_dob": False,
-                        "retrieve_with_year_of_birth": False,
-                        "retrieve_with_otp": False,
+            patient_identifier_config = PatientIdentifierConfig.objects.filter(
+                config__system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+            ).first()
+            if not patient_identifier_config:
+                patient_identifier_config = PatientIdentifierConfig.objects.create(
+                    status="active",
+                    facility=None,
+                    created_by=abdm_user,
+                    config={
+                        "use": "official",
+                        "description": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                        "required": False,
+                        "unique": True,
+                        "regex": "",
+                        "system": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+                        "display": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                        "retrieve_config": {
+                            "retrieve_with_dob": False,
+                            "retrieve_with_year_of_birth": False,
+                            "retrieve_with_otp": False,
+                        },
                     },
+                )
+
+            PatientIdentifier.objects.get_or_create(
+                patient=patient,
+                config=patient_identifier_config,
+                value=abha_number.abha_number,
+                created_by=abdm_user,
+                defaults={
+                    "patient": patient,
+                    "config": patient_identifier_config,
+                    "value": abha_number.abha_number,
+                    "created_by": abdm_user,
                 },
             )
-
-        PatientIdentifier.objects.get_or_create(
-            patient=patient,
-            config=patient_identifier_config,
-            value=abha_number.abha_number,
-            created_by=abdm_user,
-            defaults={
-                "patient": patient,
-                "config": patient_identifier_config,
-                "value": abha_number.abha_number,
-                "created_by": abdm_user,
-            },
-        )
         patient.build_instance_identifiers()
         patient.save()
 
