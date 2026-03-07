@@ -540,8 +540,15 @@ class HIPCallbackViewSet(GenericViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         patient_data = validated_data.get("profile").get("patient")
+        abha_number = AbhaNumber.objects.filter(
+            Q(health_id=patient_data.get("abhaAddress"))
+            | (
+                Q(abha_number=patient_data.get("abhaNumber"))
+                & Q(abha_number__isnull=False)
+            )
+        ).first()
         (abha_number, created) = AbhaNumber.objects.update_or_create(
-            abha_number=patient_data.get("abhaNumber"),
+            pk=abha_number.pk if abha_number else None,
             defaults={
                 "abha_number": patient_data.get("abhaNumber"),
                 "health_id": patient_data.get("abhaAddress"),
