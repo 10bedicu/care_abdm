@@ -146,12 +146,6 @@ class GatewayService:
 
             return {}
 
-        cache.set(
-            f"abdm_generate_token__{hf_id}__{abha_number.health_id}",
-            timestamp(),
-            timeout=60 * 30,
-        )
-
         path = "/v3/token/generate-token"
         response = GatewayService.request.post(
             path,
@@ -170,6 +164,12 @@ class GatewayService:
 
         if response.status_code != 202:
             raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
+
+        cache.set(
+            f"abdm_generate_token__{hf_id}__{abha_number.health_id}",
+            timestamp(),
+            timeout=60 * 30,
+        )
 
         return {}
 
