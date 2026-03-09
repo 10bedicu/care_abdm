@@ -777,7 +777,7 @@ class GatewayService:
                 "REQUEST-ID": uuid(),
                 "TIMESTAMP": timestamp(),
                 "X-CM-ID": cm_id(),
-                "REQUESTER-ID": hf_id_from_abha_id(abha_number.abha_number),
+                "REQUESTER-ID": hf_id_from_abha_id(abha_number.health_id),
             },
         )
 
