@@ -109,7 +109,9 @@ class GatewayService:
             )
 
         payload = {
-            "abhaNumber": abha_number.abha_number.replace("-", ""),
+            "abhaNumber": abha_number.abha_number.replace("-", "")
+            if abha_number.abha_number
+            else None,
             "abhaAddress": abha_number.health_id,
             "name": abha_number.name,
             "gender": abha_number.gender,
@@ -124,7 +126,7 @@ class GatewayService:
         cache.set(
             f"{base_cache_key}__{request_id}",
             {
-                "abha_number": abha_number.abha_number,
+                "abha_number": abha_number.health_id,
                 "purpose": data.get("purpose"),
                 "care_contexts": data.get("care_contexts"),
                 "reference_id": data.get("reference_id"),
@@ -144,12 +146,6 @@ class GatewayService:
 
             return {}
 
-        cache.set(
-            f"abdm_generate_token__{hf_id}__{abha_number.health_id}",
-            timestamp(),
-            timeout=60 * 30,
-        )
-
         path = "/v3/token/generate-token"
         response = GatewayService.request.post(
             path,
@@ -168,6 +164,12 @@ class GatewayService:
 
         if response.status_code != 202:
             raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
+
+        cache.set(
+            f"abdm_generate_token__{hf_id}__{abha_number.health_id}",
+            timestamp(),
+            timeout=60 * 30,
+        )
 
         return {}
 
@@ -244,7 +246,9 @@ class GatewayService:
             grouped_care_contexts[care_context["hi_type"]].append(care_context)
 
         payload = {
-            "abhaNumber": abha_number.abha_number.replace("-", ""),
+            "abhaNumber": abha_number.abha_number.replace("-", "")
+            if abha_number.abha_number
+            else None,
             "abhaAddress": abha_number.health_id,
             "patient": list(
                 map(
@@ -759,7 +763,9 @@ class GatewayService:
         payload = {
             "scope": "DEMO",
             "parameters": {
-                "abhaNumber": abha_number.abha_number.replace("-", ""),
+                "abhaNumber": abha_number.abha_number.replace("-", "")
+                if abha_number.abha_number
+                else None,
                 "abhaAddress": abha_number.health_id,
                 "name": abha_number.name,
                 "gender": abha_number.gender,
@@ -777,7 +783,7 @@ class GatewayService:
                 "REQUEST-ID": uuid(),
                 "TIMESTAMP": timestamp(),
                 "X-CM-ID": cm_id(),
-                "REQUESTER-ID": hf_id_from_abha_id(abha_number.abha_number),
+                "REQUESTER-ID": hf_id_from_abha_id(abha_number.health_id),
             },
         )
 

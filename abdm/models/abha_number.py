@@ -38,7 +38,7 @@ class AbhaNumber(BaseModel):
     refresh_token = models.TextField(null=True, blank=True)
 
     def __str__(self):
-        return f"{self.pk} {self.abha_number}"
+        return f"{self.pk} {self.health_id}"
 
     @property
     def parsed_date_of_birth(self):
