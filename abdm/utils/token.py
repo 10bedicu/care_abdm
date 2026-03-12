@@ -60,13 +60,13 @@ def get_or_create_token_queue(facility: Facility):
     return token_queue
 
 
-SCAN_AND_SHARE_TOKEN_CATEGORY = None
+SCAN_AND_SHARE_TOKEN_CATEGORY = {}
 
 
 def get_or_create_scan_and_share_token_category(facility: Facility):
     global SCAN_AND_SHARE_TOKEN_CATEGORY
-    if SCAN_AND_SHARE_TOKEN_CATEGORY:
-        return SCAN_AND_SHARE_TOKEN_CATEGORY
+    if SCAN_AND_SHARE_TOKEN_CATEGORY.get(facility.id):
+        return SCAN_AND_SHARE_TOKEN_CATEGORY.get(facility.id)
 
     abdm_user = get_or_create_abdm_user()
 
@@ -83,7 +83,7 @@ def get_or_create_scan_and_share_token_category(facility: Facility):
             "name": "Scan and Share",
         },
     )
-    SCAN_AND_SHARE_TOKEN_CATEGORY = token_category
+    SCAN_AND_SHARE_TOKEN_CATEGORY[facility.id] = token_category
 
     return token_category
 
