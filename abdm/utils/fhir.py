@@ -210,7 +210,8 @@ class Fhir:
     def _organization(self, facility: FacilityModel):
         health_facility = HealthFacilityModel.objects.filter(facility=facility).first()
         facility_spec = FacilityRetrieveSpec.serialize(facility)
-        id = health_facility.hf_id if health_facility else str(facility_spec.id)
+        id = str(facility_spec.id)
+        hf_id = health_facility.hf_id if health_facility else None
 
         return Organization(
             id=id,
@@ -218,10 +219,10 @@ class Fhir:
                 Identifier(
                     system=(
                         "https://facility.ndhm.gov.in"
-                        if health_facility
+                        if hf_id
                         else f"{CARE_IDENTIFIER_SYSTEM}/facility"
                     ),
-                    value=id,
+                    value=hf_id or id,
                     type=CodeableConcept(
                         coding=[
                             Coding(
