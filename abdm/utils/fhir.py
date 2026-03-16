@@ -2,6 +2,9 @@ import base64
 from datetime import UTC, datetime
 from functools import wraps
 
+from abdm.models.health_facility import HealthFacility as HealthFacilityModel
+from abdm.service.helper import ABDMAPIException, uuid
+from abdm.settings import plugin_settings as settings
 from django.db.models import Q
 from fhir.resources.R4B.address import Address
 from fhir.resources.R4B.allergyintolerance import AllergyIntolerance
@@ -24,7 +27,7 @@ from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.medicationrequest import MedicationRequest
 from fhir.resources.R4B.medicationstatement import MedicationStatement
-from fhir.resources.R4B.observation import Observation
+from fhir.resources.R4B.observation import Observation, ObservationReferenceRange
 from fhir.resources.R4B.organization import Organization
 from fhir.resources.R4B.patient import Patient
 from fhir.resources.R4B.period import Period
@@ -36,9 +39,6 @@ from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.timing import Timing, TimingRepeat
 
-from abdm.models.health_facility import HealthFacility as HealthFacilityModel
-from abdm.service.helper import ABDMAPIException, uuid
-from abdm.settings import plugin_settings as settings
 from care.emr.models.allergy_intolerance import (
     AllergyIntolerance as AllergyIntoleranceModel,
 )
@@ -418,8 +418,22 @@ class Fhir:
                                 ]
                             ),
                             doseRange=Range(
-                                low=dosage_spec.dose_and_rate.dose_range.low,
-                                high=dosage_spec.dose_and_rate.dose_range.high,
+                                low=Quantity(
+                                    value=dosage_spec.dose_and_rate.dose_range.low.value,
+                                    unit=dosage_spec.dose_and_rate.dose_range.low.unit.display,
+                                    system=dosage_spec.dose_and_rate.dose_range.low.unit.system,
+                                    code=dosage_spec.dose_and_rate.dose_range.low.unit.code,
+                                )
+                                if dosage_spec.dose_and_rate.dose_range.low
+                                else None,
+                                high=Quantity(
+                                    value=dosage_spec.dose_and_rate.dose_range.high.value,
+                                    unit=dosage_spec.dose_and_rate.dose_range.high.unit.display,
+                                    system=dosage_spec.dose_and_rate.dose_range.high.unit.system,
+                                    code=dosage_spec.dose_and_rate.dose_range.high.unit.code,
+                                )
+                                if dosage_spec.dose_and_rate.dose_range.high
+                                else None,
                             )
                             if dosage_spec.dose_and_rate.dose_range
                             else None,
@@ -604,7 +618,19 @@ class Fhir:
             if observation_spec.body_site
             else None,
             referenceRange=[
-                Range(**rrange) for rrange in observation_spec.reference_range
+                ObservationReferenceRange(
+                    low=Quantity(
+                        value=rrange.min,
+                    )
+                    if rrange.min
+                    else None,
+                    high=Quantity(
+                        value=rrange.max,
+                    )
+                    if rrange.max
+                    else None,
+                )
+                for rrange in observation_spec.reference_range
             ],
             encounter=self._reference(self._encounter(observation.encounter))
             if observation.encounter
