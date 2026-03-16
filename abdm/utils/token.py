@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from abdm.utils.user import get_or_create_abdm_user
 from django.db import transaction
 
 from abdm.utils.user import get_or_create_abdm_user
@@ -10,7 +11,8 @@ from care.emr.models.scheduling.token import Token, TokenCategory, TokenQueue
 from care.emr.resources.scheduling.schedule.spec import SchedulableResourceTypeOptions
 from care.emr.resources.scheduling.token.spec import TokenStatusOptions
 from care.facility.models.facility import Facility
-from care.utils.lock import Lock
+from care.utils.lock import Lock, ObjectLocked
+from care_abdm.abdm.service.helper import ABDMAPIException
 
 
 def get_or_create_token_queue(facility: Facility):
@@ -107,20 +109,33 @@ def get_or_create_scan_and_share_token(patient: Patient, facility: Facility):
     ).first()
 
     if not token:
-        with Lock(f"booking:token:{token_queue.id}"), transaction.atomic():
-            number = (
-                Token.objects.filter(queue=token_queue, category=token_category).count()
-                + 1
-            )
-            token = Token.objects.create(
-                facility=facility,
-                patient=patient,
-                queue=token_queue,
-                number=number,
-                status=TokenStatusOptions.CREATED.value,
-                category=token_category,
-                created_by=abdm_user,
-            )
+        lock = Lock(f"booking:token:{token_queue.id}")
+        try:
+            lock.acquire()
+        except ObjectLocked as e:
+            raise ABDMAPIException(
+                "Token is already locked, try again after a while"
+            ) from e
+
+        try:
+            with transaction.atomic():
+                number = (
+                    Token.objects.filter(queue=token_queue, category=token_category).count()
+                    + 1
+                )
+                token = Token.objects.create(
+                    facility=facility,
+                    patient=patient,
+                    queue=token_queue,
+                    number=number,
+                    status=TokenStatusOptions.CREATED.value,
+                    category=token_category,
+                    created_by=abdm_user,
+                )
+            transaction.on_commit(lock.release)
+        except Exception:
+            lock.release()
+            raise
 
     return token
 
