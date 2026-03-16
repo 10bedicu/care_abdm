@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
-from abdm.utils.user import get_or_create_abdm_user
 from django.db import transaction
 
 from abdm.utils.user import get_or_create_abdm_user
+from abdm.service.helper import ABDMAPIException
 from care.emr.models.healthcare_service import HealthcareService
 from care.emr.models.patient import Patient
 from care.emr.models.scheduling.schedule import SchedulableResource
@@ -12,7 +12,6 @@ from care.emr.resources.scheduling.schedule.spec import SchedulableResourceTypeO
 from care.emr.resources.scheduling.token.spec import TokenStatusOptions
 from care.facility.models.facility import Facility
 from care.utils.lock import Lock, ObjectLocked
-from care_abdm.abdm.service.helper import ABDMAPIException
 
 
 def get_or_create_token_queue(facility: Facility):
