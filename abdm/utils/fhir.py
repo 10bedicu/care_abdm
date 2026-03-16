@@ -2,6 +2,9 @@ import base64
 from datetime import UTC, datetime
 from functools import wraps
 
+from abdm.models.health_facility import HealthFacility as HealthFacilityModel
+from abdm.service.helper import ABDMAPIException, uuid
+from abdm.settings import plugin_settings as settings
 from django.db.models import Q
 from fhir.resources.R4B.address import Address
 from fhir.resources.R4B.allergyintolerance import AllergyIntolerance
@@ -24,7 +27,7 @@ from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.medicationrequest import MedicationRequest
 from fhir.resources.R4B.medicationstatement import MedicationStatement
-from fhir.resources.R4B.observation import Observation
+from fhir.resources.R4B.observation import Observation, ObservationReferenceRange
 from fhir.resources.R4B.organization import Organization
 from fhir.resources.R4B.patient import Patient
 from fhir.resources.R4B.period import Period
@@ -36,9 +39,6 @@ from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.timing import Timing, TimingRepeat
 
-from abdm.models.health_facility import HealthFacility as HealthFacilityModel
-from abdm.service.helper import ABDMAPIException, uuid
-from abdm.settings import plugin_settings as settings
 from care.emr.models.allergy_intolerance import (
     AllergyIntolerance as AllergyIntoleranceModel,
 )
@@ -132,6 +132,27 @@ class Fhir:
         patient_spec = PatientRetrieveSpec.serialize(patient)
         id = str(patient_spec.id)
 
+        address = []
+        if patient_spec.address:
+            address.append(
+                Address(
+                    line=[patient_spec.address],
+                    postalCode=patient_spec.pincode,
+                    country="IN",
+                )
+            )
+        if (
+            patient_spec.permanent_address
+            and patient_spec.permanent_address != patient_spec.address
+        ):
+            address.append(
+                Address(
+                    line=[patient_spec.permanent_address],
+                    postalCode=patient_spec.pincode,
+                    country="IN",
+                )
+            )
+
         return Patient(
             id=id,
             identifier=[Identifier(value=id)],
@@ -154,18 +175,7 @@ class Fhir:
             ],
             gender=patient_spec.gender,
             birthDate=patient.abha_number.parsed_date_of_birth,
-            address=[
-                Address(
-                    line=[patient_spec.address],
-                    postalCode=patient_spec.pincode,
-                    country="IN",
-                ),
-                Address(
-                    line=[patient_spec.permanent_address],
-                    postalCode=patient_spec.pincode,
-                    country="IN",
-                ),
-            ],
+            address=address or None,
         )
 
     @cache_profiles(Practitioner.get_resource_type())
@@ -210,7 +220,8 @@ class Fhir:
     def _organization(self, facility: FacilityModel):
         health_facility = HealthFacilityModel.objects.filter(facility=facility).first()
         facility_spec = FacilityRetrieveSpec.serialize(facility)
-        id = health_facility.hf_id if health_facility else str(facility_spec.id)
+        id = str(facility_spec.id)
+        hf_id = health_facility.hf_id if health_facility else None
 
         return Organization(
             id=id,
@@ -218,10 +229,10 @@ class Fhir:
                 Identifier(
                     system=(
                         "https://facility.ndhm.gov.in"
-                        if health_facility
+                        if hf_id
                         else f"{CARE_IDENTIFIER_SYSTEM}/facility"
                     ),
-                    value=id,
+                    value=hf_id or id,
                     type=CodeableConcept(
                         coding=[
                             Coding(
@@ -407,8 +418,22 @@ class Fhir:
                                 ]
                             ),
                             doseRange=Range(
-                                low=dosage_spec.dose_and_rate.dose_range.low,
-                                high=dosage_spec.dose_and_rate.dose_range.high,
+                                low=Quantity(
+                                    value=dosage_spec.dose_and_rate.dose_range.low.value,
+                                    unit=dosage_spec.dose_and_rate.dose_range.low.unit.display,
+                                    system=dosage_spec.dose_and_rate.dose_range.low.unit.system,
+                                    code=dosage_spec.dose_and_rate.dose_range.low.unit.code,
+                                )
+                                if dosage_spec.dose_and_rate.dose_range.low
+                                else None,
+                                high=Quantity(
+                                    value=dosage_spec.dose_and_rate.dose_range.high.value,
+                                    unit=dosage_spec.dose_and_rate.dose_range.high.unit.display,
+                                    system=dosage_spec.dose_and_rate.dose_range.high.unit.system,
+                                    code=dosage_spec.dose_and_rate.dose_range.high.unit.code,
+                                )
+                                if dosage_spec.dose_and_rate.dose_range.high
+                                else None,
                             )
                             if dosage_spec.dose_and_rate.dose_range
                             else None,
@@ -569,25 +594,21 @@ class Fhir:
             else CodeableConcept(**observation_spec.alternate_coding),
             valueString=observation_spec.value.get("value")
             if observation_spec.value.get("value")
+            and not observation_spec.value.get("unit")
+            and not observation_spec.value.get("coding")
             else None,
             valueCodeableConcept=CodeableConcept(
-                coding=[Coding(**observation_spec.value.get("value_code"))]
+                coding=[Coding(**observation_spec.value.get("coding"))]
             )
-            if observation_spec.value.get("value_code")
+            if observation_spec.value.get("coding")
             else None,
             valueQuantity=Quantity(
-                value=observation_spec.value.get("value_quantity", {}).get("value"),
-                unit=observation_spec.value.get("value_quantity", {})
-                .get("unit", {})
-                .get("display"),
-                system=observation_spec.value.get("value_quantity", {})
-                .get("unit", {})
-                .get("system"),
-                code=observation_spec.value.get("value_quantity", {})
-                .get("unit", {})
-                .get("code"),
+                value=observation_spec.value.get("value"),
+                unit=observation_spec.value.get("unit", {}).get("display"),
+                system=observation_spec.value.get("unit", {}).get("system"),
+                code=observation_spec.value.get("unit", {}).get("code"),
             )
-            if observation_spec.value.get("value_quantity")
+            if observation_spec.value.get("unit")
             else None,
             effectiveDateTime=observation_spec.effective_datetime.isoformat(),
             method=CodeableConcept(coding=[Coding(**observation_spec.method)])
@@ -597,7 +618,19 @@ class Fhir:
             if observation_spec.body_site
             else None,
             referenceRange=[
-                Range(**rrange) for rrange in observation_spec.reference_range
+                ObservationReferenceRange(
+                    low=Quantity(
+                        value=rrange.min,
+                    )
+                    if rrange.min
+                    else None,
+                    high=Quantity(
+                        value=rrange.max,
+                    )
+                    if rrange.max
+                    else None,
+                )
+                for rrange in observation_spec.reference_range
             ],
             encounter=self._reference(self._encounter(observation.encounter))
             if observation.encounter

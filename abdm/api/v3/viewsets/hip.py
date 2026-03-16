@@ -1,5 +1,4 @@
 import logging
-import time
 from datetime import datetime
 from functools import reduce
 
@@ -383,7 +382,7 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="consent/request/hip/notify")
     def consent__request__hip__notify(self, request):
-        time.sleep(10)
+        # TODO: handle the case where hip/notify is called before hip/on-init
 
         validated_data = self.validate_request(request)
 

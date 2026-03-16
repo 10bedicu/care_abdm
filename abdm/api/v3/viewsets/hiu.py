@@ -69,7 +69,11 @@ class HIUViewSet(GenericViewSet):
         validated_data = self.validate_request(request)
 
         abha_number = AbhaNumber.objects.filter(
-            Q(abha_number=validated_data.get("abha_number"))
+            Q(
+                Q(abha_number=validated_data.get("abha_number"))
+                & Q(abha_number__isnull=False)
+            )
+            | Q(health_id=validated_data.get("abha_number"))
             | Q(patient__external_id=validated_data.get("patient"))
         ).first()
 

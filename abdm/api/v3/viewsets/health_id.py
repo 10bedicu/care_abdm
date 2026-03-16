@@ -593,7 +593,8 @@ class HealthIdViewSet(GenericViewSet):
         )
 
         abha_number = AbhaNumber.objects.filter(
-            abha_number=result.get("healthIdNumber")
+            Q(abha_number=result.get("healthIdNumber"))
+            | Q(health_id=result.get("healthIdNumber"))
         ).first()
 
         if not abha_number:
@@ -609,7 +610,7 @@ class HealthIdViewSet(GenericViewSet):
         )
 
         (abha_number, _) = AbhaNumber.objects.update_or_create(
-            abha_number=profile_result.get("ABHANumber"),
+            pk=abha_number.pk,
             defaults={
                 "abha_number": profile_result.get("ABHANumber"),
                 "health_id": profile_result.get("preferredAbhaAddress"),
@@ -778,8 +779,15 @@ class HealthIdViewSet(GenericViewSet):
             {"x_token": token.get("access_token")}
         )
 
+        abha_number = AbhaNumber.objects.filter(
+            Q(health_id=profile_result.get("preferredAbhaAddress"))
+            | (
+                Q(abha_number=profile_result.get("ABHANumber"))
+                & Q(abha_number__isnull=False)
+            )
+        ).first()
         (abha_number, created) = AbhaNumber.objects.update_or_create(
-            abha_number=profile_result.get("ABHANumber"),
+            pk=abha_number.pk if abha_number else None,
             defaults={
                 "abha_number": profile_result.get("ABHANumber"),
                 "health_id": profile_result.get("preferredAbhaAddress"),
