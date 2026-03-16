@@ -570,25 +570,21 @@ class Fhir:
             else CodeableConcept(**observation_spec.alternate_coding),
             valueString=observation_spec.value.get("value")
             if observation_spec.value.get("value")
+            and not observation_spec.value.get("unit")
+            and not observation_spec.value.get("coding")
             else None,
             valueCodeableConcept=CodeableConcept(
-                coding=[Coding(**observation_spec.value.get("value_code"))]
+                coding=[Coding(**observation_spec.value.get("coding"))]
             )
-            if observation_spec.value.get("value_code")
+            if observation_spec.value.get("coding")
             else None,
             valueQuantity=Quantity(
-                value=observation_spec.value.get("value_quantity", {}).get("value"),
-                unit=observation_spec.value.get("value_quantity", {})
-                .get("unit", {})
-                .get("display"),
-                system=observation_spec.value.get("value_quantity", {})
-                .get("unit", {})
-                .get("system"),
-                code=observation_spec.value.get("value_quantity", {})
-                .get("unit", {})
-                .get("code"),
+                value=observation_spec.value.get("value"),
+                unit=observation_spec.value.get("unit", {}).get("display"),
+                system=observation_spec.value.get("unit", {}).get("system"),
+                code=observation_spec.value.get("unit", {}).get("code"),
             )
-            if observation_spec.value.get("value_quantity")
+            if observation_spec.value.get("unit")
             else None,
             effectiveDateTime=observation_spec.effective_datetime.isoformat(),
             method=CodeableConcept(coding=[Coding(**observation_spec.method)])
