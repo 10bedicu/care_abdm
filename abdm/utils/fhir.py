@@ -132,6 +132,27 @@ class Fhir:
         patient_spec = PatientRetrieveSpec.serialize(patient)
         id = str(patient_spec.id)
 
+        address = []
+        if patient_spec.address:
+            address.append(
+                Address(
+                    line=[patient_spec.address],
+                    postalCode=patient_spec.pincode,
+                    country="IN",
+                )
+            )
+        if (
+            patient_spec.permanent_address
+            and patient_spec.permanent_address != patient_spec.address
+        ):
+            address.append(
+                Address(
+                    line=[patient_spec.permanent_address],
+                    postalCode=patient_spec.pincode,
+                    country="IN",
+                )
+            )
+
         return Patient(
             id=id,
             identifier=[Identifier(value=id)],
@@ -154,18 +175,7 @@ class Fhir:
             ],
             gender=patient_spec.gender,
             birthDate=patient.abha_number.parsed_date_of_birth,
-            address=[
-                Address(
-                    line=[patient_spec.address],
-                    postalCode=patient_spec.pincode,
-                    country="IN",
-                ),
-                Address(
-                    line=[patient_spec.permanent_address],
-                    postalCode=patient_spec.pincode,
-                    country="IN",
-                ),
-            ],
+            address=address or None,
         )
 
     @cache_profiles(Practitioner.get_resource_type())
