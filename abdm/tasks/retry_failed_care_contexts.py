@@ -10,16 +10,33 @@ from abdm.service.v3.gateway import GatewayService
 
 logger = logging.getLogger(__name__)
 
-
+TRANSACTION_BATCH_SIZE = 500
 CARE_CONTEXT_BATCH_SIZE = 20
-
 
 @shared_task
 def retry_failed_care_contexts():
-    filtered_transactions = Transaction.objects.filter(
-        status__in=[TransactionStatus.INITIATED, TransactionStatus.FAILED],
-        type=TransactionType.LINK_CARE_CONTEXT,
+    qs = (
+        Transaction.objects.filter(
+            status__in=[TransactionStatus.INITIATED, TransactionStatus.FAILED],
+            type=TransactionType.LINK_CARE_CONTEXT,
+        )
+        .order_by("id")  # ensures consistent batching
+        .values_list("id", flat=True)
     )
+
+    ids = list(qs)
+
+    logger.info(f"Dispatching {len(ids)} transactions for retry")
+
+    for i in range(0, len(ids), TRANSACTION_BATCH_SIZE):
+        batch_ids = ids[i : i + TRANSACTION_BATCH_SIZE]
+
+        process_care_context_batch.delay(batch_ids)
+
+
+@shared_task(bind=True, queue="care_context_queue")
+def process_care_context_batch(self, transaction_ids: list[int]):
+    filtered_transactions = Transaction.objects.filter(id__in=transaction_ids)
 
     grouped_transactions = filtered_transactions.values(
         hf_id=F("meta_data__hf_id"),
@@ -48,7 +65,9 @@ def retry_failed_care_contexts():
             if transaction.meta_data.get("type") != "hip_initiated_linking":
                 continue
 
-            for care_context_reference in transaction.meta_data.get("care_contexts"):
+            for care_context_reference in transaction.meta_data.get(
+                "care_contexts", []
+            ):
                 care_context = care_context_dict_from_reference_id(
                     care_context_reference
                 )
