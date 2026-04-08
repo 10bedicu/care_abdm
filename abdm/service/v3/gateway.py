@@ -680,7 +680,7 @@ class GatewayService:
             timeout=20,
         )
 
-        if response.status_code != 202:
+        if not response.ok:
             raise ABDMAPIException(detail=GatewayService.handle_error(response.text))
 
         Transaction.objects.create(
