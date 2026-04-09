@@ -200,7 +200,7 @@ def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911
     if version != "v2":
         return None
 
-    if model == "medication_request":
+    if model == "prescription":
         medication_request = MedicationRequest.objects.filter(
             created_date__date=param
         ).first()
