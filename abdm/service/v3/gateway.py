@@ -551,6 +551,10 @@ class GatewayService:
         )
         cipher.generate_key_pair()
 
+        logger.info(
+            f"ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: Consent: {consent.__dict__}"
+        )
+
         entries = []
         for care_context in consent.care_contexts:
             care_context_reference = care_context.get("careContextReference", "")
@@ -645,6 +649,10 @@ class GatewayService:
                 "careContextReference": care_context.get("careContextReference"),
             }
             entries.append(entry)
+
+        logger.info(
+            f"ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: Entries: {entries}"
+        )
 
         payload = {
             "pageNumber": 1,
