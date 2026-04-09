@@ -551,6 +551,10 @@ class GatewayService:
         )
         cipher.generate_key_pair()
 
+        logger.info(
+            f"ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: Consent: {consent.__dict__}"
+        )
+
         entries = []
         for care_context in consent.care_contexts:
             care_context_reference = care_context.get("careContextReference", "")
@@ -646,6 +650,10 @@ class GatewayService:
             }
             entries.append(entry)
 
+        logger.info(
+            f"ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: Entries: {entries}"
+        )
+
         payload = {
             "pageNumber": 1,
             "pageCount": 1,
@@ -680,7 +688,7 @@ class GatewayService:
             timeout=20,
         )
 
-        if response.status_code != 202:
+        if not response.ok:
             raise ABDMAPIException(detail=GatewayService.handle_error(response.text))
 
         Transaction.objects.create(
