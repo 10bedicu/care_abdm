@@ -2,9 +2,6 @@ import base64
 from datetime import UTC, datetime
 from functools import wraps
 
-from abdm.models.health_facility import HealthFacility as HealthFacilityModel
-from abdm.service.helper import ABDMAPIException, uuid
-from abdm.settings import plugin_settings as settings
 from django.db.models import Q
 from fhir.resources.R4B.address import Address
 from fhir.resources.R4B.allergyintolerance import AllergyIntolerance
@@ -39,6 +36,9 @@ from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.timing import Timing, TimingRepeat
 
+from abdm.models.health_facility import HealthFacility as HealthFacilityModel
+from abdm.service.helper import ABDMAPIException, uuid
+from abdm.settings import plugin_settings as settings
 from care.emr.models.allergy_intolerance import (
     AllergyIntolerance as AllergyIntoleranceModel,
 )
@@ -586,7 +586,16 @@ class Fhir:
             id=id,
             identifier=[Identifier(value=id)],
             status=observation_spec.status,
-            category=[CodeableConcept(coding=[Coding(**observation_spec.category)])]
+            category=[
+                CodeableConcept(
+                    coding=[Coding(**observation_spec.category)]
+                    if isinstance(observation_spec.category, dict)
+                    else None,
+                    text=observation_spec.category
+                    if isinstance(observation_spec.category, str)
+                    else None,
+                )
+            ]
             if observation_spec.category
             else None,
             code=CodeableConcept(coding=[Coding(**observation_spec.main_code)])
