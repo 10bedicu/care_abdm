@@ -571,7 +571,7 @@ class GatewayService:
                 continue
 
             if (
-                model == "medication_request"
+                model == "prescription"
                 and HealthInformationType.PRESCRIPTION in consent.hi_types
             ):
                 medication_requests = MedicationRequest.objects.filter(
