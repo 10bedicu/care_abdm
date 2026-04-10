@@ -2,9 +2,6 @@ import base64
 from datetime import UTC, datetime
 from functools import wraps
 
-from abdm.models.health_facility import HealthFacility as HealthFacilityModel
-from abdm.service.helper import ABDMAPIException, uuid
-from abdm.settings import plugin_settings as settings
 from django.db.models import Q
 from fhir.resources.R4B.address import Address
 from fhir.resources.R4B.allergyintolerance import AllergyIntolerance
@@ -27,7 +24,11 @@ from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.medicationrequest import MedicationRequest
 from fhir.resources.R4B.medicationstatement import MedicationStatement
-from fhir.resources.R4B.observation import Observation, ObservationReferenceRange
+from fhir.resources.R4B.observation import (
+    Observation,
+    ObservationComponent,
+    ObservationReferenceRange,
+)
 from fhir.resources.R4B.organization import Organization
 from fhir.resources.R4B.patient import Patient
 from fhir.resources.R4B.period import Period
@@ -39,6 +40,9 @@ from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.timing import Timing, TimingRepeat
 
+from abdm.models.health_facility import HealthFacility as HealthFacilityModel
+from abdm.service.helper import ABDMAPIException, uuid
+from abdm.settings import plugin_settings as settings
 from care.emr.models.allergy_intolerance import (
     AllergyIntolerance as AllergyIntoleranceModel,
 )
@@ -586,7 +590,16 @@ class Fhir:
             id=id,
             identifier=[Identifier(value=id)],
             status=observation_spec.status,
-            category=[CodeableConcept(coding=[Coding(**observation_spec.category)])]
+            category=[
+                CodeableConcept(
+                    coding=[Coding(**observation_spec.category)]
+                    if isinstance(observation_spec.category, dict)
+                    else None,
+                    text=observation_spec.category
+                    if isinstance(observation_spec.category, str)
+                    else None,
+                )
+            ]
             if observation_spec.category
             else None,
             code=CodeableConcept(coding=[Coding(**observation_spec.main_code)])
@@ -643,6 +656,57 @@ class Fhir:
             )
             if observation_spec.interpretation
             else None,
+            component=[
+                ObservationComponent(
+                    code=CodeableConcept(coding=[Coding(**component.get("code"))])
+                    if component.get("code")
+                    else None,
+                    valueString=component.get("value", {}).get("value")
+                    if component.get("value", {}).get("value")
+                    and not component.get("value", {}).get("unit")
+                    and not component.get("value", {}).get("coding")
+                    else None,
+                    valueCodeableConcept=CodeableConcept(
+                        coding=[Coding(**component.get("value", {}).get("coding"))]
+                    )
+                    if component.get("value", {}).get("coding")
+                    else None,
+                    valueQuantity=Quantity(
+                        value=component.get("value", {}).get("value"),
+                        unit=component.get("value", {}).get("unit", {}).get("display"),
+                        system=component.get("value", {}).get("unit", {}).get("system"),
+                        code=component.get("value", {}).get("unit", {}).get("code"),
+                    )
+                    if component.get("value", {}).get("unit")
+                    else None,
+                    interpretation=CodeableConcept(
+                        coding=[Coding(**component.get("interpretation"))]
+                        if isinstance(component.get("interpretation"), dict)
+                        else None,
+                        text=component.get("interpretation")
+                        if isinstance(component.get("interpretation"), str)
+                        else None,
+                    )
+                    if component.get("interpretation")
+                    else None,
+                    referenceRange=[
+                        ObservationReferenceRange(
+                            low=Quantity(
+                                value=rrange.get("min"),
+                            )
+                            if rrange.get("min")
+                            else None,
+                            high=Quantity(
+                                value=rrange.get("max"),
+                            )
+                            if rrange.get("max")
+                            else None,
+                        )
+                        for rrange in component.get("reference_range", [])
+                    ],
+                )
+                for component in observation_spec.component
+            ],
         )
 
     def _prescription_composition(
