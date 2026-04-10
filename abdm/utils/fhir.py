@@ -203,7 +203,7 @@ class Fhir:
                     ),
                 )
             ],
-            name=[HumanName(text=user.full_name)],
+            name=[HumanName(text=user.full_name or user.username)],
             telecom=[
                 *(
                     [ContactPoint(system="phone", value=user_spec.phone_number)]
@@ -477,7 +477,21 @@ class Fhir:
             ],
             note=[Annotation(text=request_spec.note)] if request_spec.note else None,
             medicationCodeableConcept=CodeableConcept(
-                coding=[Coding(**request_spec.medication)],
+                coding=[
+                    Coding(
+                        **(
+                            request_spec.medication
+                            or (
+                                request_spec.requested_product.get("code", {})
+                                if request_spec.requested_product
+                                else {}
+                            )
+                        )
+                    )
+                ],
+                text=request_spec.requested_product.get("name")
+                if request_spec.requested_product
+                else None,
             ),
             subject=self._reference(self._patient(request.patient)),
             requester=self._reference(self._practitioner(request.created_by)),
@@ -679,14 +693,16 @@ class Fhir:
                     )
                     if component.get("value", {}).get("unit")
                     else None,
-                    interpretation=CodeableConcept(
-                        coding=[Coding(**component.get("interpretation"))]
-                        if isinstance(component.get("interpretation"), dict)
-                        else None,
-                        text=component.get("interpretation")
-                        if isinstance(component.get("interpretation"), str)
-                        else None,
-                    )
+                    interpretation=[
+                        CodeableConcept(
+                            coding=[Coding(**component.get("interpretation"))]
+                            if isinstance(component.get("interpretation"), dict)
+                            else None,
+                            text=component.get("interpretation")
+                            if isinstance(component.get("interpretation"), str)
+                            else None,
+                        )
+                    ]
                     if component.get("interpretation")
                     else None,
                     referenceRange=[
