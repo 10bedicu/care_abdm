@@ -481,7 +481,11 @@ class Fhir:
                     Coding(
                         **(
                             request_spec.medication
-                            or request_spec.requested_product.get("code", {})
+                            or (
+                                request_spec.requested_product.get("code", {})
+                                if request_spec.requested_product
+                                else {}
+                            )
                         )
                     )
                 ],
