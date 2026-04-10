@@ -641,6 +641,10 @@ class GatewayService:
             else:
                 continue
 
+            logger.info(
+                f"ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: FHIR Data: {fhir_data.json()}"
+            )
+
             encrypted_data = cipher.encrypt(fhir_data.json())["data"]
             entry = {
                 "content": encrypted_data,
