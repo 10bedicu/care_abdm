@@ -24,6 +24,7 @@ from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.medicationrequest import MedicationRequest
 from fhir.resources.R4B.medicationstatement import MedicationStatement
+from fhir.resources.R4B.meta import Meta
 from fhir.resources.R4B.observation import (
     Observation,
     ObservationComponent,
@@ -159,6 +160,11 @@ class Fhir:
 
         return Patient(
             id=id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Patient"],
+            ),
             identifier=[Identifier(value=id)],
             name=[HumanName(text=patient_spec.name)],
             telecom=[
@@ -189,6 +195,13 @@ class Fhir:
 
         return Practitioner(
             id=id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Practitioner"
+                ],
+            ),
             identifier=[
                 Identifier(
                     value=id,
@@ -229,6 +242,13 @@ class Fhir:
 
         return Organization(
             id=id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Organization"
+                ],
+            ),
             identifier=[
                 Identifier(
                     system=(
@@ -283,6 +303,11 @@ class Fhir:
 
         return Condition(
             id=id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Condition"],
+            ),
             identifier=[Identifier(value=id)],
             category=[
                 CodeableConcept(
@@ -316,6 +341,13 @@ class Fhir:
         return Encounter(
             **{
                 "id": id,
+                "meta": Meta(
+                    versionId="1",
+                    lastUpdated=datetime.now(UTC).isoformat(),
+                    profile=[
+                        "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Encounter"
+                    ],
+                ),
                 "identifier": [Identifier(value=id)],
                 "status": encounter_spec.status,
                 "class": Coding(
@@ -372,6 +404,13 @@ class Fhir:
 
         return MedicationRequest(
             id=id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/MedicationRequest"
+                ],
+            ),
             identifier=[Identifier(value=id)],
             status=request_spec.status,
             intent=request_spec.intent,
@@ -504,6 +543,13 @@ class Fhir:
 
         return MedicationStatement(
             id=id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/MedicationStatement"
+                ],
+            ),
             identifier=[Identifier(value=id)],
             status=statement_spec.status,
             medicationCodeableConcept=self._coding_to_codable_concept(
@@ -532,6 +578,13 @@ class Fhir:
 
         return DocumentReference(
             id=id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DocumentReference"
+                ],
+            ),
             identifier=[Identifier(value=id)],
             status="current",
             type=CodeableConcept(text=file.internal_name.split(".")[0]),
@@ -552,6 +605,13 @@ class Fhir:
 
         return AllergyIntolerance(
             id=id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/AllergyIntolerance"
+                ],
+            ),
             identifier=[Identifier(value=id)],
             verificationStatus=CodeableConcept(
                 coding=[
@@ -602,6 +662,13 @@ class Fhir:
 
         return Observation(
             id=id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Observation"
+                ],
+            ),
             identifier=[Identifier(value=id)],
             status=observation_spec.status,
             category=[
@@ -730,6 +797,13 @@ class Fhir:
     ):
         return Composition(
             id=care_context_id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/PrescriptionRecord"
+                ],
+            ),
             identifier=Identifier(
                 value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/composition"
             ),
@@ -773,6 +847,13 @@ class Fhir:
     def _op_consult_composition(self, encounter: EncounterModel, care_context_id: str):
         return Composition(
             id=care_context_id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/OPConsultRecord"
+                ],
+            ),
             identifier=Identifier(value=care_context_id),
             status="final",
             type=CodeableConcept(
@@ -905,6 +986,13 @@ class Fhir:
     ):
         return Composition(
             id=care_context_id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DischargeSummaryRecord"
+                ],
+            ),
             identifier=Identifier(value=care_context_id),
             status="final",
             type=CodeableConcept(
@@ -1054,6 +1142,13 @@ class Fhir:
 
         return Composition(
             id=care_context_id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/HealthDocumentRecord"
+                ],
+            ),
             identifier=Identifier(value=care_context_id),
             status="final",
             type=CodeableConcept(
@@ -1104,6 +1199,13 @@ class Fhir:
 
         return Composition(
             id=care_context_id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/WellnessRecord"
+                ],
+            ),
             identifier=Identifier(value=care_context_id),
             status="final",
             type=CodeableConcept(text="Wellness Record"),
@@ -1139,6 +1241,20 @@ class Fhir:
     def _bundle(self, entries: list[BundleEntry], care_context_id: str = uuid()):
         return Bundle(
             id=care_context_id,
+            meta=Meta(
+                versionId="1",
+                lastUpdated=datetime.now(UTC).isoformat(),
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DocumentBundle"
+                ],
+                security=[
+                    Coding(
+                        system="http://terminology.hl7.org/CodeSystem/v3-Confidentiality",
+                        code="V",
+                        display="very restricted",
+                    )
+                ],
+            ),
             identifier=Identifier(
                 value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
             ),
