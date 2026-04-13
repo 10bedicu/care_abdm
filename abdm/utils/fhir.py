@@ -19,7 +19,11 @@ from fhir.resources.R4B.documentreference import (
 )
 from fhir.resources.R4B.dosage import Dosage, DosageDoseAndRate
 from fhir.resources.R4B.duration import Duration
-from fhir.resources.R4B.encounter import Encounter, EncounterDiagnosis
+from fhir.resources.R4B.encounter import (
+    Encounter,
+    EncounterDiagnosis,
+    EncounterHospitalization,
+)
 from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.medicationrequest import MedicationRequest
@@ -63,16 +67,69 @@ from care.emr.models.questionnaire import (
     QuestionnaireResponse as QuestionnaireResponseModel,
 )
 from care.emr.resources.allergy_intolerance.spec import AllergyIntoleranceReadSpec
+from care.emr.resources.allergy_intolerance.spec import (
+    CategoryChoices as AllergyIntoleranceCategoryChoices,
+)
+from care.emr.resources.allergy_intolerance.spec import (
+    ClinicalStatusChoices as AllergyIntoleranceClinicalStatusChoices,
+)
+from care.emr.resources.allergy_intolerance.spec import (
+    CriticalityChoices as AllergyIntoleranceCriticalityChoices,
+)
+from care.emr.resources.allergy_intolerance.spec import (
+    VerificationStatusChoices as AllergyIntoleranceVerificationStatusChoices,
+)
 from care.emr.resources.common.coding import Coding as CodingSpec
+from care.emr.resources.condition.spec import (
+    CategoryChoices as ConditionCategoryChoices,
+)
+from care.emr.resources.condition.spec import (
+    ClinicalStatusChoices as ConditionClinicalStatusChoices,
+)
 from care.emr.resources.condition.spec import ConditionReadSpec
+from care.emr.resources.condition.spec import (
+    SeverityChoices as ConditionSeverityChoices,
+)
+from care.emr.resources.condition.spec import (
+    VerificationStatusChoices as ConditionVerificationStatusChoices,
+)
+from care.emr.resources.encounter.constants import (
+    AdmitSourcesChoices as EncounterAdmitSourceChoices,
+)
+from care.emr.resources.encounter.constants import ClassChoices as EncounterClassChoices
+from care.emr.resources.encounter.constants import (
+    DietPreferenceChoices as EncounterDietPreferenceChoices,
+)
+from care.emr.resources.encounter.constants import (
+    DischargeDispositionChoices as EncounterDischargeDispositionChoices,
+)
+from care.emr.resources.encounter.constants import EncounterPriorityChoices
+from care.emr.resources.encounter.constants import (
+    StatusChoices as EncounterStatusChoices,
+)
 from care.emr.resources.encounter.spec import EncounterRetrieveSpec
 from care.emr.resources.facility.spec import FacilityRetrieveSpec
 from care.emr.resources.file_upload.spec import FileTypeChoices
 from care.emr.resources.medication.request.spec import (
     DosageInstruction as DosageInstructionSpec,
 )
-from care.emr.resources.medication.request.spec import MedicationRequestReadSpec
-from care.emr.resources.medication.statement.spec import MedicationStatementReadSpec
+from care.emr.resources.medication.request.spec import (
+    DoseType as MedicationRequestDoseType,
+)
+from care.emr.resources.medication.request.spec import (
+    MedicationRequestCategory,
+    MedicationRequestIntent,
+    MedicationRequestPriority,
+    MedicationRequestReadSpec,
+    MedicationRequestStatus,
+)
+from care.emr.resources.medication.request.spec import (
+    StatusReason as MedicationRequestStatusReason,
+)
+from care.emr.resources.medication.statement.spec import (
+    MedicationStatementReadSpec,
+    MedicationStatementStatus,
+)
 from care.emr.resources.observation.spec import ObservationReadSpec
 from care.emr.resources.patient.spec import PatientRetrieveSpec
 from care.emr.resources.user.spec import UserRetrieveSpec
@@ -131,6 +188,35 @@ class Fhir:
             return None
 
         return Reference(reference=self._reference_url(resource))
+
+    def _coding(self, coding: CodingSpec | None):
+        if coding is None:
+            return None
+
+        return Coding(
+            code=coding.code,
+            display=coding.display,
+            system=coding.system,
+        )
+
+    def _coding_to_codable_concept(self, coding: CodingSpec | None):
+        if coding is None:
+            return None
+
+        return CodeableConcept(coding=[self._coding(coding)])
+
+    def _coding_from_mapping(
+        self, system: str, mapping: dict[str, tuple[str, str]], key: str, default: str
+    ):
+        coding = mapping.get(key)
+        if not mapping:
+            coding = mapping.get(default)
+
+        return Coding(
+            system=system,
+            code=coding[0],
+            display=coding[1] or None,
+        )
 
     @cache_profiles(Patient.get_resource_type())
     def _patient(self, patient: PatientModel):
@@ -301,6 +387,86 @@ class Fhir:
         condition_spec = ConditionReadSpec.serialize(condition)
         id = str(condition_spec.id)
 
+        condition_category_code_map = {
+            ConditionCategoryChoices.problem_list_item: (
+                "problem-list-item",
+                "Problem List Item",
+            ),
+            ConditionCategoryChoices.encounter_diagnosis: (
+                "encounter-diagnosis",
+                "Encounter Diagnosis",
+            ),
+        }
+
+        condition_verification_status_code_map = {
+            ConditionVerificationStatusChoices.unconfirmed: (
+                "unconfirmed",
+                "Unconfirmed",
+            ),
+            ConditionVerificationStatusChoices.provisional: (
+                "provisional",
+                "Provisional",
+            ),
+            ConditionVerificationStatusChoices.confirmed: (
+                "confirmed",
+                "Confirmed",
+            ),
+            ConditionVerificationStatusChoices.refuted: (
+                "refuted",
+                "Refuted",
+            ),
+            ConditionVerificationStatusChoices.entered_in_error: (
+                "entered-in-error",
+                "Entered in Error",
+            ),
+        }
+
+        condition_clinical_status_code_map = {
+            ConditionClinicalStatusChoices.active: (
+                "active",
+                "Active",
+            ),
+            ConditionClinicalStatusChoices.recurrence: (
+                "recurrence",
+                "Recurrence",
+            ),
+            ConditionClinicalStatusChoices.relapse: (
+                "relapse",
+                "Relapse",
+            ),
+            ConditionClinicalStatusChoices.inactive: (
+                "inactive",
+                "Inactive",
+            ),
+            ConditionClinicalStatusChoices.remission: (
+                "remission",
+                "Remission",
+            ),
+            ConditionClinicalStatusChoices.resolved: (
+                "resolved",
+                "Resolved",
+            ),
+            ConditionClinicalStatusChoices.unknown: (
+                "unknown",
+                "Unknown",
+            ),
+        }
+
+        condition_severity_code_map = {
+            ConditionSeverityChoices.mild: (
+                "255604002",
+                "Mild",
+            ),
+            ConditionSeverityChoices.moderate: (
+                "6736007",
+                "Moderate",
+            ),
+            ConditionSeverityChoices.severe: (
+                "24484000",
+                "Severe",
+            ),
+        }
+
         return Condition(
             id=id,
             meta=Meta(
@@ -312,21 +478,49 @@ class Fhir:
             category=[
                 CodeableConcept(
                     coding=[
-                        Coding(
+                        self._coding_from_mapping(
                             system="http://terminology.hl7.org/CodeSystem/condition-category",
-                            code=condition_spec.category,
+                            mapping=condition_category_code_map,
+                            key=condition_spec.category,
+                            default=ConditionCategoryChoices.problem_list_item.value,
                         )
                     ],
                 )
             ],
             verificationStatus=CodeableConcept(
                 coding=[
-                    Coding(
+                    self._coding_from_mapping(
                         system="http://terminology.hl7.org/CodeSystem/condition-ver-status",
-                        code=condition_spec.verification_status,
+                        mapping=condition_verification_status_code_map,
+                        key=condition_spec.verification_status,
+                        default=ConditionVerificationStatusChoices.unconfirmed.value,
                     )
                 ]
             ),
+            clinicalStatus=CodeableConcept(
+                coding=[
+                    self._coding_from_mapping(
+                        system="http://terminology.hl7.org/CodeSystem/condition-clinical",
+                        mapping=condition_clinical_status_code_map,
+                        key=condition_spec.clinical_status,
+                        default=ConditionClinicalStatusChoices.active.value,
+                    )
+                ]
+            )
+            if condition_spec.clinical_status
+            else None,
+            severity=CodeableConcept(
+                coding=[
+                    self._coding_from_mapping(
+                        system="http://snomed.info/sct",
+                        mapping=condition_severity_code_map,
+                        key=condition_spec.severity,
+                        default=ConditionSeverityChoices.moderate.value,
+                    )
+                ]
+            )
+            if condition_spec.severity
+            else None,
             code=CodeableConcept(
                 coding=[Coding(**condition_spec.code)],
             ),
@@ -337,6 +531,225 @@ class Fhir:
     def _encounter(self, encounter: EncounterModel, include_diagnosis: bool = False):
         encounter_spec = EncounterRetrieveSpec.serialize(encounter)
         id = str(encounter_spec.id)
+
+        encounter_class_code_map = {
+            EncounterClassChoices.amb: (
+                "AMB",
+                "Ambulatory",
+            ),
+            EncounterClassChoices.emer: (
+                "EMER",
+                "Emergency",
+            ),
+            EncounterClassChoices.hh: (
+                "HH",
+                "Home Health",
+            ),
+            EncounterClassChoices.imp: (
+                "IMP",
+                "Inpatient",
+            ),
+            EncounterClassChoices.obsenc: (
+                "OBSENC",
+                "Observation Encounter",
+            ),
+            EncounterClassChoices.vr: (
+                "VR",
+                "Virtual",
+            ),
+        }
+
+        encounter_priority_code_map = {
+            EncounterPriorityChoices.ASAP: (
+                "A",
+                "ASAP",
+            ),
+            EncounterPriorityChoices.callback_results: (
+                "CR",
+                "Callback Results",
+            ),
+            EncounterPriorityChoices.callback_for_scheduling: (
+                "EL",
+                "Callback for Scheduling",
+            ),
+            EncounterPriorityChoices.elective: (
+                "EL",
+                "Elective",
+            ),
+            EncounterPriorityChoices.emergency: (
+                "EM",
+                "Emergency",
+            ),
+            EncounterPriorityChoices.preop: (
+                "P",
+                "Preop",
+            ),
+            EncounterPriorityChoices.as_needed: (
+                "PRN",
+                "As Needed",
+            ),
+            EncounterPriorityChoices.routine: (
+                "R",
+                "Routine",
+            ),
+            EncounterPriorityChoices.rush_reporting: (
+                "RR",
+                "Rush Reporting",
+            ),
+            EncounterPriorityChoices.stat: (
+                "S",
+                "Stat",
+            ),
+            EncounterPriorityChoices.timing_critical: (
+                "T",
+                "Timing Critical",
+            ),
+            EncounterPriorityChoices.use_as_directed: (
+                "UD",
+                "Use as Directed",
+            ),
+            EncounterPriorityChoices.urgent: (
+                "UR",
+                "Urgent",
+            ),
+        }
+
+        encounter_status_code_map = {
+            EncounterStatusChoices.planned: "planned",
+            EncounterStatusChoices.in_progress: "in-progress",
+            EncounterStatusChoices.on_hold: "onleave",
+            EncounterStatusChoices.discharged: "finished",
+            EncounterStatusChoices.completed: "finished",
+            EncounterStatusChoices.cancelled: "cancelled",
+            EncounterStatusChoices.discontinued: "discontinued",
+            EncounterStatusChoices.entered_in_error: "entered-in-error",
+            EncounterStatusChoices.unknown: "unknown",
+        }
+
+        encounter_admit_source_code_map = {
+            EncounterAdmitSourceChoices.hosp_trans: (
+                "hosp-trans",
+                "Transferred from other hospital",
+            ),
+            EncounterAdmitSourceChoices.emd: (
+                "emd",
+                "From accident/emergency department",
+            ),
+            EncounterAdmitSourceChoices.outp: (
+                "outp",
+                "From outpatient department",
+            ),
+            EncounterAdmitSourceChoices.born: (
+                "born",
+                "Born in hospital",
+            ),
+            EncounterAdmitSourceChoices.gp: (
+                "gp",
+                "General Practitioner referral",
+            ),
+            EncounterAdmitSourceChoices.mp: (
+                "mp",
+                "Medical Practitioner/physician referral",
+            ),
+            EncounterAdmitSourceChoices.nursing: (
+                "nursing",
+                "From nursing home",
+            ),
+            EncounterAdmitSourceChoices.psych: (
+                "psych",
+                "From psychiatric hospital",
+            ),
+            EncounterAdmitSourceChoices.rehab: (
+                "rehab",
+                "From rehabilitation facility",
+            ),
+            EncounterAdmitSourceChoices.other: (
+                "other",
+                "Other",
+            ),
+        }
+
+        encounter_discharge_disposition_code_map = {
+            EncounterDischargeDispositionChoices.home: (
+                "home",
+                "Home",
+            ),
+            EncounterDischargeDispositionChoices.alt_home: (
+                "alt_home",
+                "Alternative Home",
+            ),
+            EncounterDischargeDispositionChoices.other_hcf: (
+                "other_hcf",
+                "Other Healthcare Facility",
+            ),
+            EncounterDischargeDispositionChoices.hosp: (
+                "hosp",
+                "Hospice",
+            ),
+            EncounterDischargeDispositionChoices.long: (
+                "long",
+                "Long-term Care",
+            ),
+            EncounterDischargeDispositionChoices.aadvice: (
+                "aadvice",
+                "Left Against Advice",
+            ),
+            EncounterDischargeDispositionChoices.exp: (
+                "exp",
+                "Expired",
+            ),
+            EncounterDischargeDispositionChoices.psy: (
+                "psy",
+                "Psychiatric Hospital",
+            ),
+            EncounterDischargeDispositionChoices.rehab: (
+                "rehab",
+                "Rehabilitation",
+            ),
+            EncounterDischargeDispositionChoices.snf: (
+                "snf",
+                "Skilled Nursing Facility",
+            ),
+            EncounterDischargeDispositionChoices.oth: (
+                "oth",
+                "Other",
+            ),
+        }
+
+        encounter_diet_preference_code_map = {
+            EncounterDietPreferenceChoices.vegetarian: (
+                "vegetarian",
+                "Vegetarian",
+            ),
+            EncounterDietPreferenceChoices.dairy_free: (
+                "dairy-free",
+                "Dairy Free",
+            ),
+            EncounterDietPreferenceChoices.nut_free: (
+                "nut-free",
+                "Nut Free",
+            ),
+            EncounterDietPreferenceChoices.gluten_free: (
+                "gluten-free",
+                "Gluten Free",
+            ),
+            EncounterDietPreferenceChoices.vegan: (
+                "vegan",
+                "Vegan",
+            ),
+            EncounterDietPreferenceChoices.halal: (
+                "halal",
+                "Halal",
+            ),
+            EncounterDietPreferenceChoices.kosher: (
+                "kosher",
+                "Kosher",
+            ),
+            EncounterDietPreferenceChoices.none: (
+                "none",
+                "None",
+            ),
+        }
 
         return Encounter(
             **{
@@ -349,17 +762,23 @@ class Fhir:
                     ],
                 ),
                 "identifier": [Identifier(value=id)],
-                "status": encounter_spec.status,
-                "class": Coding(
+                "status": encounter_status_code_map.get(
+                    encounter_spec.status, "unknown"
+                ),
+                "class": self._coding_from_mapping(
                     system="http://terminology.hl7.org/CodeSystem/v3-ActCode",
-                    code=encounter_spec.encounter_class,
+                    mapping=encounter_class_code_map,
+                    key=encounter_spec.encounter_class,
+                    default=EncounterClassChoices.amb.value,
                 ),
                 "subject": self._reference(self._patient(encounter.patient)),
                 "priority": CodeableConcept(
                     coding=[
-                        Coding(
+                        self._coding_from_mapping(
                             system="http://terminology.hl7.org/CodeSystem/v3-ActPriority",
-                            code=encounter_spec.priority,
+                            mapping=encounter_priority_code_map,
+                            key=encounter_spec.priority,
+                            default=EncounterPriorityChoices.ASAP.value,
                         )
                     ]
                 ),
@@ -378,29 +797,143 @@ class Fhir:
                     if include_diagnosis
                     else None
                 ),
+                "hospitalization": EncounterHospitalization(
+                    re_admission=CodeableConcept(
+                        coding=[
+                            Coding(
+                                code="R",
+                                system="http://terminology.hl7.org/CodeSystem/v2-0092",
+                                display="Re-admission",
+                            )
+                        ]
+                    )
+                    if encounter_spec.hospitalization.re_admission
+                    else None,
+                    admitSource=CodeableConcept(
+                        coding=[
+                            self._coding_from_mapping(
+                                system="http://terminology.hl7.org/CodeSystem/admit-source",
+                                mapping=encounter_admit_source_code_map,
+                                key=encounter_spec.hospitalization.admit_source,
+                                default=EncounterAdmitSourceChoices.other.value,
+                            )
+                        ]
+                    )
+                    if encounter_spec.hospitalization.admit_source
+                    else None,
+                    dischargeDisposition=CodeableConcept(
+                        coding=[
+                            self._coding_from_mapping(
+                                system="http://terminology.hl7.org/CodeSystem/discharge-disposition",
+                                mapping=encounter_discharge_disposition_code_map,
+                                key=encounter_spec.hospitalization.discharge_disposition,
+                                default=EncounterDischargeDispositionChoices.home.value,
+                            )
+                        ]
+                    )
+                    if encounter_spec.hospitalization.discharge_disposition
+                    else None,
+                    dietPreference=[
+                        CodeableConcept(
+                            coding=[
+                                self._coding_from_mapping(
+                                    system="http://terminology.hl7.org/CodeSystem/diet",
+                                    mapping=encounter_diet_preference_code_map,
+                                    key=encounter_spec.hospitalization.diet_preference,
+                                    default=EncounterDietPreferenceChoices.none.value,
+                                )
+                            ]
+                        )
+                    ]
+                    if encounter_spec.hospitalization.diet_preference
+                    else None,
+                )
+                if encounter_spec.hospitalization
+                else None,
             }
         )
-
-    def _coding(self, coding: CodingSpec | None):
-        if coding is None:
-            return None
-
-        return Coding(
-            code=coding.code,
-            display=coding.display,
-            system=coding.system,
-        )
-
-    def _coding_to_codable_concept(self, coding: CodingSpec | None):
-        if coding is None:
-            return None
-
-        return CodeableConcept(coding=[self._coding(coding)])
 
     @cache_profiles(MedicationRequest.get_resource_type())
     def _medication_request(self, request: MedicationRequestModel):
         request_spec = MedicationRequestReadSpec.serialize(request)
         id = str(request_spec.id)
+
+        medication_request_status_code_map = {
+            MedicationRequestStatus.active: "active",
+            MedicationRequestStatus.on_hold: "on-hold",
+            MedicationRequestStatus.cancelled: "cancelled",
+            MedicationRequestStatus.completed: "completed",
+            MedicationRequestStatus.entered_in_error: "entered-in-error",
+            MedicationRequestStatus.stopped: "stopped",
+            MedicationRequestStatus.draft: "draft",
+            MedicationRequestStatus.unknown: "unknown",
+        }
+
+        medication_request_intent_code_map = {
+            MedicationRequestIntent.proposal: "proposal",
+            MedicationRequestIntent.plan: "plan",
+            MedicationRequestIntent.order: "order",
+            MedicationRequestIntent.original_order: "original-order",
+            MedicationRequestIntent.reflex_order: "reflex-order",
+            MedicationRequestIntent.filler_order: "filler-order",
+            MedicationRequestIntent.instance_order: "instance-order",
+        }
+
+        medication_request_status_reason_code_map = {
+            MedicationRequestStatusReason.alt_choice: (
+                "altchoice",
+                "Try another treatment first",
+            ),
+            MedicationRequestStatusReason.clarif: (
+                "clarif",
+                "Prescription requires clarification",
+            ),
+            MedicationRequestStatusReason.drughigh: ("drughigh", "Drug level too high"),
+            MedicationRequestStatusReason.hospadm: ("hospadm", "Admission to hospital"),
+            MedicationRequestStatusReason.labint: ("labint", "Lab interference issues"),
+            MedicationRequestStatusReason.non_avail: (
+                "non-avail",
+                "Patient not available",
+            ),
+            MedicationRequestStatusReason.preg: (
+                "preg",
+                "Parent is pregnant/breast feeding",
+            ),
+            MedicationRequestStatusReason.salg: ("salg", "Allergy"),
+            MedicationRequestStatusReason.sddi: (
+                "sddi",
+                "Drug interacts with another drug",
+            ),
+            MedicationRequestStatusReason.sdupther: ("sdupther", "Duplicate therapy"),
+            MedicationRequestStatusReason.sintol: ("sintol", "Suspected intolerance"),
+            MedicationRequestStatusReason.surg: (
+                "surg",
+                "Patient scheduled for surgery",
+            ),
+            MedicationRequestStatusReason.washout: (
+                "washout",
+                "Waiting for old drug to wash out",
+            ),
+        }
+
+        medication_request_priority_code_map = {
+            MedicationRequestPriority.routine: "routine",
+            MedicationRequestPriority.urgent: "urgent",
+            MedicationRequestPriority.asap: "asap",
+            MedicationRequestPriority.stat: "stat",
+        }
+
+        medication_request_category_code_map = {
+            MedicationRequestCategory.inpatient: ("inpatient", "Inpatient"),
+            MedicationRequestCategory.outpatient: ("outpatient", "Outpatient"),
+            MedicationRequestCategory.community: ("community", "Community"),
+            MedicationRequestCategory.discharge: ("discharge", "Discharge"),
+        }
+
+        medication_request_dosage_and_rate_type_code_map = {
+            MedicationRequestDoseType.calculated: ("calculated", "Calculated"),
+            MedicationRequestDoseType.ordered: ("ordered", "Ordered"),
+        }
 
         return MedicationRequest(
             id=id,
@@ -412,8 +945,37 @@ class Fhir:
                 ],
             ),
             identifier=[Identifier(value=id)],
-            status=request_spec.status,
-            intent=request_spec.intent,
+            status=medication_request_status_code_map.get(
+                request_spec.status, "unknown"
+            ),
+            statusReason=CodeableConcept(
+                coding=[
+                    self._coding_from_mapping(
+                        system="http://terminology.hl7.org/CodeSystem/medicationrequest-status-reason",
+                        mapping=medication_request_status_reason_code_map,
+                        key=request_spec.status_reason,
+                        default=MedicationRequestStatusReason.alt_choice.value,
+                    )
+                ]
+            )
+            if request_spec.status_reason
+            else None,
+            intent=medication_request_intent_code_map.get(request_spec.intent, "order"),
+            category=[
+                CodeableConcept(
+                    coding=[
+                        self._coding_from_mapping(
+                            system="http://terminology.hl7.org/CodeSystem/medicationrequest-category",
+                            mapping=medication_request_category_code_map,
+                            key=request_spec.category,
+                            default=MedicationRequestCategory.inpatient.value,
+                        )
+                    ]
+                )
+            ],
+            priority=medication_request_priority_code_map.get(
+                request_spec.priority, "routine"
+            ),
             authoredOn=request_spec.created_date.isoformat(),
             dosageInstruction=[
                 Dosage(
@@ -454,9 +1016,11 @@ class Fhir:
                         DosageDoseAndRate(
                             type=CodeableConcept(
                                 coding=[
-                                    Coding(
+                                    self._coding_from_mapping(
                                         system="http://terminology.hl7.org/CodeSystem/dose-rate-type",
-                                        code=dosage_spec.dose_and_rate.type,
+                                        mapping=medication_request_dosage_and_rate_type_code_map,
+                                        key=dosage_spec.dose_and_rate.type,
+                                        default=MedicationRequestDoseType.ordered.value,
                                     )
                                 ]
                             ),
@@ -541,6 +1105,17 @@ class Fhir:
         statement_spec = MedicationStatementReadSpec.serialize(statement)
         id = str(statement_spec.id)
 
+        medication_statement_status_code_map = {
+            MedicationStatementStatus.active: "active",
+            MedicationStatementStatus.completed: "completed",
+            MedicationStatementStatus.entered_in_error: "entered-in-error",
+            MedicationStatementStatus.intended: "intended",
+            MedicationStatementStatus.stopped: "stopped",
+            MedicationStatementStatus.on_hold: "on-hold",
+            MedicationStatementStatus.unknown: "unknown",
+            MedicationStatementStatus.not_taken: "not-taken",
+        }
+
         return MedicationStatement(
             id=id,
             meta=Meta(
@@ -551,7 +1126,9 @@ class Fhir:
                 ],
             ),
             identifier=[Identifier(value=id)],
-            status=statement_spec.status,
+            status=medication_statement_status_code_map.get(
+                statement_spec.status, "unknown"
+            ),
             medicationCodeableConcept=self._coding_to_codable_concept(
                 statement_spec.medication
             ),
@@ -603,6 +1180,53 @@ class Fhir:
         id = str(allergy.external_id)
         allergy_spec = AllergyIntoleranceReadSpec.serialize(allergy)
 
+        allergy_intolerance_clinical_status_code_map = {
+            AllergyIntoleranceClinicalStatusChoices.active: (
+                "active",
+                "Active",
+            ),
+            AllergyIntoleranceClinicalStatusChoices.inactive: (
+                "inactive",
+                "Inactive",
+            ),
+            AllergyIntoleranceClinicalStatusChoices.resolved: (
+                "resolved",
+                "Resolved",
+            ),
+        }
+
+        allergy_intolerance_verification_status_code_map = {
+            AllergyIntoleranceVerificationStatusChoices.unconfirmed: (
+                "unconfirmed",
+                "Unconfirmed",
+            ),
+            AllergyIntoleranceVerificationStatusChoices.confirmed: (
+                "confirmed",
+                "Confirmed",
+            ),
+            AllergyIntoleranceVerificationStatusChoices.refuted: (
+                "refuted",
+                "Refuted",
+            ),
+            AllergyIntoleranceVerificationStatusChoices.entered_in_error: (
+                "entered-in-error",
+                "Entered in Error",
+            ),
+        }
+
+        allergy_intolerance_category_code_map = {
+            AllergyIntoleranceCategoryChoices.food: "food",
+            AllergyIntoleranceCategoryChoices.medication: "medication",
+            AllergyIntoleranceCategoryChoices.environment: "environment",
+            AllergyIntoleranceCategoryChoices.biologic: "biologic",
+        }
+
+        allergy_intolerance_criticality_code_map = {
+            AllergyIntoleranceCriticalityChoices.low: "low",
+            AllergyIntoleranceCriticalityChoices.high: "high",
+            AllergyIntoleranceCriticalityChoices.unable_to_assess: "unable-to-assess",
+        }
+
         return AllergyIntolerance(
             id=id,
             meta=Meta(
@@ -615,22 +1239,30 @@ class Fhir:
             identifier=[Identifier(value=id)],
             verificationStatus=CodeableConcept(
                 coding=[
-                    Coding(
+                    self._coding_from_mapping(
                         system="http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
-                        code=allergy_spec.verification_status,
+                        mapping=allergy_intolerance_verification_status_code_map,
+                        key=allergy_spec.verification_status,
+                        default=AllergyIntoleranceVerificationStatusChoices.unconfirmed.value,
                     )
                 ]
             ),
             clinicalStatus=CodeableConcept(
                 coding=[
-                    Coding(
+                    self._coding_from_mapping(
                         system="http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
-                        code=allergy_spec.clinical_status,
+                        mapping=allergy_intolerance_clinical_status_code_map,
+                        key=allergy_spec.clinical_status,
+                        default=AllergyIntoleranceClinicalStatusChoices.active.value,
                     )
                 ]
             ),
-            category=[allergy_spec.category] if allergy_spec.category else None,
-            criticality=allergy_spec.criticality,
+            category=[allergy_intolerance_category_code_map.get(allergy_spec.category)]
+            if allergy_spec.category
+            else None,
+            criticality=allergy_intolerance_criticality_code_map.get(
+                allergy_spec.criticality, "unable-to-assess"
+            ),
             code=CodeableConcept(
                 coding=[Coding(**allergy_spec.code)],
             ),
