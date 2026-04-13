@@ -204,7 +204,14 @@ class Fhir:
         if coding is None:
             return None
 
-        return CodeableConcept(coding=[self._coding(coding)])
+        fhir_coding = self._coding(coding)
+        return CodeableConcept(coding=[fhir_coding], text=fhir_coding.display)
+
+    def _concept_from_mapping(
+        self, system: str, mapping: dict[str, tuple[str, str]], key: str, default: str
+    ):
+        coding = self._coding_from_mapping(system, mapping, key, default)
+        return CodeableConcept(coding=[coding], text=coding.display)
 
     def _coding_from_mapping(
         self, system: str, mapping: dict[str, tuple[str, str]], key: str, default: str
@@ -330,7 +337,8 @@ class Fhir:
                                 code="PRN",
                                 display="Provider number",
                             )
-                        ]
+                        ],
+                        text="Provider number",
                     ),
                 )
             ],
@@ -398,7 +406,8 @@ class Fhir:
                                 code="FI",
                                 display="Facility ID",
                             )
-                        ]
+                        ],
+                        text="Facility ID",
                     ),
                 )
             ],
@@ -410,7 +419,8 @@ class Fhir:
                             code="prov",
                             display="Healthcare Provider",
                         )
-                    ]
+                    ],
+                    text="Healthcare Provider",
                 )
             ],
             name=facility_spec.name,
@@ -541,53 +551,38 @@ class Fhir:
             ),
             identifier=[Identifier(value=id)],
             category=[
-                CodeableConcept(
-                    coding=[
-                        self._coding_from_mapping(
-                            system="http://terminology.hl7.org/CodeSystem/condition-category",
-                            mapping=condition_category_code_map,
-                            key=condition_spec.category,
-                            default=ConditionCategoryChoices.problem_list_item.value,
-                        )
-                    ],
+                self._concept_from_mapping(
+                    system="http://terminology.hl7.org/CodeSystem/condition-category",
+                    mapping=condition_category_code_map,
+                    key=condition_spec.category,
+                    default=ConditionCategoryChoices.problem_list_item.value,
                 )
             ],
-            verificationStatus=CodeableConcept(
-                coding=[
-                    self._coding_from_mapping(
-                        system="http://terminology.hl7.org/CodeSystem/condition-ver-status",
-                        mapping=condition_verification_status_code_map,
-                        key=condition_spec.verification_status,
-                        default=ConditionVerificationStatusChoices.unconfirmed.value,
-                    )
-                ]
+            verificationStatus=self._concept_from_mapping(
+                system="http://terminology.hl7.org/CodeSystem/condition-ver-status",
+                mapping=condition_verification_status_code_map,
+                key=condition_spec.verification_status,
+                default=ConditionVerificationStatusChoices.unconfirmed.value,
             ),
-            clinicalStatus=CodeableConcept(
-                coding=[
-                    self._coding_from_mapping(
-                        system="http://terminology.hl7.org/CodeSystem/condition-clinical",
-                        mapping=condition_clinical_status_code_map,
-                        key=condition_spec.clinical_status,
-                        default=ConditionClinicalStatusChoices.active.value,
-                    )
-                ]
+            clinicalStatus=self._concept_from_mapping(
+                system="http://terminology.hl7.org/CodeSystem/condition-clinical",
+                mapping=condition_clinical_status_code_map,
+                key=condition_spec.clinical_status,
+                default=ConditionClinicalStatusChoices.active.value,
             )
             if condition_spec.clinical_status
             else None,
-            severity=CodeableConcept(
-                coding=[
-                    self._coding_from_mapping(
-                        system="http://snomed.info/sct",
-                        mapping=condition_severity_code_map,
-                        key=condition_spec.severity,
-                        default=ConditionSeverityChoices.moderate.value,
-                    )
-                ]
+            severity=self._concept_from_mapping(
+                system="http://snomed.info/sct",
+                mapping=condition_severity_code_map,
+                key=condition_spec.severity,
+                default=ConditionSeverityChoices.moderate.value,
             )
             if condition_spec.severity
             else None,
             code=CodeableConcept(
                 coding=[Coding(**condition_spec.code)],
+                text=condition_spec.code.get("display"),
             ),
             subject=self._reference(self._patient(condition.patient)),
         )
@@ -857,15 +852,11 @@ class Fhir:
                     default=EncounterClassChoices.amb.value,
                 ),
                 "subject": self._reference(self._patient(encounter.patient)),
-                "priority": CodeableConcept(
-                    coding=[
-                        self._coding_from_mapping(
-                            system="http://terminology.hl7.org/CodeSystem/v3-ActPriority",
-                            mapping=encounter_priority_code_map,
-                            key=encounter_spec.priority,
-                            default=EncounterPriorityChoices.ASAP.value,
-                        )
-                    ]
+                "priority": self._concept_from_mapping(
+                    system="http://terminology.hl7.org/CodeSystem/v3-ActPriority",
+                    mapping=encounter_priority_code_map,
+                    key=encounter_spec.priority,
+                    default=EncounterPriorityChoices.ASAP.value,
                 ),
                 "period": Period(**encounter_spec.period),
                 "diagnosis": (
@@ -890,44 +881,33 @@ class Fhir:
                                 system="http://terminology.hl7.org/CodeSystem/v2-0092",
                                 display="Re-admission",
                             )
-                        ]
+                        ],
+                        text="Re-admission",
                     )
                     if encounter_spec.hospitalization.re_admission
                     else None,
-                    admitSource=CodeableConcept(
-                        coding=[
-                            self._coding_from_mapping(
-                                system="http://terminology.hl7.org/CodeSystem/admit-source",
-                                mapping=encounter_admit_source_code_map,
-                                key=encounter_spec.hospitalization.admit_source,
-                                default=EncounterAdmitSourceChoices.other.value,
-                            )
-                        ]
+                    admitSource=self._concept_from_mapping(
+                        system="http://terminology.hl7.org/CodeSystem/admit-source",
+                        mapping=encounter_admit_source_code_map,
+                        key=encounter_spec.hospitalization.admit_source,
+                        default=EncounterAdmitSourceChoices.other.value,
                     )
                     if encounter_spec.hospitalization.admit_source
                     else None,
-                    dischargeDisposition=CodeableConcept(
-                        coding=[
-                            self._coding_from_mapping(
-                                system="http://terminology.hl7.org/CodeSystem/discharge-disposition",
-                                mapping=encounter_discharge_disposition_code_map,
-                                key=encounter_spec.hospitalization.discharge_disposition,
-                                default=EncounterDischargeDispositionChoices.home.value,
-                            )
-                        ]
+                    dischargeDisposition=self._concept_from_mapping(
+                        system="http://terminology.hl7.org/CodeSystem/discharge-disposition",
+                        mapping=encounter_discharge_disposition_code_map,
+                        key=encounter_spec.hospitalization.discharge_disposition,
+                        default=EncounterDischargeDispositionChoices.home.value,
                     )
                     if encounter_spec.hospitalization.discharge_disposition
                     else None,
                     dietPreference=[
-                        CodeableConcept(
-                            coding=[
-                                self._coding_from_mapping(
-                                    system="http://terminology.hl7.org/CodeSystem/diet",
-                                    mapping=encounter_diet_preference_code_map,
-                                    key=encounter_spec.hospitalization.diet_preference,
-                                    default=EncounterDietPreferenceChoices.none.value,
-                                )
-                            ]
+                        self._concept_from_mapping(
+                            system="http://terminology.hl7.org/CodeSystem/diet",
+                            mapping=encounter_diet_preference_code_map,
+                            key=encounter_spec.hospitalization.diet_preference,
+                            default=EncounterDietPreferenceChoices.none.value,
                         )
                     ]
                     if encounter_spec.hospitalization.diet_preference
@@ -1059,29 +1039,21 @@ class Fhir:
             status=medication_request_status_code_map.get(
                 request_spec.status, "unknown"
             ),
-            statusReason=CodeableConcept(
-                coding=[
-                    self._coding_from_mapping(
-                        system="http://terminology.hl7.org/CodeSystem/medicationrequest-status-reason",
-                        mapping=medication_request_status_reason_code_map,
-                        key=request_spec.status_reason,
-                        default=MedicationRequestStatusReason.alt_choice.value,
-                    )
-                ]
+            statusReason=self._concept_from_mapping(
+                system="http://terminology.hl7.org/CodeSystem/medicationrequest-status-reason",
+                mapping=medication_request_status_reason_code_map,
+                key=request_spec.status_reason,
+                default=MedicationRequestStatusReason.alt_choice.value,
             )
             if request_spec.status_reason
             else None,
             intent=medication_request_intent_code_map.get(request_spec.intent, "order"),
             category=[
-                CodeableConcept(
-                    coding=[
-                        self._coding_from_mapping(
-                            system="http://terminology.hl7.org/CodeSystem/medicationrequest-category",
-                            mapping=medication_request_category_code_map,
-                            key=request_spec.category,
-                            default=MedicationRequestCategory.inpatient.value,
-                        )
-                    ]
+                self._concept_from_mapping(
+                    system="http://terminology.hl7.org/CodeSystem/medicationrequest-category",
+                    mapping=medication_request_category_code_map,
+                    key=request_spec.category,
+                    default=MedicationRequestCategory.inpatient.value,
                 )
             ],
             priority=medication_request_priority_code_map.get(
@@ -1125,15 +1097,11 @@ class Fhir:
                     method=self._coding_to_codable_concept(dosage_spec.method),
                     doseAndRate=[
                         DosageDoseAndRate(
-                            type=CodeableConcept(
-                                coding=[
-                                    self._coding_from_mapping(
-                                        system="http://terminology.hl7.org/CodeSystem/dose-rate-type",
-                                        mapping=medication_request_dosage_and_rate_type_code_map,
-                                        key=dosage_spec.dose_and_rate.type,
-                                        default=MedicationRequestDoseType.ordered.value,
-                                    )
-                                ]
+                            type=self._concept_from_mapping(
+                                system="http://terminology.hl7.org/CodeSystem/dose-rate-type",
+                                mapping=medication_request_dosage_and_rate_type_code_map,
+                                key=dosage_spec.dose_and_rate.type,
+                                default=MedicationRequestDoseType.ordered.value,
                             ),
                             doseRange=Range(
                                 low=Quantity(
@@ -1205,7 +1173,7 @@ class Fhir:
                 ],
                 text=request_spec.requested_product.get("name")
                 if request_spec.requested_product
-                else None,
+                else (request_spec.medication or {}).get("display"),
             ),
             subject=self._reference(self._patient(request.patient)),
             requester=self._reference(self._practitioner(request.created_by)),
@@ -1407,25 +1375,17 @@ class Fhir:
                 div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(allergy_div_parts) + "</div>",
             ),
             identifier=[Identifier(value=id)],
-            verificationStatus=CodeableConcept(
-                coding=[
-                    self._coding_from_mapping(
-                        system="http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
-                        mapping=allergy_intolerance_verification_status_code_map,
-                        key=allergy_spec.verification_status,
-                        default=AllergyIntoleranceVerificationStatusChoices.unconfirmed.value,
-                    )
-                ]
+            verificationStatus=self._concept_from_mapping(
+                system="http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                mapping=allergy_intolerance_verification_status_code_map,
+                key=allergy_spec.verification_status,
+                default=AllergyIntoleranceVerificationStatusChoices.unconfirmed.value,
             ),
-            clinicalStatus=CodeableConcept(
-                coding=[
-                    self._coding_from_mapping(
-                        system="http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
-                        mapping=allergy_intolerance_clinical_status_code_map,
-                        key=allergy_spec.clinical_status,
-                        default=AllergyIntoleranceClinicalStatusChoices.active.value,
-                    )
-                ]
+            clinicalStatus=self._concept_from_mapping(
+                system="http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+                mapping=allergy_intolerance_clinical_status_code_map,
+                key=allergy_spec.clinical_status,
+                default=AllergyIntoleranceClinicalStatusChoices.active.value,
             ),
             category=[allergy_intolerance_category_code_map.get(allergy_spec.category)]
             if allergy_spec.category
@@ -1435,6 +1395,7 @@ class Fhir:
             ),
             code=CodeableConcept(
                 coding=[Coding(**allergy_spec.code)],
+                text=allergy_spec.code.get("display"),
             ),
             recordedDate=allergy_spec.recorded_date.isoformat()
             if allergy.recorded_date
@@ -1513,14 +1474,19 @@ class Fhir:
                     coding=[Coding(**observation_spec.category)]
                     if isinstance(observation_spec.category, dict)
                     else None,
-                    text=observation_spec.category
+                    text=observation_spec.category.get("display")
+                    if isinstance(observation_spec.category, dict)
+                    else observation_spec.category
                     if isinstance(observation_spec.category, str)
                     else None,
                 )
             ]
             if observation_spec.category
             else None,
-            code=CodeableConcept(coding=[Coding(**observation_spec.main_code)])
+            code=CodeableConcept(
+                coding=[Coding(**observation_spec.main_code)],
+                text=observation_spec.main_code.get("display"),
+            )
             if observation_spec.main_code
             else CodeableConcept(**observation_spec.alternate_coding),
             valueString=observation_spec.value.get("value")
@@ -1529,7 +1495,8 @@ class Fhir:
             and not observation_spec.value.get("coding")
             else None,
             valueCodeableConcept=CodeableConcept(
-                coding=[Coding(**observation_spec.value.get("coding"))]
+                coding=[Coding(**observation_spec.value.get("coding"))],
+                text=observation_spec.value.get("coding", {}).get("display"),
             )
             if observation_spec.value.get("coding")
             else None,
@@ -1542,10 +1509,16 @@ class Fhir:
             if observation_spec.value.get("unit")
             else None,
             effectiveDateTime=observation_spec.effective_datetime.isoformat(),
-            method=CodeableConcept(coding=[Coding(**observation_spec.method)])
+            method=CodeableConcept(
+                coding=[Coding(**observation_spec.method)],
+                text=observation_spec.method.get("display"),
+            )
             if observation_spec.method
             else None,
-            bodySite=CodeableConcept(coding=[Coding(**observation_spec.body_site)])
+            bodySite=CodeableConcept(
+                coding=[Coding(**observation_spec.body_site)],
+                text=observation_spec.body_site.get("display"),
+            )
             if observation_spec.body_site
             else None,
             referenceRange=[
@@ -1576,7 +1549,10 @@ class Fhir:
             else None,
             component=[
                 ObservationComponent(
-                    code=CodeableConcept(coding=[Coding(**component.get("code"))])
+                    code=CodeableConcept(
+                        coding=[Coding(**component.get("code"))],
+                        text=component.get("code", {}).get("display"),
+                    )
                     if component.get("code")
                     else None,
                     valueString=component.get("value", {}).get("value")
@@ -1585,7 +1561,8 @@ class Fhir:
                     and not component.get("value", {}).get("coding")
                     else None,
                     valueCodeableConcept=CodeableConcept(
-                        coding=[Coding(**component.get("value", {}).get("coding"))]
+                        coding=[Coding(**component.get("value", {}).get("coding"))],
+                        text=component.get("value", {}).get("coding", {}).get("display"),
                     )
                     if component.get("value", {}).get("coding")
                     else None,
@@ -1602,7 +1579,9 @@ class Fhir:
                             coding=[Coding(**component.get("interpretation"))]
                             if isinstance(component.get("interpretation"), dict)
                             else None,
-                            text=component.get("interpretation")
+                            text=component.get("interpretation", {}).get("display")
+                            if isinstance(component.get("interpretation"), dict)
+                            else component.get("interpretation")
                             if isinstance(component.get("interpretation"), str)
                             else None,
                         )
@@ -1652,7 +1631,8 @@ class Fhir:
                         code="440545006",
                         display="Prescription record",
                     )
-                ]
+                ],
+                text="Prescription record",
             ),
             title="Prescription Records",
             date=datetime.now(UTC).isoformat(),
@@ -1666,7 +1646,8 @@ class Fhir:
                                 code="440545006",
                                 display="Prescription record",
                             )
-                        ]
+                        ],
+                        text="Prescription record",
                     ),
                     entry=[
                         self._reference(self._medication_request(request))
@@ -1700,7 +1681,8 @@ class Fhir:
                         code="371530004",
                         display="Clinical consultation report",
                     )
-                ]
+                ],
+                text="Clinical consultation report",
             ),
             title="Consultation Report",
             date=datetime.now(UTC).isoformat(),
@@ -1714,7 +1696,8 @@ class Fhir:
                                 code="422843007",
                                 display="Chief complaint section",
                             )
-                        ]
+                        ],
+                        text="Chief complaint section",
                     ),
                     entry=[
                         self._reference(self._condition(condition))
@@ -1729,7 +1712,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if ConditionModel.objects.filter(encounter=encounter).count() == 0
                     else None,
@@ -1743,7 +1727,8 @@ class Fhir:
                                 code="425044008",
                                 display="Physical exam section",
                             )
-                        ]
+                        ],
+                        text="Physical exam section",
                     ),
                     entry=[
                         self._reference(self._observation(observation))
@@ -1758,7 +1743,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if ObservationModel.objects.filter(encounter=encounter)
                     .exclude(Q(main_code__isnull=True) | Q(main_code={}))
@@ -1775,7 +1761,8 @@ class Fhir:
                                 code="722446000",
                                 display="Allergy record",
                             )
-                        ]
+                        ],
+                        text="Allergy record",
                     ),
                     entry=[
                         self._reference(self._allergy_intolerance(allergy))
@@ -1790,7 +1777,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if AllergyIntoleranceModel.objects.filter(
                         encounter=encounter
@@ -1807,7 +1795,8 @@ class Fhir:
                                 code="721912009",
                                 display="Medication summary document",
                             )
-                        ]
+                        ],
+                        text="Medication summary document",
                     ),
                     entry=[
                         *[
@@ -1830,7 +1819,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if MedicationRequestModel.objects.filter(
                         encounter=encounter
@@ -1851,7 +1841,8 @@ class Fhir:
                                 code="371530004",
                                 display="Clinical consultation report",
                             )
-                        ]
+                        ],
+                        text="Clinical consultation report",
                     ),
                     entry=[
                         self._reference(self._document_reference(file))
@@ -1866,7 +1857,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if FileUploadModel.objects.filter(
                         associating_id=encounter.external_id
@@ -1903,7 +1895,8 @@ class Fhir:
                         code="373942005",
                         display="Discharge summary",
                     )
-                ]
+                ],
+                text="Discharge summary",
             ),
             title="Discharge Summary",
             date=datetime.now(UTC).isoformat(),
@@ -1917,7 +1910,8 @@ class Fhir:
                                 code="422843007",
                                 display="Chief complaint section",
                             )
-                        ]
+                        ],
+                        text="Chief complaint section",
                     ),
                     entry=[
                         self._reference(self._condition(condition))
@@ -1932,7 +1926,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if ConditionModel.objects.filter(encounter=encounter).count() == 0
                     else None,
@@ -1946,7 +1941,8 @@ class Fhir:
                                 code="425044008",
                                 display="Physical exam section",
                             )
-                        ]
+                        ],
+                        text="Physical exam section",
                     ),
                     entry=[
                         self._reference(self._observation(observation))
@@ -1961,7 +1957,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if ObservationModel.objects.filter(encounter=encounter)
                     .exclude(Q(main_code__isnull=True) | Q(main_code={}))
@@ -1978,7 +1975,8 @@ class Fhir:
                                 code="722446000",
                                 display="Allergy record",
                             )
-                        ]
+                        ],
+                        text="Allergy record",
                     ),
                     entry=[
                         self._reference(self._allergy_intolerance(allergy))
@@ -1993,7 +1991,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if AllergyIntoleranceModel.objects.filter(
                         encounter=encounter
@@ -2010,7 +2009,8 @@ class Fhir:
                                 code="721912009",
                                 display="Medication summary document",
                             )
-                        ]
+                        ],
+                        text="Medication summary document",
                     ),
                     entry=[
                         *[
@@ -2033,7 +2033,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if MedicationRequestModel.objects.filter(
                         encounter=encounter
@@ -2054,7 +2055,8 @@ class Fhir:
                                 code="371530004",
                                 display="Clinical consultation report",
                             )
-                        ]
+                        ],
+                        text="Clinical consultation report",
                     ),
                     entry=[
                         self._reference(self._document_reference(file))
@@ -2069,7 +2071,8 @@ class Fhir:
                                 code="notstarted",
                                 display="Not Started",
                             )
-                        ]
+                        ],
+                        text="Not Started",
                     )
                     if FileUploadModel.objects.filter(
                         associating_id=encounter.external_id
@@ -2123,7 +2126,8 @@ class Fhir:
                         code="419891008",
                         display="Record artifact",
                     )
-                ]
+                ],
+                text="Record artifact",
             ),
             title="Health Document",
             date=datetime.now(UTC).isoformat(),
