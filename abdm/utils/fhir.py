@@ -1136,6 +1136,17 @@ class Fhir:
             ],
         )
 
+    def _bundle(self, entries: list[BundleEntry], care_context_id: str = uuid()):
+        return Bundle(
+            id=care_context_id,
+            identifier=Identifier(
+                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
+            ),
+            type="document",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=entries,
+        )
+
     def _bundle_entry(self, resource: Resource):
         return BundleEntry(fullUrl=self._reference_url(resource), resource=resource)
 
@@ -1144,73 +1155,53 @@ class Fhir:
         prescriptions: list[MedicationRequestModel],
         care_context_id: str = uuid(),
     ):
-        return Bundle(
-            id=care_context_id,
-            identifier=Identifier(
-                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
-            ),
-            type="document",
-            timestamp=datetime.now(UTC).isoformat(),
-            entry=[
+        return self._bundle(
+            entries=[
                 self._bundle_entry(
                     self._prescription_composition(prescriptions, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
+            care_context_id=care_context_id,
         )
 
     def create_op_consult_record(
         self, encounter: EncounterModel, care_context_id: str = uuid()
     ):
-        return Bundle(
-            id=care_context_id,
-            identifier=Identifier(
-                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
-            ),
-            type="document",
-            timestamp=datetime.now(UTC).isoformat(),
-            entry=[
+        return self._bundle(
+            entries=[
                 self._bundle_entry(
                     self._op_consult_composition(encounter, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
+            care_context_id=care_context_id,
         )
 
     def create_discharge_summary_record(
         self, encounter: EncounterModel, care_context_id: str = uuid()
     ):
-        return Bundle(
-            id=care_context_id,
-            identifier=Identifier(
-                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
-            ),
-            type="document",
-            timestamp=datetime.now(UTC).isoformat(),
-            entry=[
+        return self._bundle(
+            entries=[
                 self._bundle_entry(
                     self._discharge_summary_composition(encounter, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
+            care_context_id=care_context_id,
         )
 
     def create_health_document_record(
         self, file: FileUploadModel, care_context_id: str = uuid()
     ):
-        return Bundle(
-            id=care_context_id,
-            identifier=Identifier(
-                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
-            ),
-            type="document",
-            timestamp=datetime.now(UTC).isoformat(),
-            entry=[
+        return self._bundle(
+            entries=[
                 self._bundle_entry(
                     self._health_document_composition(file, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
+            care_context_id=care_context_id,
         )
 
     def create_wellness_record(
@@ -1218,17 +1209,12 @@ class Fhir:
         questionnaire_response: QuestionnaireResponseModel,
         care_context_id: str = uuid(),
     ):
-        return Bundle(
-            id=care_context_id,
-            identifier=Identifier(
-                value=care_context_id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"
-            ),
-            type="document",
-            timestamp=datetime.now(UTC).isoformat(),
-            entry=[
+        return self._bundle(
+            entries=[
                 self._bundle_entry(
                     self._wellness_composition(questionnaire_response, care_context_id)
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
+            care_context_id=care_context_id,
         )
