@@ -29,6 +29,7 @@ from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.medicationrequest import MedicationRequest
 from fhir.resources.R4B.medicationstatement import MedicationStatement
 from fhir.resources.R4B.meta import Meta
+from fhir.resources.R4B.narrative import Narrative
 from fhir.resources.R4B.observation import (
     Observation,
     ObservationComponent,
@@ -244,12 +245,29 @@ class Fhir:
                 )
             )
 
+        patient_div_parts = [f"<p><b>Name:</b> {patient_spec.name}</p>"]
+        if patient_spec.gender:
+            patient_div_parts.append(f"<p><b>Gender:</b> {patient_spec.gender}</p>")
+        birth_date = getattr(patient.abha_number, "parsed_date_of_birth", None) if patient.abha_number else None
+        if birth_date:
+            patient_div_parts.append(f"<p><b>Date of Birth:</b> {birth_date}</p>")
+        if patient_spec.phone_number:
+            patient_div_parts.append(f"<p><b>Phone:</b> {patient_spec.phone_number}</p>")
+        if patient_spec.emergency_phone_number:
+            patient_div_parts.append(f"<p><b>Emergency Phone:</b> {patient_spec.emergency_phone_number}</p>")
+        if patient_spec.address:
+            patient_div_parts.append(f"<p><b>Address:</b> {patient_spec.address}</p>")
+
         return Patient(
             id=id,
             meta=Meta(
                 versionId="1",
                 lastUpdated=datetime.now(UTC).isoformat(),
                 profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Patient"],
+            ),
+            text=Narrative(
+                status="generated",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(patient_div_parts) + "</div>",
             ),
             identifier=[Identifier(value=id)],
             name=[HumanName(text=patient_spec.name)],
@@ -279,6 +297,16 @@ class Fhir:
         user_spec = UserRetrieveSpec.serialize(user)
         id = str(user_spec.id)
 
+        practitioner_div_parts = [f"<p><b>Name:</b> {user.full_name or user.username}</p>"]
+        if user_spec.gender:
+            practitioner_div_parts.append(f"<p><b>Gender:</b> {user_spec.gender}</p>")
+        if user.date_of_birth:
+            practitioner_div_parts.append(f"<p><b>Date of Birth:</b> {user.date_of_birth}</p>")
+        if user_spec.phone_number:
+            practitioner_div_parts.append(f"<p><b>Phone:</b> {user_spec.phone_number}</p>")
+        if user_spec.email:
+            practitioner_div_parts.append(f"<p><b>Email:</b> {user_spec.email}</p>")
+
         return Practitioner(
             id=id,
             meta=Meta(
@@ -287,6 +315,10 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Practitioner"
                 ],
+            ),
+            text=Narrative(
+                status="generated",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(practitioner_div_parts) + "</div>",
             ),
             identifier=[
                 Identifier(
@@ -326,6 +358,18 @@ class Fhir:
         id = str(facility_spec.id)
         hf_id = health_facility.hf_id if health_facility else None
 
+        organization_div_parts = [
+            f"<p><b>Name:</b> {facility_spec.name}</p>",
+            "<p><b>Type:</b> Healthcare Provider</p>",
+        ]
+        if facility_spec.phone_number:
+            organization_div_parts.append(f"<p><b>Phone:</b> {facility_spec.phone_number}</p>")
+        if facility_spec.address:
+            address_text = facility_spec.address
+            if facility_spec.pincode:
+                address_text += f", {facility_spec.pincode}"
+            organization_div_parts.append(f"<p><b>Address:</b> {address_text}, IN</p>")
+
         return Organization(
             id=id,
             meta=Meta(
@@ -334,6 +378,10 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Organization"
                 ],
+            ),
+            text=Narrative(
+                status="generated",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(organization_div_parts) + "</div>",
             ),
             identifier=[
                 Identifier(
@@ -467,12 +515,29 @@ class Fhir:
             ),
         }
 
+        condition_code_display = condition_spec.code.get("display") or condition_spec.code.get("code", "")
+        condition_div_parts = [f"<p><b>Condition:</b> {condition_code_display}</p>"]
+        if condition_spec.category:
+            condition_div_parts.append(f"<p><b>Category:</b> {condition_spec.category}</p>")
+        if condition_spec.clinical_status:
+            condition_div_parts.append(f"<p><b>Clinical Status:</b> {condition_spec.clinical_status}</p>")
+        if condition_spec.verification_status:
+            condition_div_parts.append(f"<p><b>Verification Status:</b> {condition_spec.verification_status}</p>")
+        if condition_spec.severity:
+            condition_div_parts.append(f"<p><b>Severity:</b> {condition_spec.severity}</p>")
+        if condition_spec.note:
+            condition_div_parts.append(f"<p><b>Note:</b> {condition_spec.note}</p>")
+
         return Condition(
             id=id,
             meta=Meta(
                 versionId="1",
                 lastUpdated=datetime.now(UTC).isoformat(),
                 profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Condition"],
+            ),
+            text=Narrative(
+                status="generated",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(condition_div_parts) + "</div>",
             ),
             identifier=[Identifier(value=id)],
             category=[
@@ -751,6 +816,22 @@ class Fhir:
             ),
         }
 
+        period = encounter_spec.period
+        period_start = period.get("start") if isinstance(period, dict) else getattr(period, "start", None)
+        period_end = period.get("end") if isinstance(period, dict) else getattr(period, "end", None)
+
+        encounter_div_parts = [f"<p><b>Status:</b> {encounter_spec.status}</p>"]
+        encounter_div_parts.append(f"<p><b>Class:</b> {encounter_spec.encounter_class}</p>")
+        encounter_div_parts.append(f"<p><b>Priority:</b> {encounter_spec.priority}</p>")
+        if period_start:
+            encounter_div_parts.append(f"<p><b>Start:</b> {period_start}</p>")
+        if period_end:
+            encounter_div_parts.append(f"<p><b>End:</b> {period_end}</p>")
+        if encounter_spec.external_identifier:
+            encounter_div_parts.append(f"<p><b>External ID:</b> {encounter_spec.external_identifier}</p>")
+        if encounter_spec.discharge_summary_advice:
+            encounter_div_parts.append(f"<p><b>Discharge Advice:</b> {encounter_spec.discharge_summary_advice}</p>")
+
         return Encounter(
             **{
                 "id": id,
@@ -760,6 +841,10 @@ class Fhir:
                     profile=[
                         "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Encounter"
                     ],
+                ),
+                "text": Narrative(
+                    status="generated",
+                    div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(encounter_div_parts) + "</div>",
                 ),
                 "identifier": [Identifier(value=id)],
                 "status": encounter_status_code_map.get(
@@ -935,6 +1020,28 @@ class Fhir:
             MedicationRequestDoseType.ordered: ("ordered", "Ordered"),
         }
 
+        medication_name = (
+            request_spec.requested_product.get("name")
+            if request_spec.requested_product
+            else None
+        ) or (
+            request_spec.medication.get("display") or request_spec.medication.get("code")
+            if request_spec.medication
+            else None
+        ) or "Medication Request"
+
+        med_req_div_parts = [f"<p><b>Medication:</b> {medication_name}</p>"]
+        med_req_div_parts.append(f"<p><b>Status:</b> {request_spec.status}</p>")
+        med_req_div_parts.append(f"<p><b>Intent:</b> {request_spec.intent}</p>")
+        if request_spec.priority:
+            med_req_div_parts.append(f"<p><b>Priority:</b> {request_spec.priority}</p>")
+        if request_spec.category:
+            med_req_div_parts.append(f"<p><b>Category:</b> {request_spec.category}</p>")
+        if request_spec.status_reason:
+            med_req_div_parts.append(f"<p><b>Status Reason:</b> {request_spec.status_reason}</p>")
+        if request_spec.note:
+            med_req_div_parts.append(f"<p><b>Note:</b> {request_spec.note}</p>")
+
         return MedicationRequest(
             id=id,
             meta=Meta(
@@ -943,6 +1050,10 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/MedicationRequest"
                 ],
+            ),
+            text=Narrative(
+                status="generated",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(med_req_div_parts) + "</div>",
             ),
             identifier=[Identifier(value=id)],
             status=medication_request_status_code_map.get(
@@ -1116,6 +1227,27 @@ class Fhir:
             MedicationStatementStatus.not_taken: "not-taken",
         }
 
+        med = statement_spec.medication
+        if isinstance(med, dict):
+            med_stmt_name = med.get("display") or med.get("code") or "Medication Statement"
+        else:
+            med_stmt_name = getattr(med, "display", None) or getattr(med, "code", None) or "Medication Statement"
+
+        ep = statement_spec.effective_period
+        ep_start = ep.get("start") if isinstance(ep, dict) else getattr(ep, "start", None)
+        ep_end = ep.get("end") if isinstance(ep, dict) else getattr(ep, "end", None)
+
+        med_stmt_div_parts = [f"<p><b>Medication:</b> {med_stmt_name}</p>"]
+        med_stmt_div_parts.append(f"<p><b>Status:</b> {statement_spec.status}</p>")
+        if statement_spec.dosage_text:
+            med_stmt_div_parts.append(f"<p><b>Dosage:</b> {statement_spec.dosage_text}</p>")
+        if ep_start:
+            med_stmt_div_parts.append(f"<p><b>Effective From:</b> {ep_start}</p>")
+        if ep_end:
+            med_stmt_div_parts.append(f"<p><b>Effective To:</b> {ep_end}</p>")
+        if statement_spec.note:
+            med_stmt_div_parts.append(f"<p><b>Note:</b> {statement_spec.note}</p>")
+
         return MedicationStatement(
             id=id,
             meta=Meta(
@@ -1124,6 +1256,10 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/MedicationStatement"
                 ],
+            ),
+            text=Narrative(
+                status="generated",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(med_stmt_div_parts) + "</div>",
             ),
             identifier=[Identifier(value=id)],
             status=medication_statement_status_code_map.get(
@@ -1153,6 +1289,13 @@ class Fhir:
         id = str(file.external_id)
         content_type, content = file.files_manager.file_contents(file)
 
+        doc_ref_div_parts = [f"<p><b>Document:</b> {file.name or file.internal_name}</p>"]
+        doc_ref_div_parts.append("<p><b>Status:</b> current</p>")
+        if file.file_type:
+            doc_ref_div_parts.append(f"<p><b>Type:</b> {file.file_type}</p>")
+        if file.file_category:
+            doc_ref_div_parts.append(f"<p><b>Category:</b> {file.file_category}</p>")
+
         return DocumentReference(
             id=id,
             meta=Meta(
@@ -1161,6 +1304,10 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DocumentReference"
                 ],
+            ),
+            text=Narrative(
+                status="generated",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(doc_ref_div_parts) + "</div>",
             ),
             identifier=[Identifier(value=id)],
             status="current",
@@ -1227,6 +1374,25 @@ class Fhir:
             AllergyIntoleranceCriticalityChoices.unable_to_assess: "unable-to-assess",
         }
 
+        allergy_code_display = allergy_spec.code.get("display") or allergy_spec.code.get("code", "")
+        allergy_div_parts = [f"<p><b>Allergen:</b> {allergy_code_display}</p>"]
+        if allergy_spec.allergy_intolerance_type:
+            allergy_div_parts.append(f"<p><b>Type:</b> {allergy_spec.allergy_intolerance_type}</p>")
+        if allergy_spec.category:
+            allergy_div_parts.append(f"<p><b>Category:</b> {allergy_spec.category}</p>")
+        if allergy_spec.criticality:
+            allergy_div_parts.append(f"<p><b>Criticality:</b> {allergy_spec.criticality}</p>")
+        if allergy_spec.clinical_status:
+            allergy_div_parts.append(f"<p><b>Clinical Status:</b> {allergy_spec.clinical_status}</p>")
+        if allergy_spec.verification_status:
+            allergy_div_parts.append(f"<p><b>Verification Status:</b> {allergy_spec.verification_status}</p>")
+        if allergy_spec.recorded_date:
+            allergy_div_parts.append(f"<p><b>Recorded Date:</b> {allergy_spec.recorded_date.date()}</p>")
+        if allergy_spec.last_occurrence:
+            allergy_div_parts.append(f"<p><b>Last Occurrence:</b> {allergy_spec.last_occurrence.date()}</p>")
+        if allergy_spec.note:
+            allergy_div_parts.append(f"<p><b>Note:</b> {allergy_spec.note}</p>")
+
         return AllergyIntolerance(
             id=id,
             meta=Meta(
@@ -1235,6 +1401,10 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/AllergyIntolerance"
                 ],
+            ),
+            text=Narrative(
+                status="generated",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(allergy_div_parts) + "</div>",
             ),
             identifier=[Identifier(value=id)],
             verificationStatus=CodeableConcept(
@@ -1292,6 +1462,37 @@ class Fhir:
         id = str(observation.external_id)
         observation_spec = ObservationReadSpec.serialize(observation)
 
+        obs_code_display = (
+            observation_spec.main_code.get("display") or observation_spec.main_code.get("code")
+            if observation_spec.main_code
+            else "Observation"
+        )
+        obs_div_parts = [f"<p><b>Observation:</b> {obs_code_display}</p>"]
+        obs_div_parts.append(f"<p><b>Status:</b> {observation_spec.status}</p>")
+        obs_div_parts.append(f"<p><b>Effective Date:</b> {observation_spec.effective_datetime.date()}</p>")
+
+        obs_value = observation_spec.value
+        if isinstance(obs_value, dict):
+            raw_value = obs_value.get("value")
+            unit_info = obs_value.get("unit", {})
+            unit_display = unit_info.get("display") if isinstance(unit_info, dict) else None
+            coding_info = obs_value.get("coding")
+            if raw_value is not None and unit_display:
+                obs_div_parts.append(f"<p><b>Value:</b> {raw_value} {unit_display}</p>")
+            elif raw_value is not None:
+                obs_div_parts.append(f"<p><b>Value:</b> {raw_value}</p>")
+            elif coding_info:
+                coding_display = coding_info.get("display") or coding_info.get("code", "")
+                obs_div_parts.append(f"<p><b>Value:</b> {coding_display}</p>")
+
+        obs_interpretation = observation_spec.interpretation
+        if obs_interpretation:
+            interp_text = obs_interpretation if isinstance(obs_interpretation, str) else obs_interpretation.get("text") or obs_interpretation.get("code")
+            if interp_text:
+                obs_div_parts.append(f"<p><b>Interpretation:</b> {interp_text}</p>")
+        if observation_spec.note:
+            obs_div_parts.append(f"<p><b>Note:</b> {observation_spec.note}</p>")
+
         return Observation(
             id=id,
             meta=Meta(
@@ -1300,6 +1501,10 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Observation"
                 ],
+            ),
+            text=Narrative(
+                status="generated",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(obs_div_parts) + "</div>",
             ),
             identifier=[Identifier(value=id)],
             status=observation_spec.status,
