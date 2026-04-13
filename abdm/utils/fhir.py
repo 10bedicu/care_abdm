@@ -1499,113 +1499,177 @@ class Fhir:
             ),
             title="Consultation Report",
             date=datetime.now(UTC).isoformat(),
-            section=list(
-                filter(
-                    lambda section: section.entry and len(section.entry) > 0,
-                    [
-                        CompositionSection(
-                            title="Chief Complaints",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="422843007",
-                                        display="Chief complaint section",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                self._reference(self._condition(condition))
-                                for condition in ConditionModel.objects.filter(
-                                    encounter=encounter
-                                )
-                            ],
-                        ),
-                        CompositionSection(
-                            title="Physical Examination",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="425044008",
-                                        display="Physical exam section",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                self._reference(self._observation(observation))
-                                for observation in ObservationModel.objects.filter(
-                                    encounter=encounter
-                                ).exclude(Q(main_code__isnull=True) | Q(main_code={}))
-                            ],
-                        ),
-                        CompositionSection(
-                            title="Allergies",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="722446000",
-                                        display="Allergy record",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                self._reference(self._allergy_intolerance(allergy))
-                                for allergy in AllergyIntoleranceModel.objects.filter(
-                                    encounter=encounter
-                                )
-                            ],
-                        ),
-                        CompositionSection(
-                            title="Medications",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="721912009",
-                                        display="Medication summary document",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                *[
-                                    self._reference(self._medication_request(request))
-                                    for request in MedicationRequestModel.objects.filter(
-                                        encounter=encounter
-                                    )
-                                ],
-                                *[
-                                    self._reference(
-                                        self._medication_statement(statement)
-                                    )
-                                    for statement in MedicationStatementModel.objects.filter(
-                                        encounter=encounter
-                                    )
-                                ],
-                            ],
-                        ),
-                        CompositionSection(
-                            title="Document Reference",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="371530004",
-                                        display="Clinical consultation report",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                self._reference(self._document_reference(file))
-                                for file in FileUploadModel.objects.filter(
-                                    associating_id=encounter.external_id
-                                )
-                            ],
-                        ),
+            section=[
+                CompositionSection(
+                    title="Chief Complaints",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="422843007",
+                                display="Chief complaint section",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._condition(condition))
+                        for condition in ConditionModel.objects.filter(
+                            encounter=encounter
+                        )
                     ],
-                )
-            ),
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if ConditionModel.objects.filter(encounter=encounter).count() == 0
+                    else None,
+                ),
+                CompositionSection(
+                    title="Physical Examination",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="425044008",
+                                display="Physical exam section",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._observation(observation))
+                        for observation in ObservationModel.objects.filter(
+                            encounter=encounter
+                        ).exclude(Q(main_code__isnull=True) | Q(main_code={}))
+                    ],
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if ObservationModel.objects.filter(encounter=encounter)
+                    .exclude(Q(main_code__isnull=True) | Q(main_code={}))
+                    .count()
+                    == 0
+                    else None,
+                ),
+                CompositionSection(
+                    title="Allergies",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="722446000",
+                                display="Allergy record",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._allergy_intolerance(allergy))
+                        for allergy in AllergyIntoleranceModel.objects.filter(
+                            encounter=encounter
+                        )
+                    ],
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if AllergyIntoleranceModel.objects.filter(
+                        encounter=encounter
+                    ).count()
+                    == 0
+                    else None,
+                ),
+                CompositionSection(
+                    title="Medications",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="721912009",
+                                display="Medication summary document",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        *[
+                            self._reference(self._medication_request(request))
+                            for request in MedicationRequestModel.objects.filter(
+                                encounter=encounter
+                            )
+                        ],
+                        *[
+                            self._reference(self._medication_statement(statement))
+                            for statement in MedicationStatementModel.objects.filter(
+                                encounter=encounter
+                            )
+                        ],
+                    ],
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if MedicationRequestModel.objects.filter(
+                        encounter=encounter
+                    ).count()
+                    == 0
+                    and MedicationStatementModel.objects.filter(
+                        encounter=encounter
+                    ).count()
+                    == 0
+                    else None,
+                ),
+                CompositionSection(
+                    title="Document Reference",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="371530004",
+                                display="Clinical consultation report",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._document_reference(file))
+                        for file in FileUploadModel.objects.filter(
+                            associating_id=encounter.external_id
+                        )
+                    ],
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if FileUploadModel.objects.filter(
+                        associating_id=encounter.external_id
+                    ).count()
+                    == 0
+                    else None,
+                ),
+            ],
             subject=self._reference(self._patient(encounter.patient)),
             encounter=self._reference(
                 self._encounter(encounter, include_diagnosis=True)
@@ -1638,113 +1702,177 @@ class Fhir:
             ),
             title="Discharge Summary",
             date=datetime.now(UTC).isoformat(),
-            section=list(
-                filter(
-                    lambda section: section.entry and len(section.entry) > 0,
-                    [
-                        CompositionSection(
-                            title="Chief Complaints",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="422843007",
-                                        display="Chief complaint section",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                self._reference(self._condition(condition))
-                                for condition in ConditionModel.objects.filter(
-                                    encounter=encounter
-                                )
-                            ],
-                        ),
-                        CompositionSection(
-                            title="Physical Examination",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="425044008",
-                                        display="Physical exam section",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                self._reference(self._observation(observation))
-                                for observation in ObservationModel.objects.filter(
-                                    encounter=encounter
-                                ).exclude(Q(main_code__isnull=True) | Q(main_code={}))
-                            ],
-                        ),
-                        CompositionSection(
-                            title="Allergies",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="722446000",
-                                        display="Allergy record",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                self._reference(self._allergy_intolerance(allergy))
-                                for allergy in AllergyIntoleranceModel.objects.filter(
-                                    encounter=encounter
-                                )
-                            ],
-                        ),
-                        CompositionSection(
-                            title="Medications",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="721912009",
-                                        display="Medication summary document",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                *[
-                                    self._reference(self._medication_request(request))
-                                    for request in MedicationRequestModel.objects.filter(
-                                        encounter=encounter
-                                    )
-                                ],
-                                *[
-                                    self._reference(
-                                        self._medication_statement(statement)
-                                    )
-                                    for statement in MedicationStatementModel.objects.filter(
-                                        encounter=encounter
-                                    )
-                                ],
-                            ],
-                        ),
-                        CompositionSection(
-                            title="Document Reference",
-                            code=CodeableConcept(
-                                coding=[
-                                    Coding(
-                                        system="http://snomed.info/sct",
-                                        code="371530004",
-                                        display="Clinical consultation report",
-                                    )
-                                ]
-                            ),
-                            entry=[
-                                self._reference(self._document_reference(file))
-                                for file in FileUploadModel.objects.filter(
-                                    associating_id=encounter.external_id
-                                )
-                            ],
-                        ),
+            section=[
+                CompositionSection(
+                    title="Chief Complaints",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="422843007",
+                                display="Chief complaint section",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._condition(condition))
+                        for condition in ConditionModel.objects.filter(
+                            encounter=encounter
+                        )
                     ],
-                )
-            ),
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if ConditionModel.objects.filter(encounter=encounter).count() == 0
+                    else None,
+                ),
+                CompositionSection(
+                    title="Physical Examination",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="425044008",
+                                display="Physical exam section",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._observation(observation))
+                        for observation in ObservationModel.objects.filter(
+                            encounter=encounter
+                        ).exclude(Q(main_code__isnull=True) | Q(main_code={}))
+                    ],
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if ObservationModel.objects.filter(encounter=encounter)
+                    .exclude(Q(main_code__isnull=True) | Q(main_code={}))
+                    .count()
+                    == 0
+                    else None,
+                ),
+                CompositionSection(
+                    title="Allergies",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="722446000",
+                                display="Allergy record",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._allergy_intolerance(allergy))
+                        for allergy in AllergyIntoleranceModel.objects.filter(
+                            encounter=encounter
+                        )
+                    ],
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if AllergyIntoleranceModel.objects.filter(
+                        encounter=encounter
+                    ).count()
+                    == 0
+                    else None,
+                ),
+                CompositionSection(
+                    title="Medications",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="721912009",
+                                display="Medication summary document",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        *[
+                            self._reference(self._medication_request(request))
+                            for request in MedicationRequestModel.objects.filter(
+                                encounter=encounter
+                            )
+                        ],
+                        *[
+                            self._reference(self._medication_statement(statement))
+                            for statement in MedicationStatementModel.objects.filter(
+                                encounter=encounter
+                            )
+                        ],
+                    ],
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if MedicationRequestModel.objects.filter(
+                        encounter=encounter
+                    ).count()
+                    == 0
+                    and MedicationStatementModel.objects.filter(
+                        encounter=encounter
+                    ).count()
+                    == 0
+                    else None,
+                ),
+                CompositionSection(
+                    title="Document Reference",
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://snomed.info/sct",
+                                code="371530004",
+                                display="Clinical consultation report",
+                            )
+                        ]
+                    ),
+                    entry=[
+                        self._reference(self._document_reference(file))
+                        for file in FileUploadModel.objects.filter(
+                            associating_id=encounter.external_id
+                        )
+                    ],
+                    emptyReason=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/list-empty-reason",
+                                code="notstarted",
+                                display="Not Started",
+                            )
+                        ]
+                    )
+                    if FileUploadModel.objects.filter(
+                        associating_id=encounter.external_id
+                    ).count()
+                    == 0
+                    else None,
+                ),
+            ],
             subject=self._reference(self._patient(encounter.patient)),
             encounter=self._reference(
                 self._encounter(encounter, include_diagnosis=True)
@@ -1794,17 +1922,12 @@ class Fhir:
             ),
             title="Health Document",
             date=datetime.now(UTC).isoformat(),
-            section=list(
-                filter(
-                    lambda section: section.entry and len(section.entry) > 0,
-                    [
-                        CompositionSection(
-                            title=file.name,
-                            entry=[self._reference(self._document_reference(file))],
-                        ),
-                    ],
-                )
-            ),
+            section=[
+                CompositionSection(
+                    title=file.name,
+                    entry=[self._reference(self._document_reference(file))],
+                ),
+            ],
             subject=self._reference(self._patient(patient)),
             encounter=self._reference(
                 self._encounter(encounter, include_diagnosis=True)
@@ -1843,20 +1966,15 @@ class Fhir:
             type=CodeableConcept(text="Wellness Record"),
             title="Wellness Record",
             date=datetime.now(UTC).isoformat(),
-            section=list(
-                filter(
-                    lambda section: section.entry and len(section.entry) > 0,
-                    [
-                        CompositionSection(
-                            title="Other Observations",
-                            entry=[
-                                self._reference(self._observation(observation))
-                                for observation in observations
-                            ],
-                        ),
+            section=[
+                CompositionSection(
+                    title="Other Observations",
+                    entry=[
+                        self._reference(self._observation(observation))
+                        for observation in observations
                     ],
-                )
-            ),
+                ),
+            ],
             subject=self._reference(self._patient(questionnaire_response.patient)),
             encounter=self._reference(
                 self._encounter(
