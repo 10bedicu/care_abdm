@@ -139,6 +139,12 @@ from care.users.models import User as UserModel
 
 CARE_IDENTIFIER_SYSTEM = settings.BACKEND_DOMAIN
 
+def is_float(value):
+    try:
+        float(value)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 class Fhir:
     def __init__(self):
@@ -1465,7 +1471,9 @@ class Fhir:
             ),
             text=Narrative(
                 status="generated",
-                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(obs_div_parts) + "</div>",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">'
+                + "".join(obs_div_parts)
+                + "</div>",
             ),
             identifier=[Identifier(value=id)],
             status=observation_spec.status,
@@ -1491,7 +1499,10 @@ class Fhir:
             else CodeableConcept(**observation_spec.alternate_coding),
             valueString=observation_spec.value.get("value")
             if observation_spec.value.get("value")
-            and not observation_spec.value.get("unit")
+            and not (
+                observation_spec.value.get("unit")
+                and is_float(observation_spec.value.get("value"))
+            )
             and not observation_spec.value.get("coding")
             else None,
             valueCodeableConcept=CodeableConcept(
@@ -1507,6 +1518,7 @@ class Fhir:
                 code=observation_spec.value.get("unit", {}).get("code"),
             )
             if observation_spec.value.get("unit")
+            and is_float(observation_spec.value.get("value"))
             else None,
             effectiveDateTime=observation_spec.effective_datetime.isoformat(),
             method=CodeableConcept(
@@ -1557,12 +1569,17 @@ class Fhir:
                     else None,
                     valueString=component.get("value", {}).get("value")
                     if component.get("value", {}).get("value")
-                    and not component.get("value", {}).get("unit")
+                    and not (
+                        component.get("value", {}).get("unit")
+                        and is_float(component.get("value", {}).get("value"))
+                    )
                     and not component.get("value", {}).get("coding")
                     else None,
                     valueCodeableConcept=CodeableConcept(
                         coding=[Coding(**component.get("value", {}).get("coding"))],
-                        text=component.get("value", {}).get("coding", {}).get("display"),
+                        text=component.get("value", {})
+                        .get("coding", {})
+                        .get("display"),
                     )
                     if component.get("value", {}).get("coding")
                     else None,
@@ -1573,6 +1590,7 @@ class Fhir:
                         code=component.get("value", {}).get("unit", {}).get("code"),
                     )
                     if component.get("value", {}).get("unit")
+                    and is_float(component.get("value", {}).get("value"))
                     else None,
                     interpretation=[
                         CodeableConcept(
