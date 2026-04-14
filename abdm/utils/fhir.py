@@ -553,7 +553,9 @@ class Fhir:
             ),
             text=Narrative(
                 status="generated",
-                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(condition_div_parts) + "</div>",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">'
+                + "".join(condition_div_parts)
+                + "</div>",
             ),
             identifier=[Identifier(value=id)],
             category=[
@@ -590,6 +592,28 @@ class Fhir:
                 coding=[Coding(**condition_spec.code)],
                 text=condition_spec.code.get("display"),
             ),
+            recordedDate=condition_spec.created_date.isoformat(),
+            onsetDateTime=condition_spec.onset.get("onset_datetime")
+            if condition_spec.onset.get("onset_datetime")
+            else None,
+            onsetAge=condition_spec.onset.get("onset_age")
+            if condition_spec.onset.get("onset_age")
+            else None,
+            onsetString=condition_spec.onset.get("onset_string")
+            if condition_spec.onset.get("onset_string")
+            else None,
+            abatementDateTime=condition_spec.abatement.get("abatement_datetime")
+            if condition_spec.abatement.get("abatement_datetime")
+            else None,
+            abatementAge=condition_spec.abatement.get("abatement_age")
+            if condition_spec.abatement.get("abatement_age")
+            else None,
+            abatementString=condition_spec.abatement.get("abatement_string")
+            if condition_spec.abatement.get("abatement_string")
+            else None,
+            note=[Annotation(text=condition_spec.note)]
+            if condition_spec.note
+            else None,
             subject=self._reference(self._patient(condition.patient)),
         )
 
@@ -1378,7 +1402,9 @@ class Fhir:
             ),
             text=Narrative(
                 status="generated",
-                div='<div xmlns="http://www.w3.org/1999/xhtml">' + "".join(allergy_div_parts) + "</div>",
+                div='<div xmlns="http://www.w3.org/1999/xhtml">'
+                + "".join(allergy_div_parts)
+                + "</div>",
             ),
             identifier=[Identifier(value=id)],
             verificationStatus=self._concept_from_mapping(
@@ -1409,13 +1435,13 @@ class Fhir:
             lastOccurrence=allergy_spec.last_occurrence.isoformat()
             if allergy.last_occurrence
             else None,
-            onsetDateTime=allergy_spec.onset.onset_datetime.isoformat()
+            onsetDateTime=allergy_spec.onset.get("onset_datetime")
             if allergy_spec.onset.get("onset_datetime")
             else None,
-            onsetAge=allergy_spec.onset.onset_age
+            onsetAge=allergy_spec.onset.get("onset_age")
             if allergy_spec.onset.get("onset_age")
             else None,
-            onsetString=allergy_spec.onset.onset_string
+            onsetString=allergy_spec.onset.get("onset_string")
             if allergy_spec.onset.get("onset_string")
             else None,
             patient=self._reference(self._patient(allergy.patient)),
