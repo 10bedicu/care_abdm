@@ -26,6 +26,19 @@ def is_float(value):
         return False
 
 
+def _fhir_observation_reference_range(rrange) -> ObservationReferenceRange:
+    if isinstance(rrange, dict):
+        min_val = rrange.get("min")
+        max_val = rrange.get("max")
+    else:
+        min_val = rrange.min
+        max_val = rrange.max
+    return ObservationReferenceRange(
+        low=Quantity(value=min_val) if min_val is not None else None,
+        high=Quantity(value=max_val) if max_val is not None else None,
+    )
+
+
 class ObservationMixin:
     @cache_profiles(Observation.get_resource_type())
     def _observation(self, observation: ObservationModel):
@@ -148,10 +161,7 @@ class ObservationMixin:
             if observation_spec.body_site
             else None,
             referenceRange=[
-                ObservationReferenceRange(
-                    low=Quantity(value=rrange.min) if rrange.min else None,
-                    high=Quantity(value=rrange.max) if rrange.max else None,
-                )
+                _fhir_observation_reference_range(rrange)
                 for rrange in observation_spec.reference_range
             ],
             encounter=self._reference(self._encounter(observation.encounter))
@@ -160,9 +170,10 @@ class ObservationMixin:
             note=[Annotation(text=observation_spec.note)]
             if observation_spec.note
             else None,
-            interpretation=CodeableConcept(text=observation_spec.interpretation)
-            if observation_spec.interpretation
-            else None,
+            # interpretation=[CodeableConcept(text=observation_spec.interpretation)]
+            # if observation_spec.interpretation
+            # and isinstance(observation_spec.interpretation, str)
+            # else None,
             component=[
                 ObservationComponent(
                     code=CodeableConcept(
@@ -211,14 +222,7 @@ class ObservationMixin:
                     if component.get("interpretation")
                     else None,
                     referenceRange=[
-                        ObservationReferenceRange(
-                            low=Quantity(value=rrange.get("min"))
-                            if rrange.get("min")
-                            else None,
-                            high=Quantity(value=rrange.get("max"))
-                            if rrange.get("max")
-                            else None,
-                        )
+                        _fhir_observation_reference_range(rrange)
                         for rrange in component.get("reference_range", [])
                     ],
                 )

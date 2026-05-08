@@ -76,7 +76,11 @@ class FhirBase:
         if coding is None:
             return None
 
-        fhir_coding = self._coding(coding)
+        if isinstance(coding, dict):
+            fhir_coding = self._coding(CodingSpec(**coding))
+        else:
+            fhir_coding = self._coding(coding)
+
         return CodeableConcept(coding=[fhir_coding], text=fhir_coding.display)
 
     def _concept_from_mapping(

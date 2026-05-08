@@ -13,6 +13,7 @@ from abdm.models.abha_number import AbhaNumber
 from abdm.models.base import HealthInformationType
 from abdm.service.request import Request
 from abdm.settings import plugin_settings as settings
+from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.medication_request import MedicationRequest
@@ -100,9 +101,6 @@ def hf_id_from_abha_id(health_id: str):
 def cm_id():
     return settings.ABDM_CM_ID
 
-def benefit_name():
-    return settings.ABDM_BENEFIT_NAME
-
 
 def benefit_name():
     return settings.ABDM_BENEFIT_NAME
@@ -185,6 +183,13 @@ def generate_care_contexts_for_existing_data(
                     create_questionnaire_response_care_context(response)
                 )
 
+        diagnostic_reports = DiagnosticReport.objects.filter(
+            encounter_id=encounter.id,
+            patient_id=patient.id,
+        )
+        for report in diagnostic_reports:
+            encounter_care_contexts.append(create_diagnostic_report_care_context(report))
+
         hf_id = facility.healthfacility.hf_id
         if hf_id in care_contexts:
             care_contexts[hf_id].extend(encounter_care_contexts)
@@ -236,7 +241,23 @@ def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911
 
         return create_questionnaire_response_care_context(questionnaire_response)
 
+    if model == "diagnostic_report":
+        diagnostic_report = DiagnosticReport.objects.filter(external_id=param).first()
+
+        if not diagnostic_report:
+            return None
+
+        return create_diagnostic_report_care_context(diagnostic_report)
+
     return None
+
+
+def create_diagnostic_report_care_context(diagnostic_report: DiagnosticReport):
+    return {
+        "reference": f"v2::diagnostic_report::{diagnostic_report.external_id}",
+        "display": (f"Diagnostic Report {diagnostic_report.service_request.title}"),
+        "hi_type": HealthInformationType.DIAGNOSTIC_REPORT,
+    }
 
 
 def create_medication_request_care_context(medication_request: MedicationRequest):

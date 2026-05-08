@@ -19,7 +19,6 @@ class DocumentReferenceMixin:
     @cache_profiles(DocumentReference.get_resource_type())
     def _document_reference(self, file: FileUploadModel):
         id = str(file.external_id)
-        content_type, content = file.files_manager.file_contents(file)
 
         doc_ref_div_parts = [
             f"<p><b>Document:</b> {file.name or file.internal_name}</p>"
@@ -48,13 +47,16 @@ class DocumentReferenceMixin:
             identifier=[Identifier(value=id)],
             status="current",
             type=CodeableConcept(text=file.internal_name.split(".")[0]),
-            content=[
-                DocumentReferenceContent(
-                    attachment=Attachment(
-                        contentType=content_type,
-                        data=base64.b64encode(content),
-                    )
-                )
-            ],
+            content=[DocumentReferenceContent(attachment=self._attachment(file))],
             author=[self._reference(self._practitioner(file.created_by))],
+        )
+
+    def _attachment(self, file: FileUploadModel):
+        content_type, content = file.files_manager.file_contents(file)
+
+        return Attachment(
+            contentType=content_type,
+            data=base64.b64encode(content),
+            title=file.name,
+            creation=file.created_date.isoformat(),
         )

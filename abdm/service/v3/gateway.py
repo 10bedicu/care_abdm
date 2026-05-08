@@ -54,6 +54,7 @@ from abdm.service.v3.types.gateway import (
 from abdm.settings import plugin_settings as settings
 from abdm.utils.cipher import Cipher
 from abdm.utils.fhir import Fhir
+from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.medication_request import MedicationRequest
@@ -590,7 +591,6 @@ class GatewayService:
             ):
                 encounter = Encounter.objects.filter(
                     external_id=param,
-                    patient__external_id=patient_reference,
                 ).first()
 
                 if not encounter:
@@ -604,7 +604,6 @@ class GatewayService:
             ):
                 encounter = Encounter.objects.filter(
                     external_id=param,
-                    patient__external_id=patient_reference,
                 ).first()
 
                 if not encounter:
@@ -637,6 +636,19 @@ class GatewayService:
                     continue
 
                 fhir_data = Fhir().create_wellness_record(questionnaire_response)
+
+            elif (
+                model == "diagnostic_report"
+                and HealthInformationType.DIAGNOSTIC_REPORT in consent.hi_types
+            ):
+                diagnostic_report = DiagnosticReport.objects.filter(
+                    external_id=param,
+                ).first()
+
+                if not diagnostic_report:
+                    continue
+
+                fhir_data = Fhir().create_diagnostic_report_record(diagnostic_report)
 
             else:
                 continue
