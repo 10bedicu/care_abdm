@@ -7,6 +7,7 @@ from django.dispatch import receiver
 
 from abdm.service.helper import (
     ABDMAPIException,
+    create_diagnostic_report_care_context,
     create_encounter_care_context,
     create_file_upload_care_context,
     create_medication_request_care_context,
@@ -14,6 +15,7 @@ from abdm.service.helper import (
     hf_id_from_encounter,
 )
 from abdm.service.v3.gateway import GatewayService
+from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.medication_request import MedicationRequest
@@ -188,4 +190,39 @@ def create_care_context_on_questionnaire_response_creation(
 
     except Exception as e:
         warning = f"Failed to link care context for questionnaire response {instance.questionnaire_response.external_id} with patient {patient.external_id}, {e!s}"
+        logger.exception(warning)
+
+
+@receiver(post_save, sender=DiagnosticReport)
+def create_care_context_on_diagnostic_report_creation(
+    sender, instance: DiagnosticReport, created: bool, **kwargs
+):
+    patient = instance.patient
+    hf_id = hf_id_from_encounter(instance)
+
+    if (
+        not created
+        or not hf_id
+        or not patient
+        or getattr(patient, "abha_number", None) is None
+    ):
+        return
+
+    try:
+        transaction.on_commit(
+            lambda: GatewayService.link__carecontext(
+                {
+                    "patient": patient,
+                    "care_contexts": [create_diagnostic_report_care_context(instance)],
+                    "user": instance.created_by,
+                    "hf_id": hf_id,
+                }
+            )
+        )
+    except ABDMAPIException as e:
+        warning = f"Failed to link care context for diagnostic report {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
+        logger.warning(warning)
+
+    except Exception as e:
+        warning = f"Failed to link care context for diagnostic report {instance.external_id} with patient {patient.external_id}, {e!s}"
         logger.exception(warning)
