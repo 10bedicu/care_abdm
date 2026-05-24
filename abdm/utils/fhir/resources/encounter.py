@@ -29,7 +29,7 @@ from care.emr.resources.encounter.constants import EncounterPriorityChoices
 from care.emr.resources.encounter.constants import (
     StatusChoices as EncounterStatusChoices,
 )
-from care.emr.resources.encounter.spec import EncounterRetrieveSpec
+from care.emr.resources.encounter.spec import EncounterRetrieveSpec, HospitalizationSpec
 
 ENCOUNTER_CLASS_CODE_MAP = {
     EncounterClassChoices.amb: ("AMB", "Ambulatory"),
@@ -128,6 +128,14 @@ class EncounterMixin:
         encounter_spec = EncounterRetrieveSpec.serialize(encounter)
         id = str(encounter_spec.id)
 
+        hospitalization = encounter_spec.hospitalization
+        if isinstance(hospitalization, dict):
+            hospitalization = (
+                HospitalizationSpec.model_validate(hospitalization)
+                if hospitalization
+                else None
+            )
+
         period = encounter_spec.period
         period_start = (
             period.get("start")
@@ -207,7 +215,7 @@ class EncounterMixin:
                     else None
                 ),
                 "hospitalization": EncounterHospitalization(
-                    re_admission=CodeableConcept(
+                    reAdmission=CodeableConcept(
                         coding=[
                             Coding(
                                 code="R",
@@ -217,36 +225,36 @@ class EncounterMixin:
                         ],
                         text="Re-admission",
                     )
-                    if encounter_spec.hospitalization.re_admission
+                    if hospitalization.re_admission
                     else None,
                     admitSource=self._concept_from_mapping(
                         system="http://terminology.hl7.org/CodeSystem/admit-source",
                         mapping=ENCOUNTER_ADMIT_SOURCE_CODE_MAP,
-                        key=encounter_spec.hospitalization.admit_source,
+                        key=hospitalization.admit_source,
                         default=EncounterAdmitSourceChoices.other.value,
                     )
-                    if encounter_spec.hospitalization.admit_source
+                    if hospitalization.admit_source
                     else None,
                     dischargeDisposition=self._concept_from_mapping(
                         system="http://terminology.hl7.org/CodeSystem/discharge-disposition",
                         mapping=ENCOUNTER_DISCHARGE_DISPOSITION_CODE_MAP,
-                        key=encounter_spec.hospitalization.discharge_disposition,
+                        key=hospitalization.discharge_disposition,
                         default=EncounterDischargeDispositionChoices.home.value,
                     )
-                    if encounter_spec.hospitalization.discharge_disposition
+                    if hospitalization.discharge_disposition
                     else None,
                     dietPreference=[
                         self._concept_from_mapping(
                             system="http://terminology.hl7.org/CodeSystem/diet",
                             mapping=ENCOUNTER_DIET_PREFERENCE_CODE_MAP,
-                            key=encounter_spec.hospitalization.diet_preference,
+                            key=hospitalization.diet_preference,
                             default=EncounterDietPreferenceChoices.none.value,
                         )
                     ]
-                    if encounter_spec.hospitalization.diet_preference
+                    if hospitalization.diet_preference
                     else None,
                 )
-                if encounter_spec.hospitalization
+                if hospitalization
                 else None,
             }
         )
