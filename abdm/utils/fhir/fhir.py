@@ -13,14 +13,17 @@ from .base import FhirBase
 from .compositions.diagnostic_report import DiagnosticReportCompositionMixin
 from .compositions.discharge_summary import DischargeSummaryCompositionMixin
 from .compositions.health_document import HealthDocumentCompositionMixin
+from .compositions.invoice_record import InvoiceRecordCompositionMixin
 from .compositions.op_consult import OPConsultCompositionMixin
 from .compositions.prescription import PrescriptionCompositionMixin
 from .compositions.wellness import WellnessCompositionMixin
 from .resources.allergy_intolerance import AllergyIntoleranceMixin
+from .resources.charge_item import ChargeItemMixin
 from .resources.condition import ConditionMixin
 from .resources.diagnostic_report import DiagnosticReportMixin
 from .resources.document_reference import DocumentReferenceMixin
 from .resources.encounter import EncounterMixin
+from .resources.invoice import InvoiceMixin
 from .resources.medication_request import MedicationRequestMixin
 from .resources.medication_statement import MedicationStatementMixin
 from .resources.observation import ObservationMixin
@@ -47,12 +50,15 @@ class Fhir(
     ServiceRequestMixin,
     SpecimenMixin,
     DiagnosticReportMixin,
+    ChargeItemMixin,
+    InvoiceMixin,
     PrescriptionCompositionMixin,
     OPConsultCompositionMixin,
     DischargeSummaryCompositionMixin,
     HealthDocumentCompositionMixin,
     WellnessCompositionMixin,
     DiagnosticReportCompositionMixin,
+    InvoiceRecordCompositionMixin,
     FhirBase,
 ):
     def _bundle(self, entries: list[BundleEntry], care_context_id: str = uuid()):
