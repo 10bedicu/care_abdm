@@ -4,6 +4,7 @@ from functools import reduce
 
 from django.contrib.postgres.search import TrigramSimilarity
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -34,18 +35,20 @@ from abdm.models import (
 from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.gateway import GatewayService
 from abdm.settings import plugin_settings as settings
+from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
 from abdm.utils.token import (
     get_or_create_scan_and_share_token,
     get_scan_and_share_token_by_token_number,
 )
 from abdm.utils.user import get_or_create_abdm_user
 from care.emr.locks.billing import PatientCreateLock
-from care.emr.models.patient import Patient, PatientIdentifier, PatientIdentifierConfig
+from care.emr.models.patient import Patient
 from care.emr.resources.patient.spec import GenderChoices, PatientRetrieveSpec
 from care.emr.resources.patient_identifier.default_expression_evaluator import (
     evaluate_patient_instance_default_values,
 )
 from care.facility.models.facility import Facility
+from care.utils.lock import ObjectLocked
 
 logger = logging.getLogger(__name__)
 
@@ -565,95 +568,102 @@ class HIPCallbackViewSet(GenericViewSet):
                 "mobile": patient_data.get("phoneNumber"),
             },
         )
-        patient = abha_number.patient
+
+        full_address = ", ".join(
+            filter(
+                lambda x: x,
+                [
+                    patient_data.get("address").get("line"),
+                    patient_data.get("address").get("district"),
+                    patient_data.get("address").get("state"),
+                    patient_data.get("address").get("pinCode"),
+                ],
+            )
+        )
+        phone_number = (
+            "+91" + patient_data.get("phoneNumber", "").replace(" ", "")[-10:]
+        )
+        date_of_birth = datetime.strptime(
+            f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
+            "%Y-%m-%d",
+        ).date()
 
         is_existing_patient = True
-        if not patient:
-            is_existing_patient = False
-
-            full_address = ", ".join(
-                filter(
-                    lambda x: x,
-                    [
-                        patient_data.get("address").get("line"),
-                        patient_data.get("address").get("district"),
-                        patient_data.get("address").get("state"),
-                        patient_data.get("address").get("pinCode"),
-                    ],
-                )
+        lock = PatientCreateLock()
+        try:
+            lock.acquire()
+        except ObjectLocked:
+            logger.warning(
+                "Patient creation lock unavailable during scan and share for %s",
+                patient_data.get("abhaAddress"),
             )
-            phone_number = (
-                "+91" + patient_data.get("phoneNumber", "").replace(" ", "")[-10:]
+            GatewayService.patient_share__on_share(
+                {
+                    "error": {
+                        "message": "Patient creation failed, try again after a while",
+                        "code": "ABDM-9999",
+                    },
+                    "request_id": request.headers.get("REQUEST-ID"),
+                }
             )
-            date_of_birth = datetime.strptime(
-                f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
-                "%Y-%m-%d",
-            ).date()
-            # TODO: consider the case of existing patient without abha number
-            with PatientCreateLock():
-                patient = Patient.objects.create(
-                    name=patient_data.get("name"),
-                    gender={
-                        "M": GenderChoices.male,
-                        "F": GenderChoices.female,
-                        "O": GenderChoices.non_binary,
-                    }.get(patient_data.get("gender"), "O"),
-                    date_of_birth=date_of_birth,
-                    phone_number=phone_number,
-                    emergency_phone_number=phone_number,
-                    address=full_address,
-                    permanent_address=full_address,
-                    pincode=patient_data.get("address").get("pinCode"),
-                    geo_organization=None,
-                )
-                evaluate_patient_instance_default_values(patient)
+            return Response(status=status.HTTP_200_OK)
 
-                abha_number.patient = patient
-                abha_number.save()
+        try:
+            with transaction.atomic():
+                abha_number.refresh_from_db()
+                if abha_number.patient_id:
+                    patient = abha_number.patient
+                else:
+                    is_existing_patient = False
+                    # TODO: consider the case of existing patient without abha number
+                    patient = Patient.objects.create(
+                        name=patient_data.get("name"),
+                        gender={
+                            "M": GenderChoices.male,
+                            "F": GenderChoices.female,
+                            "O": GenderChoices.non_binary,
+                        }.get(patient_data.get("gender"), "O"),
+                        date_of_birth=date_of_birth,
+                        phone_number=phone_number,
+                        emergency_phone_number=phone_number,
+                        address=full_address,
+                        permanent_address=full_address,
+                        pincode=patient_data.get("address").get("pinCode"),
+                        geo_organization=None,
+                    )
+                    evaluate_patient_instance_default_values(patient)
+                    abha_number.patient = patient
+                    abha_number.save(update_fields=["patient"])
+
+                if abha_number.abha_number or abha_number.health_id:
+                    abdm_user = get_or_create_abdm_user()
+
+                    if abha_number.abha_number:
+                        ensure_abdm_patient_identifier(
+                            patient,
+                            system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+                            display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                            value=abha_number.abha_number,
+                            created_by=abdm_user,
+                        )
+                    if abha_number.health_id:
+                        ensure_abdm_patient_identifier(
+                            patient,
+                            system=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_SYSTEM,
+                            display=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_DISPLAY,
+                            value=abha_number.health_id,
+                            created_by=abdm_user,
+                        )
+
+                patient.build_instance_identifiers()
+                patient.save()
+
+            transaction.on_commit(lock.release)
+        except Exception:
+            lock.release()
+            raise
 
         token = get_or_create_scan_and_share_token(patient, health_facility.facility)
-
-        if abha_number.abha_number:
-            abdm_user = get_or_create_abdm_user()
-
-            patient_identifier_config = PatientIdentifierConfig.objects.filter(
-                config__system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-            ).first()
-            if not patient_identifier_config:
-                patient_identifier_config = PatientIdentifierConfig.objects.create(
-                    status="active",
-                    facility=None,
-                    created_by=abdm_user,
-                    config={
-                        "use": "official",
-                        "description": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                        "required": False,
-                        "unique": True,
-                        "regex": "",
-                        "system": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                        "display": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                        "retrieve_config": {
-                            "retrieve_with_dob": False,
-                            "retrieve_with_year_of_birth": False,
-                            "retrieve_with_otp": False,
-                        },
-                    },
-                )
-
-            PatientIdentifier.objects.get_or_create(
-                patient=patient,
-                config=patient_identifier_config,
-                value=abha_number.abha_number,
-                created_by=abdm_user,
-                defaults={
-                    "patient": patient,
-                    "config": patient_identifier_config,
-                    "value": abha_number.abha_number,
-                    "created_by": abdm_user,
-                },
-            )
-        patient.build_instance_identifiers()
-        patient.save()
 
         GatewayService.patient_share__on_share(
             {
