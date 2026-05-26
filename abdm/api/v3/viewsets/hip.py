@@ -635,25 +635,15 @@ class HIPCallbackViewSet(GenericViewSet):
                     abha_number.patient = patient
                     abha_number.save(update_fields=["patient"])
 
-                if abha_number.abha_number or abha_number.health_id:
+                if abha_number.abha_number:
                     abdm_user = get_or_create_abdm_user()
-
-                    if abha_number.abha_number:
-                        ensure_abdm_patient_identifier(
-                            patient,
-                            system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                            display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                            value=abha_number.abha_number,
-                            created_by=abdm_user,
-                        )
-                    if abha_number.health_id:
-                        ensure_abdm_patient_identifier(
-                            patient,
-                            system=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_SYSTEM,
-                            display=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_DISPLAY,
-                            value=abha_number.health_id,
-                            created_by=abdm_user,
-                        )
+                    ensure_abdm_patient_identifier(
+                        patient,
+                        system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+                        display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                        value=abha_number.abha_number,
+                        created_by=abdm_user,
+                    )
 
                 patient.build_instance_identifiers()
                 patient.save()

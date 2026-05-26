@@ -134,14 +134,6 @@ class HealthIdViewSet(GenericViewSet):
                     value=abha_number.abha_number,
                     created_by=abdm_user,
                 )
-            if abha_number.health_id:
-                ensure_abdm_patient_identifier(
-                    patient,
-                    system=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_SYSTEM,
-                    display=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_DISPLAY,
-                    value=abha_number.health_id,
-                    created_by=abdm_user,
-                )
 
             patient.build_instance_identifiers()
             patient.save()
