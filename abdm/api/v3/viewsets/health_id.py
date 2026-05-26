@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
@@ -35,8 +36,9 @@ from abdm.service.helper import (
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
+from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
 from abdm.utils.user import get_or_create_abdm_user
-from care.emr.models.patient import Patient, PatientIdentifier, PatientIdentifierConfig
+from care.emr.models.patient import Patient
 from care.security.authorization.base import AuthorizationController
 
 
@@ -118,43 +120,31 @@ class HealthIdViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        abha_number.patient = patient
-        abha_number.save()
-
         abdm_user = get_or_create_abdm_user()
 
-        patient_identifier_config = PatientIdentifierConfig.objects.filter(
-            config__system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-        ).first()
-        if not patient_identifier_config:
-            patient_identifier_config = PatientIdentifierConfig.objects.create(
-                status="active",
-                facility=None,
-                created_by=abdm_user,
-                config={
-                    "use": "official",
-                    "description": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                    "required": False,
-                    "unique": True,
-                    "regex": "",
-                    "system": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                    "display": settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                    "retrieve_config": {
-                        "retrieve_with_dob": False,
-                        "retrieve_with_year_of_birth": False,
-                        "retrieve_with_otp": False,
-                    },
-                },
-            )
+        with transaction.atomic():
+            abha_number.patient = patient
+            abha_number.save(update_fields=["patient"])
 
-        PatientIdentifier.objects.create(
-            patient=patient,
-            config=patient_identifier_config,
-            value=abha_number.abha_number,
-            created_by=abdm_user,
-        )
-        patient.build_instance_identifiers()
-        patient.save()
+            if abha_number.abha_number:
+                ensure_abdm_patient_identifier(
+                    patient,
+                    system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+                    display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                    value=abha_number.abha_number,
+                    created_by=abdm_user,
+                )
+            if abha_number.health_id:
+                ensure_abdm_patient_identifier(
+                    patient,
+                    system=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_SYSTEM,
+                    display=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_DISPLAY,
+                    value=abha_number.health_id,
+                    created_by=abdm_user,
+                )
+
+            patient.build_instance_identifiers()
+            patient.save()
 
         hf_care_contexts = generate_care_contexts_for_existing_data(patient)
 
