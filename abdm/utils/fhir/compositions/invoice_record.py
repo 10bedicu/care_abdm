@@ -1,7 +1,12 @@
 from datetime import UTC, datetime
 
 from fhir.resources.R4B.codeableconcept import CodeableConcept
-from fhir.resources.R4B.composition import Composition, CompositionSection
+from fhir.resources.R4B.coding import Coding
+from fhir.resources.R4B.composition import (
+    Composition,
+    CompositionAttester,
+    CompositionSection,
+)
 from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.meta import Meta
 
@@ -14,11 +19,13 @@ class InvoiceRecordCompositionMixin:
         invoice_resource = self._invoice(invoice)
         primary_encounter = getattr(invoice.account, "primary_encounter", None)
 
+        organization = self._organization(invoice.facility)
         author_user = invoice.created_by
-        authors = []
-        if author_user:
-            authors.append(self._reference(self._practitioner(author_user)))
-        authors.append(self._reference(self._organization(invoice.facility)))
+        author = (
+            self._reference(self._practitioner(author_user))
+            if author_user
+            else self._reference(organization)
+        )
 
         section_title = invoice.title or "Invoice Details"
 
@@ -33,19 +40,33 @@ class InvoiceRecordCompositionMixin:
             ),
             identifier=Identifier(value=care_context_id),
             status="final",
-            type=CodeableConcept(text="Invoice Record"),
+            type=CodeableConcept(
+                coding=[
+                    Coding(
+                        system="http://snomed.info/sct",
+                        code="371530004",
+                        display="Invoice Record",
+                    )
+                ],
+                text="Invoice Record",
+            ),
             subject=self._reference(self._patient(invoice.patient)),
             encounter=self._reference(self._encounter(primary_encounter))
             if primary_encounter
             else None,
             date=(invoice.issue_date or invoice.modified_date).isoformat(),
-            author=authors,
+            author=[author],
             title=invoice.title or "Invoice Record",
-            custodian=self._reference(self._organization(invoice.facility)),
+            custodian=self._reference(organization),
+            attester=[
+                CompositionAttester(
+                    mode="official", party=self._reference(organization)
+                )
+            ],
             section=[
                 CompositionSection(
                     title=section_title,
-                    entry=[self._reference(invoice_resource)],
+                    entry=[self._reference(invoice_resource, reference_type="Invoice")],
                 )
             ],
         )
