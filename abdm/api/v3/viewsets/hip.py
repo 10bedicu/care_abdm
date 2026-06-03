@@ -40,7 +40,9 @@ from abdm.utils.token import (
 )
 from abdm.utils.user import get_or_create_abdm_user
 from care.emr.locks.billing import PatientCreateLock
+from care.emr.models.organization import Organization
 from care.emr.models.patient import Patient, PatientIdentifier, PatientIdentifierConfig
+from care.emr.resources.organization.spec import OrganizationTypeChoices
 from care.emr.resources.patient.spec import GenderChoices, PatientRetrieveSpec
 from care.emr.resources.patient_identifier.default_expression_evaluator import (
     evaluate_patient_instance_default_values,
@@ -589,6 +591,26 @@ class HIPCallbackViewSet(GenericViewSet):
                 f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
                 "%Y-%m-%d",
             ).date()
+
+            state_name = patient_data.get("address", {}).get("state")
+            state_organization = None
+            if state_name:
+                state_organization = Organization.objects.filter(
+                    name__iexact=state_name,
+                    org_type=OrganizationTypeChoices.govt.value,
+                    metadata__govt_org_type="state",
+                ).first()
+
+            district_organization = None
+            district_name = patient_data.get("address", {}).get("district")
+            if state_organization and district_name:
+                district_organization = Organization.objects.filter(
+                    name__iexact=district_name,
+                    org_type=OrganizationTypeChoices.govt.value,
+                    parent=state_organization,
+                    metadata__govt_org_type="district",
+                ).first()
+
             # TODO: consider the case of existing patient without abha number
             with PatientCreateLock():
                 patient = Patient.objects.create(
@@ -604,7 +626,9 @@ class HIPCallbackViewSet(GenericViewSet):
                     address=full_address,
                     permanent_address=full_address,
                     pincode=patient_data.get("address").get("pinCode"),
-                    geo_organization=None,
+                    geo_organization=district_organization
+                    if district_organization
+                    else state_organization,
                 )
                 evaluate_patient_instance_default_values(patient)
 
