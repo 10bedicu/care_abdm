@@ -34,6 +34,9 @@ def _get_or_create_identifier_config(apps, *, system, display, created_by):
         config__system=system,
     ).first()
     if patient_identifier_config:
+        if not patient_identifier_config.config.get("auto_maintained"):
+            patient_identifier_config.config["auto_maintained"] = True
+            patient_identifier_config.save(update_fields=["config"])
         return patient_identifier_config
 
     return PatientIdentifierConfig.objects.create(
@@ -48,6 +51,7 @@ def _get_or_create_identifier_config(apps, *, system, display, created_by):
             "regex": "",
             "system": system,
             "display": display,
+            "auto_maintained": True,
             "retrieve_config": {
                 "retrieve_with_dob": False,
                 "retrieve_with_year_of_birth": False,

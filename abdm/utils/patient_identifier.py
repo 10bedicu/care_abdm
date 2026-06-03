@@ -18,6 +18,7 @@ def ensure_abdm_patient_identifier(patient, *, system, display, value, created_b
                 "regex": "",
                 "system": system,
                 "display": display,
+                "auto_maintained": True,
                 "retrieve_config": {
                     "retrieve_with_dob": False,
                     "retrieve_with_year_of_birth": False,
