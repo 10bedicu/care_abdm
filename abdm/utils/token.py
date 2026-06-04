@@ -1,6 +1,5 @@
-from datetime import UTC, datetime
-
 from django.db import transaction
+from django.utils import timezone
 
 from abdm.utils.user import get_or_create_abdm_user
 from abdm.service.helper import ABDMAPIException
@@ -41,7 +40,7 @@ def get_or_create_token_queue(facility: Facility):
         },
     )
 
-    today = datetime.now(UTC).date()
+    today = timezone.localdate()
     token_queue, _ = TokenQueue.objects.get_or_create(
         facility=facility,
         resource=schedulable_resource,
