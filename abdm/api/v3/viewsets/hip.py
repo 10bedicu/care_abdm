@@ -571,110 +571,114 @@ class HIPCallbackViewSet(GenericViewSet):
             },
         )
 
-        full_address = ", ".join(
-            filter(
-                lambda x: x,
-                [
-                    patient_data.get("address").get("line"),
-                    patient_data.get("address").get("district"),
-                    patient_data.get("address").get("state"),
-                    patient_data.get("address").get("pinCode"),
-                ],
-            )
-        )
-        phone_number = (
-            "+91" + patient_data.get("phoneNumber", "").replace(" ", "")[-10:]
-        )
-        date_of_birth = datetime.strptime(
-            f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
-            "%Y-%m-%d",
-        ).date()
-
-        state_name = patient_data.get("address", {}).get("state")
-        state_organization = None
-        if state_name:
-            state_organization = Organization.objects.filter(
-                name__iexact=state_name,
-                org_type=OrganizationTypeChoices.govt.value,
-                metadata__govt_org_type="state",
-            ).first()
-
-        district_organization = None
-        district_name = patient_data.get("address", {}).get("district")
-        if state_organization and district_name:
-            district_organization = Organization.objects.filter(
-                name__iexact=district_name,
-                org_type=OrganizationTypeChoices.govt.value,
-                parent=state_organization,
-                metadata__govt_org_type="district",
-            ).first()
-
         is_existing_patient = True
-        lock = PatientCreateLock()
-        try:
-            lock.acquire()
-        except ObjectLocked:
-            logger.warning(
-                "Patient creation lock unavailable during scan and share for %s",
-                patient_data.get("abhaAddress"),
-            )
-            GatewayService.patient_share__on_share(
-                {
-                    "error": {
-                        "message": "Patient creation failed, try again after a while",
-                        "code": "ABDM-9999",
-                    },
-                    "request_id": request.headers.get("REQUEST-ID"),
-                }
-            )
-            return Response(status=status.HTTP_200_OK)
+        if not abha_number.patient_id:
+            lock = PatientCreateLock()
+            try:
+                lock.acquire()
+            except ObjectLocked:
+                logger.warning(
+                    "Patient creation lock unavailable during scan and share for %s",
+                    patient_data.get("abhaAddress"),
+                )
+                GatewayService.patient_share__on_share(
+                    {
+                        "error": {
+                            "message": "Patient creation failed, try again after a while",
+                            "code": "ABDM-9999",
+                        },
+                        "request_id": request.headers.get("REQUEST-ID"),
+                    }
+                )
+                return Response(status=status.HTTP_200_OK)
 
-        try:
-            with transaction.atomic():
-                abha_number.refresh_from_db()
-                if abha_number.patient_id:
-                    patient = abha_number.patient
-                else:
-                    is_existing_patient = False
-                    # TODO: consider the case of existing patient without abha number
-                    patient = Patient.objects.create(
-                        name=patient_data.get("name"),
-                        gender={
-                            "M": GenderChoices.male,
-                            "F": GenderChoices.female,
-                            "O": GenderChoices.non_binary,
-                        }.get(patient_data.get("gender"), "O"),
-                        date_of_birth=date_of_birth,
-                        phone_number=phone_number,
-                        emergency_phone_number=phone_number,
-                        address=full_address,
-                        permanent_address=full_address,
-                        pincode=patient_data.get("address").get("pinCode"),
-                        geo_organization=district_organization
-                        if district_organization
-                        else state_organization,
-                    )
-                    evaluate_patient_instance_default_values(patient)
-                    abha_number.patient = patient
-                    abha_number.save(update_fields=["patient"])
+            try:
+                with transaction.atomic():
+                    abha_number.refresh_from_db()
+                    if not abha_number.patient_id:
+                        is_existing_patient = False
+                        full_address = ", ".join(
+                            filter(
+                                lambda x: x,
+                                [
+                                    patient_data.get("address").get("line"),
+                                    patient_data.get("address").get("district"),
+                                    patient_data.get("address").get("state"),
+                                    patient_data.get("address").get("pinCode"),
+                                ],
+                            )
+                        )
+                        phone_number = (
+                            "+91"
+                            + patient_data.get("phoneNumber", "").replace(" ", "")[-10:]
+                        )
+                        date_of_birth = datetime.strptime(
+                            f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
+                            "%Y-%m-%d",
+                        ).date()
 
-                if abha_number.abha_number:
-                    abdm_user = get_or_create_abdm_user()
-                    ensure_abdm_patient_identifier(
-                        patient,
-                        system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                        display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                        value=abha_number.abha_number,
-                        created_by=abdm_user,
-                    )
+                        state_name = patient_data.get("address", {}).get("state")
+                        state_organization = None
+                        if state_name:
+                            state_organization = Organization.objects.filter(
+                                name__iexact=state_name,
+                                org_type=OrganizationTypeChoices.govt.value,
+                                metadata__govt_org_type="state",
+                            ).first()
 
-                patient.build_instance_identifiers()
-                patient.save()
+                        district_organization = None
+                        district_name = patient_data.get("address", {}).get(
+                            "district"
+                        )
+                        if state_organization and district_name:
+                            district_organization = Organization.objects.filter(
+                                name__iexact=district_name,
+                                org_type=OrganizationTypeChoices.govt.value,
+                                parent=state_organization,
+                                metadata__govt_org_type="district",
+                            ).first()
 
-            transaction.on_commit(lock.release)
-        except Exception:
-            lock.release()
-            raise
+                        # TODO: consider the case of existing patient without abha number
+                        patient = Patient.objects.create(
+                            name=patient_data.get("name"),
+                            gender={
+                                "M": GenderChoices.male,
+                                "F": GenderChoices.female,
+                                "O": GenderChoices.non_binary,
+                            }.get(patient_data.get("gender"), "O"),
+                            date_of_birth=date_of_birth,
+                            phone_number=phone_number,
+                            emergency_phone_number=phone_number,
+                            address=full_address,
+                            permanent_address=full_address,
+                            pincode=patient_data.get("address").get("pinCode"),
+                            geo_organization=district_organization
+                            if district_organization
+                            else state_organization,
+                        )
+                        evaluate_patient_instance_default_values(patient)
+                        abha_number.patient = patient
+                        abha_number.save(update_fields=["patient"])
+
+                        if abha_number.abha_number:
+                            abdm_user = get_or_create_abdm_user()
+                            ensure_abdm_patient_identifier(
+                                patient,
+                                system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+                                display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                                value=abha_number.abha_number,
+                                created_by=abdm_user,
+                            )
+
+                        patient.build_instance_identifiers()
+                        patient.save()
+
+                transaction.on_commit(lock.release)
+            except Exception:
+                lock.release()
+                raise
+
+        patient = abha_number.patient
 
         token = get_or_create_scan_and_share_token(patient, health_facility.facility)
 
