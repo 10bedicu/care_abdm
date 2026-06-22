@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 
 from django.db.models import Q
 from drf_spectacular.utils import extend_schema
@@ -386,15 +387,21 @@ class HIUCallbackViewSet(GenericViewSet):
         validated_data = self.validate_request(request)
 
         if "hiRequest" in validated_data:
-            artefact = ConsentArtefact.objects.filter(
-                consent_id=validated_data.get("response").get("requestId")
-            ).first()
+            request_id = validated_data.get("response").get("requestId")
+
+            artefact = None
+            for attempt in range(5):
+                artefact = ConsentArtefact.objects.filter(consent_id=request_id).first()
+
+                if artefact:
+                    break
+
+                time.sleep(0.5 * (attempt + 1))
 
             if not artefact:
                 logger.warning(
-                    f"Consent Artefact: {validated_data.get('response').get('requestId')} not found in the database"
+                    f"Consent Artefact: {request_id} not found in the database"
                 )
-
                 return Response(status=status.HTTP_404_NOT_FOUND)
 
             artefact.consent_id = validated_data.get("hiRequest").get("transactionId")
@@ -417,13 +424,20 @@ class HIUCallbackViewSet(GenericViewSet):
 
         key_material = validated_data.get("keyMaterial")
 
-        artefact = ConsentArtefact.objects.filter(
-            consent_id=validated_data.get("transactionId")
-        ).first()
+        transaction_id = validated_data.get("transactionId")
+
+        artefact = None
+        for attempt in range(5):
+            artefact = ConsentArtefact.objects.filter(consent_id=transaction_id).first()
+
+            if artefact:
+                break
+
+            time.sleep(0.5 * (attempt + 1))
 
         if not artefact:
             logger.warning(
-                f"Consent Artefact: {validated_data.get('transactionId')} not found in the database"
+                f"Consent Artefact: {transaction_id} not found in the database"
             )
 
             return Response(status=status.HTTP_404_NOT_FOUND)
