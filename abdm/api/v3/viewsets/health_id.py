@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
@@ -26,6 +27,7 @@ from abdm.api.v3.serializers.health_id import (
     AbhaLoginCheckAuthMethodsSerializer,
     AbhaLoginSendOtpSerializer,
     AbhaLoginVerifyOtpSerializer,
+    AbhaLoginVerifyUserSerializer,
     LinkAbhaNumberAndPatientSerializer,
 )
 from abdm.models import AbhaNumber, Transaction, TransactionType
@@ -40,6 +42,18 @@ from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
 from abdm.utils.user import get_or_create_abdm_user
 from care.emr.models.patient import Patient
 from care.security.authorization.base import AuthorizationController
+
+ABHA_LOGIN_CACHE_KEY = "abdm_abha_login__{transaction_id}"
+ABHA_LOGIN_CACHE_TTL = 60 * 5  # 5 minutes
+
+
+def mask_abha_number(value):
+    if not value:
+        return value
+
+    visible = value[-4:]
+    masked = "".join("X" if char.isdigit() else char for char in value[:-4])
+    return masked + visible
 
 
 @extend_schema(tags=["ABDM: Health ID"])
@@ -60,6 +74,7 @@ class HealthIdViewSet(GenericViewSet):
         "abha_create__enrol_abha_address": AbhaCreateEnrolAbhaAddressSerializer,
         "abha_login__send_otp": AbhaLoginSendOtpSerializer,
         "abha_login__verify_otp": AbhaLoginVerifyOtpSerializer,
+        "abha_login__verify_user": AbhaLoginVerifyUserSerializer,
         "abha_login__check_auth_methods": AbhaLoginCheckAuthMethodsSerializer,
         "link_abha_number_and_patient": LinkAbhaNumberAndPatientSerializer,
     }
@@ -173,7 +188,7 @@ class HealthIdViewSet(GenericViewSet):
 
         abha_profile = result.get("ABHAProfile")
         token = result.get("tokens")
-        (abha_number, created) = AbhaNumber.objects.update_or_create(
+        abha_number, created = AbhaNumber.objects.update_or_create(
             abha_number=abha_profile.get("ABHANumber"),
             defaults={
                 "abha_number": abha_profile.get("ABHANumber"),
@@ -195,9 +210,15 @@ class HealthIdViewSet(GenericViewSet):
                 "last_name": abha_profile.get("lastName"),
                 "gender": abha_profile.get("gender"),
                 "date_of_birth": validate_and_format_date(
-                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").year,  # noqa DTZ007
-                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").month,  # noqa DTZ007
-                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").day,  # noqa DTZ007
+                    datetime.strptime(
+                        abha_profile.get("dob"), "%d-%m-%Y"
+                    ).year,  # noqa DTZ007
+                    datetime.strptime(
+                        abha_profile.get("dob"), "%d-%m-%Y"
+                    ).month,  # noqa DTZ007
+                    datetime.strptime(
+                        abha_profile.get("dob"), "%d-%m-%Y"
+                    ).day,  # noqa DTZ007
                 ),
                 "address": abha_profile.get("address"),
                 "district": abha_profile.get("districtName"),
@@ -278,7 +299,7 @@ class HealthIdViewSet(GenericViewSet):
 
         abha_profile = result.get("ABHAProfile")
         token = result.get("tokens")
-        (abha_number, created) = AbhaNumber.objects.update_or_create(
+        abha_number, created = AbhaNumber.objects.update_or_create(
             abha_number=abha_profile.get("ABHANumber"),
             defaults={
                 "abha_number": abha_profile.get("ABHANumber"),
@@ -300,9 +321,15 @@ class HealthIdViewSet(GenericViewSet):
                 "last_name": abha_profile.get("lastName"),
                 "gender": abha_profile.get("gender"),
                 "date_of_birth": validate_and_format_date(
-                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").year,  # noqa DTZ007
-                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").month,  # noqa DTZ007
-                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").day,  # noqa DTZ007
+                    datetime.strptime(
+                        abha_profile.get("dob"), "%d-%m-%Y"
+                    ).year,  # noqa DTZ007
+                    datetime.strptime(
+                        abha_profile.get("dob"), "%d-%m-%Y"
+                    ).month,  # noqa DTZ007
+                    datetime.strptime(
+                        abha_profile.get("dob"), "%d-%m-%Y"
+                    ).day,  # noqa DTZ007
                 ),
                 "address": abha_profile.get("address"),
                 "district": abha_profile.get("districtName"),
@@ -362,7 +389,7 @@ class HealthIdViewSet(GenericViewSet):
 
         abha_profile = result
         token = result.get("jwtResponse")
-        (abha_number, created) = AbhaNumber.objects.update_or_create(
+        abha_number, created = AbhaNumber.objects.update_or_create(
             abha_number=abha_profile.get("healthIdNumber"),
             defaults={
                 "abha_number": abha_profile.get("healthIdNumber"),
@@ -444,7 +471,7 @@ class HealthIdViewSet(GenericViewSet):
 
         abha_profile = result.get("ABHAProfile")
         token = result.get("tokens")
-        (abha_number, created) = AbhaNumber.objects.update_or_create(
+        abha_number, created = AbhaNumber.objects.update_or_create(
             abha_number=abha_profile.get("ABHANumber"),
             defaults={
                 "abha_number": abha_profile.get("ABHANumber"),
@@ -466,9 +493,15 @@ class HealthIdViewSet(GenericViewSet):
                 "last_name": abha_profile.get("lastName"),
                 "gender": abha_profile.get("gender"),
                 "date_of_birth": validate_and_format_date(
-                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").year,  # noqa DTZ007
-                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").month,  # noqa DTZ007
-                    datetime.strptime(abha_profile.get("dob"), "%d-%m-%Y").day,  # noqa DTZ007
+                    datetime.strptime(
+                        abha_profile.get("dob"), "%d-%m-%Y"
+                    ).year,  # noqa DTZ007
+                    datetime.strptime(
+                        abha_profile.get("dob"), "%d-%m-%Y"
+                    ).month,  # noqa DTZ007
+                    datetime.strptime(
+                        abha_profile.get("dob"), "%d-%m-%Y"
+                    ).day,  # noqa DTZ007
                 ),
                 "address": abha_profile.get("address"),
                 "district": abha_profile.get("districtName"),
@@ -591,7 +624,7 @@ class HealthIdViewSet(GenericViewSet):
             {"x_token": abha_number.access_token}
         )
 
-        (abha_number, _) = AbhaNumber.objects.update_or_create(
+        abha_number, _ = AbhaNumber.objects.update_or_create(
             pk=abha_number.pk,
             defaults={
                 "abha_number": profile_result.get("ABHANumber"),
@@ -684,6 +717,7 @@ class HealthIdViewSet(GenericViewSet):
 
         type = validated_data.get("type")
         otp_system = validated_data.get("otp_system")
+        transaction_id = str(validated_data.get("transaction_id"))
 
         scope = []
 
@@ -692,29 +726,44 @@ class HealthIdViewSet(GenericViewSet):
         elif otp_system == "abdm":
             scope.append("mobile-verify")
 
-        token = None
+        login_state = {
+            "type": type,
+            "otp_system": otp_system,
+            "transaction_id": transaction_id,
+        }
 
         if type == "abha-address":
             scope.insert(0, "abha-address-login")
             result = HealthIdService.phr__web__login__abha__verify(
                 {
                     "scope": scope,
-                    "transaction_id": str(validated_data.get("transaction_id")),
+                    "transaction_id": transaction_id,
                     "otp": validated_data.get("otp"),
                 }
             )
 
-            token = {
-                "txn_id": result.get("txnId"),
-                "access_token": result.get("token"),
-                "refresh_token": result.get("refreshToken"),
-            }
+            login_state.update(
+                {
+                    "txn_id": result.get("txnId"),
+                    "access_token": result.get("token"),
+                    "refresh_token": result.get("refreshToken"),
+                    "requires_user_verification": False,
+                    "accounts": [
+                        {
+                            "abha_number": user.get("abhaNumber"),
+                            "preferred_abha_address": user.get("abhaAddress"),
+                            "name": user.get("fullName"),
+                        }
+                        for user in (result.get("users") or [])
+                    ],
+                }
+            )
         else:
             scope.insert(0, "abha-login")
             result = HealthIdService.profile__login__verify(
                 {
                     "scope": scope,
-                    "transaction_id": str(validated_data.get("transaction_id")),
+                    "transaction_id": transaction_id,
                     "otp": validated_data.get("otp"),
                 }
             )
@@ -728,28 +777,114 @@ class HealthIdViewSet(GenericViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            accounts = [
+                {
+                    "abha_number": account.get("ABHANumber"),
+                    "preferred_abha_address": account.get("preferredAbhaAddress"),
+                    "name": account.get("name"),
+                    "gender": account.get("gender"),
+                    "date_of_birth": account.get("dob"),
+                    "profile_photo": account.get("profilePhoto"),
+                }
+                for account in (result.get("accounts") or [])
+            ]
+
             if type == "mobile":
-                user_verification_result = HealthIdService.profile__login__verify__user(
+                login_state.update(
                     {
+                        "txn_id": result.get("txnId"),
                         "t_token": result.get("token"),
-                        "abha_number": result.get("accounts")[0].get("ABHANumber"),
-                        "transaction_id": result.get("txnId"),
+                        "requires_user_verification": True,
+                        "accounts": accounts,
+                    }
+                )
+            else:
+                login_state.update(
+                    {
+                        "txn_id": result.get("txnId"),
+                        "access_token": result.get("token"),
+                        "refresh_token": result.get("refreshToken"),
+                        "requires_user_verification": False,
+                        "accounts": accounts,
                     }
                 )
 
-                token = {
-                    "txn_id": result.get("txnId"),
-                    "access_token": user_verification_result.get("token"),
-                    "refresh_token": user_verification_result.get("refreshToken"),
-                }
-            else:
-                token = {
-                    "txn_id": result.get("txnId"),
-                    "access_token": result.get("token"),
-                    "refresh_token": result.get("refreshToken"),
-                }
+        # Some flows do not return a list of accounts to choose from, in which
+        # case we proceed with a single implicit account.
+        if not login_state.get("accounts"):
+            login_state["accounts"] = [{}]
 
-        if not token:
+        cache.set(
+            ABHA_LOGIN_CACHE_KEY.format(transaction_id=transaction_id),
+            login_state,
+            ABHA_LOGIN_CACHE_TTL,
+        )
+
+        return Response(
+            {
+                "transaction_id": transaction_id,
+                "accounts": [
+                    {
+                        "id": index,
+                        "abha_number": mask_abha_number(account.get("abha_number")),
+                        "preferred_abha_address": account.get("preferred_abha_address"),
+                        "name": account.get("name"),
+                        "gender": account.get("gender"),
+                        "date_of_birth": account.get("date_of_birth"),
+                        "profile_photo": account.get("profile_photo"),
+                    }
+                    for index, account in enumerate(login_state["accounts"])
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="login/verify_user")
+    def abha_login__verify_user(self, request):
+        validated_data = self.validate_request(request)
+
+        transaction_id = str(validated_data.get("transaction_id"))
+        account_id = validated_data.get("account_id")
+
+        cache_key = ABHA_LOGIN_CACHE_KEY.format(transaction_id=transaction_id)
+        login_state = cache.get(cache_key)
+
+        if not login_state:
+            return Response(
+                {
+                    "detail": "Login session has expired, Please verify the OTP again",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        accounts = login_state.get("accounts") or []
+
+        if account_id >= len(accounts):
+            return Response(
+                {
+                    "detail": "Invalid account selected, Please try again",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        selected_account = accounts[account_id]
+
+        access_token = login_state.get("access_token")
+        refresh_token = login_state.get("refresh_token")
+
+        if login_state.get("requires_user_verification"):
+            user_verification_result = HealthIdService.profile__login__verify__user(
+                {
+                    "t_token": login_state.get("t_token"),
+                    "abha_number": selected_account.get("abha_number"),
+                    "transaction_id": login_state.get("txn_id"),
+                }
+            )
+
+            access_token = user_verification_result.get("token")
+            refresh_token = user_verification_result.get("refreshToken")
+
+        if not access_token:
             return Response(
                 {
                     "detail": "Unable to verify OTP, Please try again later",
@@ -757,9 +892,7 @@ class HealthIdViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = HealthIdService.profile__account(
-            {"x_token": token.get("access_token")}
-        )
+        profile_result = HealthIdService.profile__account({"x_token": access_token})
 
         abha_number = AbhaNumber.objects.filter(
             Q(health_id=profile_result.get("preferredAbhaAddress"))
@@ -768,7 +901,7 @@ class HealthIdViewSet(GenericViewSet):
                 & Q(abha_number__isnull=False)
             )
         ).first()
-        (abha_number, created) = AbhaNumber.objects.update_or_create(
+        abha_number, created = AbhaNumber.objects.update_or_create(
             pk=abha_number.pk if abha_number else None,
             defaults={
                 "abha_number": profile_result.get("ABHANumber"),
@@ -790,22 +923,24 @@ class HealthIdViewSet(GenericViewSet):
                 "email": profile_result.get("email"),
                 "mobile": profile_result.get("mobile"),
                 "profile_photo": profile_result.get("profilePhoto"),
-                "access_token": token.get("access_token"),
-                "refresh_token": token.get("refresh_token"),
+                "access_token": access_token,
+                "refresh_token": refresh_token,
             },
         )
 
         Transaction.objects.create(
-            reference_id=token.get("txn_id"),
+            reference_id=login_state.get("txn_id"),
             type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
             meta_data={
                 "abha_number": str(abha_number.external_id),
                 "method": "link_via_otp",
-                "type": type,
-                "system": otp_system,
+                "type": login_state.get("type"),
+                "system": login_state.get("otp_system"),
             },
             created_by=request.user,
         )
+
+        cache.delete(cache_key)
 
         return Response(
             {"abha_number": AbhaNumberSerializer(abha_number).data, "created": created},
