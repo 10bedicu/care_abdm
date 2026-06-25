@@ -35,6 +35,7 @@ from abdm.models import (
 from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.gateway import GatewayService
 from abdm.settings import plugin_settings as settings
+from abdm.tasks.patient_share import patient_share_on_share
 from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
 from abdm.utils.token import (
     get_or_create_scan_and_share_token,
@@ -511,7 +512,7 @@ class HIPCallbackViewSet(GenericViewSet):
         try:
             validated_data = self.validate_request(request)
         except Exception:
-            GatewayService.patient_share__on_share(
+            patient_share_on_share.delay(
                 {
                     "error": {
                         "message": "Bad Request, invalid request Body",
@@ -531,7 +532,7 @@ class HIPCallbackViewSet(GenericViewSet):
                 f"Health Facility with ID: {hip_id} not found in the database"
             )
 
-            GatewayService.patient_share__on_share(
+            patient_share_on_share.delay(
                 {
                     "error": {
                         "message": "HIP is not available",
@@ -581,7 +582,7 @@ class HIPCallbackViewSet(GenericViewSet):
                     "Patient creation lock unavailable during scan and share for %s",
                     patient_data.get("abhaAddress"),
                 )
-                GatewayService.patient_share__on_share(
+                patient_share_on_share.delay(
                     {
                         "error": {
                             "message": "Patient creation failed, try again after a while",
@@ -682,8 +683,8 @@ class HIPCallbackViewSet(GenericViewSet):
 
         token = get_or_create_scan_and_share_token(patient, health_facility.facility)
 
-        GatewayService.patient_share__on_share(
-            {
+        patient_share_on_share.delay(
+            on_share_payload={
                 "acknowledgement": {
                     "status": "SUCCESS",
                     "abha_address": abha_number.health_id,
@@ -692,13 +693,8 @@ class HIPCallbackViewSet(GenericViewSet):
                     "expiry": settings.ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
                 },
                 "request_id": request.headers.get("REQUEST-ID"),
-            }
-        )
-
-        Transaction.objects.create(
-            reference_id=uuid(),
-            type=TransactionType.SCAN_AND_SHARE,
-            meta_data={
+            },
+            transaction_meta={
                 "abha_number": str(abha_number.external_id),
                 "is_existing_patient": is_existing_patient,
                 "token": str(token.external_id),
