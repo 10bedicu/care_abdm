@@ -52,7 +52,7 @@ class ConsentViewSet(GenericViewSet, ListModelMixin, RetrieveModelMixin):
             ).select_related("organization__facility")
         ]
 
-        return queryset.filter(requester__facility__in=facilities).distinct()
+        return queryset.filter(encounter__facility__in=facilities).distinct()
 
     def create(self, request):
         serializer = self.get_serializer(data=request.data)
