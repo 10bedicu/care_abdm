@@ -25,10 +25,11 @@ def patient_share_on_share(self, on_share_payload: dict, transaction_meta: dict 
             MAX_RETRIES + 1,
         )
         raise self.retry(exc=exc, countdown=RETRY_COUNTDOWN) from exc
-    except ABDMAPIException:
-        logger.exception(
-            "patient_share on_share failed for request %s",
+    except ABDMAPIException as e:
+        logger.warning(
+            "patient_share on_share failed request_id=%s detail=%s",
             on_share_payload.get("request_id"),
+            e.detail,
         )
         raise
 

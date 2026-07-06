@@ -1,3 +1,4 @@
+import json
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -68,37 +69,42 @@ class GatewayService:
     request = Request(settings.ABDM_GATEWAY_URL)
 
     @staticmethod
-    def handle_error(error: dict[str, Any] | str) -> str:
-        if isinstance(error, list):
-            return GatewayService.handle_error(error[0])
+    def handle_error(error: Any) -> str:
+        fallback = "Unknown error occurred at ABDM's end while processing the request. Please try again later."
 
         if isinstance(error, str):
+            stripped = error.lstrip()
+            if stripped.startswith(("{", "<", "[")):
+                return "Invalid response from ABDM"
             return error
 
-        # { error: { message: "error message" } }
-        if "error" in error:
-            return GatewayService.handle_error(error["error"])
+        if isinstance(error, list):
+            return GatewayService.handle_error(error[0]) if error else fallback
 
-        # { message: "error message" }
-        if "message" in error:
-            return error["message"]
+        if isinstance(error, dict):
+            # { error: { message: "error message" } }
+            if "error" in error:
+                return GatewayService.handle_error(error["error"])
 
-        # { field_name: "error message" }
-        if isinstance(error, dict) and len(error) >= 1:
-            error.pop("code", None)
-            error.pop("timestamp", None)
-            return "".join(list(map(lambda x: str(x), list(error.values()))))
+            # { message: "error message" }
+            if "message" in error:
+                return GatewayService.handle_error(error["message"])
 
-        return "Unknown error occurred at ABDM's end while processing the request. Please try again later."
+            # { field_name: "error message" }
+            values = [
+                value
+                for key, value in error.items()
+                if key not in {"code", "timestamp"}
+            ]
+            if values:
+                return "".join(map(str, values))
+
+        return fallback
 
     @staticmethod
     def token__generate_token(
         data: TokenGenerateTokenBody,
     ) -> TokenGenerateTokenResponse:
-        logger.info(
-            f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Initiated Token Generation for {data.get('abha_number')} {data.get('hf_id')}"
-        )
-
         abha_number = data.get("abha_number")
         hf_id = data.get("hf_id", None)
 
@@ -142,10 +148,6 @@ class GatewayService:
         )
 
         if last_generate_token_request:
-            logger.info(
-                f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Last Generate Token Request found for {abha_number.health_id} {hf_id}"
-            )
-
             return {}
 
         path = "/v3/token/generate-token"
@@ -158,10 +160,6 @@ class GatewayService:
                 "X-HIP-ID": hf_id,
                 "X-CM-ID": cm_id(),
             },
-        )
-
-        logger.info(
-            f"ABDM_DEBUG__TOKEN_GENERATE_TOKEN :: Response for {payload} {response.status_code} {response.text}"
         )
 
         if response.status_code != 202:
@@ -177,10 +175,6 @@ class GatewayService:
 
     @staticmethod
     def link__carecontext(data: LinkCarecontextBody) -> LinkCarecontextResponse:
-        logger.info(
-            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Initiated Care Context Linking for {data.get('care_contexts')} {data.get('patient')} {data.get('hf_id')}"
-        )
-
         patient = data.get("patient")
         if not patient:
             raise ABDMAPIException(detail="Provide a patient to link care context")
@@ -202,7 +196,7 @@ class GatewayService:
             )
 
         reference_id = data.get("reference_id", uuid())
-        transaction, created = Transaction.objects.update_or_create(
+        transaction, _ = Transaction.objects.update_or_create(
             reference_id=reference_id,
             defaults={
                 "type": TransactionType.LINK_CARE_CONTEXT,
@@ -217,21 +211,9 @@ class GatewayService:
             },
         )
 
-        logger.info(
-            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Transaction for {reference_id} {created}"
-        )
-
         link_token = cache.get(f"abdm_link_token__{hf_id}__{abha_number.health_id}")
 
-        logger.info(
-            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Link Token for {abha_number.health_id} {link_token}"
-        )
-
         if not link_token:
-            logger.info(
-                f"ABDM_DEBUG__LINK_CARE_CONTEXT :: No Link Token found for {abha_number.health_id} {hf_id}"
-            )
-
             GatewayService.token__generate_token(
                 {
                     "abha_number": abha_number,
@@ -285,10 +267,6 @@ class GatewayService:
                 "X-HIP-ID": hf_id,
                 "X-LINK-TOKEN": link_token,
             },
-        )
-
-        logger.info(
-            f"ABDM_DEBUG__LINK_CARE_CONTEXT :: Response for {payload} {response.status_code} {response.text}"
         )
 
         if response.status_code != 202:
@@ -553,10 +531,6 @@ class GatewayService:
         )
         cipher.generate_key_pair()
 
-        logger.info(
-            f"ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: Consent: {consent.__dict__}"
-        )
-
         entries = []
         for care_context in consent.care_contexts:
             care_context_reference = care_context.get("careContextReference", "")
@@ -666,10 +640,6 @@ class GatewayService:
             else:
                 continue
 
-            logger.info(
-                f"ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: FHIR Data: {fhir_data.json()}"
-            )
-
             encrypted_data = cipher.encrypt(fhir_data.json())["data"]
             entry = {
                 "content": encrypted_data,
@@ -678,10 +648,6 @@ class GatewayService:
                 "careContextReference": care_context.get("careContextReference"),
             }
             entries.append(entry)
-
-        logger.info(
-            f"ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: Entries: {entries}"
-        )
 
         payload = {
             "pageNumber": 1,
@@ -718,7 +684,16 @@ class GatewayService:
         )
 
         if not response.ok:
-            raise ABDMAPIException(detail=GatewayService.handle_error(response.text))
+            try:
+                error_body = response.json()
+            except (ValueError, json.JSONDecodeError):
+                error_body = {"message": f"HTTP {response.status_code}"}
+            logger.warning(
+                "HI transfer push failed transaction_id=%s status=%s",
+                data.get("transaction_id"),
+                response.status_code,
+            )
+            raise ABDMAPIException(detail=GatewayService.handle_error(error_body))
 
         Transaction.objects.create(
             reference_id=data.get("transaction_id"),

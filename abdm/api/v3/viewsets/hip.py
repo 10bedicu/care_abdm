@@ -32,7 +32,7 @@ from abdm.models import (
     TransactionStatus,
     TransactionType,
 )
-from abdm.service.helper import uuid, validate_and_format_date
+from abdm.service.helper import uuid, validate_and_format_date, ABDMAPIException
 from abdm.service.v3.gateway import GatewayService
 from abdm.settings import plugin_settings as settings
 from abdm.tasks.patient_share import patient_share_on_share
@@ -153,26 +153,18 @@ class HIPCallbackViewSet(GenericViewSet):
             serializer.is_valid(raise_exception=True)
         except Exception as exception:
             logger.warning(
-                f"Validation failed for request data: {request.data}, "
-                f"Path: {request.path}, Method: {request.method}, "
-                f"Error details: {exception!s}"
+                "Validation failed path=%s method=%s fields=%s",
+                request.path,
+                request.method,
+                list(getattr(serializer, "errors", {}).keys()),
             )
-
             raise exception
 
         return serializer.validated_data
 
     @action(detail=False, methods=["POST"], url_path="hip/token/on-generate-token")
     def hip__token__on_generate_token(self, request):
-        logger.info(
-            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Request for {request.data!s} {request.headers!s}"
-        )
-
         validated_data = self.validate_request(request)
-
-        logger.info(
-            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Validated data for {validated_data}"
-        )
 
         hf_id = request.headers.get("X-HIP-ID")
         health_id = validated_data.get("abhaAddress")
@@ -181,7 +173,9 @@ class HIPCallbackViewSet(GenericViewSet):
 
         if not abha_number:
             logger.warning(
-                f"ON_GENERATE_TOKEN :: {health_id} not found in the database"
+                "ON_GENERATE_TOKEN abha not found request_id=%s hip_id=%s",
+                request.headers.get("REQUEST-ID"),
+                hf_id,
             )
 
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -196,18 +190,10 @@ class HIPCallbackViewSet(GenericViewSet):
             f"abdm_link_care_context__{hf_id}__{health_id}__*"
         )
 
-        logger.info(
-            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Link Care Context Request Cache Keys for {link_care_context_request_cache_keys}"
-        )
-
         for request_cache_key in link_care_context_request_cache_keys:
             cached_data = cache.get(request_cache_key)
 
             if cached_data.get("purpose") == "LINK_CARECONTEXT":
-                logger.info(
-                    f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Initiated Care Context Linking for {cached_data.get('reference_id')} {cached_data.get('patient')} {cached_data.get('care_contexts')} {cached_data.get('hf_id')}"
-                )
-
                 GatewayService.link__carecontext(
                     {
                         "reference_id": cached_data.get("reference_id"),
@@ -224,21 +210,11 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="link/on_carecontext")
     def link__on_carecontext(self, request):
-        logger.info(
-            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Request for {request.data!s} {request.headers!s}"
-        )
-
         data = self.validate_request(request)
         request_id = data.get("response", {}).get("requestId")
 
-        logger.info(f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Validated data for {data}")
-
         Transaction.objects.filter(reference_id=request_id).update(
             status=TransactionStatus.COMPLETED
-        )
-
-        logger.info(
-            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Transaction status updated for {request_id} to {TransactionStatus.COMPLETED.label}"
         )
 
         return Response(status=status.HTTP_202_ACCEPTED)
@@ -362,7 +338,8 @@ class HIPCallbackViewSet(GenericViewSet):
 
         if cached_data.get("otp") != validated_data.get("confirmation").get("token"):
             logger.warning(
-                f"Invalid OTP: {validated_data.get('confirmation').get('token')} for Reference ID: {validated_data.get('confirmation').get('linkRefNumber')}"
+                "Invalid OTP for linkRefNumber=%s",
+                validated_data.get("confirmation").get("linkRefNumber"),
             )
 
             return Response(status=status.HTTP_400_BAD_REQUEST)
@@ -401,7 +378,9 @@ class HIPCallbackViewSet(GenericViewSet):
 
         if not patient:
             logger.warning(
-                f"Patient with ABHA ID: {consent_detail.get('patient').get('id')} not found in the database"
+                "consent/hip/notify patient not found consent_id=%s request_id=%s",
+                notification.get("consentId"),
+                request.headers.get("REQUEST-ID"),
             )
 
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -488,9 +467,22 @@ class HIPCallbackViewSet(GenericViewSet):
                     "hip_id": request.headers.get("X-HIP-ID"),
                 }
             )
-        except Exception as exception:
+        except ABDMAPIException as e:
+            logger.warning(
+                "HI transfer failed transaction_id=%s request_id=%s consent_id=%s detail=%s",
+                validated_data.get("transactionId"),
+                request.headers.get("REQUEST-ID"),
+                consent.consent_id,
+                e.detail,
+            )
+        except Exception as e:
             logger.error(
-                f"Error occurred while transferring health information: {exception!s}"
+                "HI transfer failed transaction_id=%s request_id=%s consent_id=%s error_type=%s",
+                validated_data.get("transactionId"),
+                request.headers.get("REQUEST-ID"),
+                consent.consent_id,
+                type(e).__name__,
+                exc_info=True,
             )
 
             GatewayService.data_flow__health_information__notify(
@@ -579,8 +571,8 @@ class HIPCallbackViewSet(GenericViewSet):
                 lock.acquire()
             except ObjectLocked:
                 logger.warning(
-                    "Patient creation lock unavailable during scan and share for %s",
-                    patient_data.get("abhaAddress"),
+                    "Patient creation lock unavailable during scan and share request_id=%s",
+                    request.headers.get("REQUEST-ID"),
                 )
                 patient_share_on_share.delay(
                     {
