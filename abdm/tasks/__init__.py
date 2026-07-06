@@ -3,6 +3,7 @@ import random
 from celery import current_app
 from celery.schedules import crontab
 
+from abdm.tasks.patient_share import patient_share_on_share
 from abdm.tasks.retry_failed_care_contexts import retry_failed_care_contexts
 
 
