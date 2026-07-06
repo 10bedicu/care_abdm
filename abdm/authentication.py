@@ -4,6 +4,7 @@ from datetime import datetime
 
 import jwt
 import requests
+from django.core.cache import cache
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken
 
@@ -13,22 +14,61 @@ from care.users.models import User
 
 logger = logging.getLogger(__name__)
 
+ABDM_JWKS_CACHE_KEY_PREFIX = "abdm_jwks"
+ABDM_JWKS_CACHE_TTL = 60 * 60 * 24  # 24 hours
+
+
+def _jwks_headers():
+    return {
+        "REQUEST-ID": uuid(),
+        "TIMESTAMP": timestamp(),
+        "X-CM-ID": cm_id(),
+    }
+
+
+def _fetch_gateway_jwk(url, *, use_cache=True):
+    cache_key = f"{ABDM_JWKS_CACHE_KEY_PREFIX}__{url}"
+    if use_cache:
+        jwk = cache.get(cache_key)
+        if jwk is not None:
+            return jwk
+
+    try:
+        response = requests.get(
+            url,
+            headers=_jwks_headers(),
+            timeout=settings.ABDM_REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        jwk = response.json()["keys"][0]
+    except (requests.RequestException, KeyError, IndexError, ValueError) as e:
+        logger.error("ABDM JWKS fetch failed for %s: %s", url, e)
+        raise ValueError(f"ABDM JWKS fetch failed: {e}") from e
+
+    cache.set(cache_key, jwk, ABDM_JWKS_CACHE_TTL)
+    return jwk
+
+
+def _decode_with_jwk(jwk, token):
+    public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+    return jwt.decode(
+        token, key=public_key, audience="account", algorithms=["RS256"]
+    )
+
 
 class ABDMAuthentication(JWTAuthentication):
     def open_id_authenticate(self, url, token):
-        public_key = requests.get(
-            url,
-            headers={
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-CM-ID": cm_id(),
-            },
-        )
-        jwk = public_key.json()["keys"][0]
-        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
-        return jwt.decode(
-            token, key=public_key, audience="account", algorithms=["RS256"]
-        )
+        jwk = _fetch_gateway_jwk(url)
+        try:
+            return _decode_with_jwk(jwk, token)
+        except jwt.InvalidSignatureError:
+            logger.debug(
+                "ABDM JWKS signature verification failed; bypassing cache to refresh key"
+            )
+            fresh_jwk = _fetch_gateway_jwk(url, use_cache=False)
+            if fresh_jwk == jwk:
+                raise
+            return _decode_with_jwk(fresh_jwk, token)
 
     def authenticate_header(self, request):
         return "Bearer"
