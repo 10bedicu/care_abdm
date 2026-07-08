@@ -89,7 +89,7 @@ class HipLinkCareContextInitSerializer(Serializer):
 class HipLinkCareContextConfirmSerializer(Serializer):
     class ConfirmationSerializer(Serializer):
         linkRefNumber = CharField(max_length=50, required=True)
-        token = CharField(max_length=20, required=True)
+        token = CharField(min_length=6, max_length=6, required=True)
 
     confirmation = ConfirmationSerializer(required=True)
 
