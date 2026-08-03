@@ -1,3 +1,4 @@
+import re
 from base64 import b64decode, b64encode
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -269,10 +270,17 @@ def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911
     return None
 
 
+def clean_care_context_display(display: str) -> str:
+    # ABDM allows only alphanumeric characters, spaces, hyphens, and colons in displays
+    return re.sub(r"[^a-zA-Z0-9\-: ]", "", display.strip())
+
+
 def create_diagnostic_report_care_context(diagnostic_report: DiagnosticReport):
     return {
         "reference": f"v2::diagnostic_report::{diagnostic_report.external_id}",
-        "display": (f"Diagnostic Report {diagnostic_report.service_request.title}"),
+        "display": clean_care_context_display(
+            f"Diagnostic Report {diagnostic_report.service_request.title}"
+        ),
         "hi_type": HealthInformationType.DIAGNOSTIC_REPORT,
     }
 
@@ -280,7 +288,9 @@ def create_diagnostic_report_care_context(diagnostic_report: DiagnosticReport):
 def create_medication_request_care_context(medication_request: MedicationRequest):
     return {
         "reference": f"v2::prescription::{medication_request.created_date.date()}",
-        "display": f"Medication Prescribed on {medication_request.created_date.date()}",
+        "display": clean_care_context_display(
+            f"Medication Prescribed on {medication_request.created_date.date()}"
+        ),
         "hi_type": HealthInformationType.PRESCRIPTION,
     }
 
@@ -294,7 +304,9 @@ def create_encounter_care_context(encounter: Encounter):
 
     return {
         "reference": f"v2::encounter::{encounter.external_id}",
-        "display": f"Encounter on {encounter.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
+        "display": clean_care_context_display(
+            f"Encounter on {encounter.created_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
         "hi_type": HealthInformationType.DISCHARGE_SUMMARY
         if is_admission
         else HealthInformationType.OP_CONSULTATION,
@@ -304,7 +316,9 @@ def create_encounter_care_context(encounter: Encounter):
 def create_file_upload_care_context(file_upload: FileUpload):
     return {
         "reference": f"v2::file_upload::{file_upload.external_id}",
-        "display": f"File Uploaded on {file_upload.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
+        "display": clean_care_context_display(
+            f"File Uploaded on {file_upload.created_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
         "hi_type": HealthInformationType.RECORD_ARTIFACT,
     }
 
@@ -314,7 +328,9 @@ def create_questionnaire_response_care_context(
 ):
     return {
         "reference": f"v2::questionnaire_response::{questionnaire_response.external_id}",
-        "display": f"Observations Added on {questionnaire_response.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
+        "display": clean_care_context_display(
+            f"Observations Added on {questionnaire_response.created_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
         "hi_type": HealthInformationType.WELLNESS_RECORD,
     }
 
@@ -324,6 +340,8 @@ def create_invoice_care_context(invoice: Invoice):
 
     return {
         "reference": f"v2::invoice::{invoice.external_id}",
-        "display": f"{display_label} on {invoice.modified_date.strftime('%Y-%m-%d %H:%M:%S')}",
+        "display": clean_care_context_display(
+            f"{display_label} on {invoice.modified_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
         "hi_type": HealthInformationType.INVOICE,
     }
