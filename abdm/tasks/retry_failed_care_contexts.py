@@ -5,7 +5,7 @@ from django.db.models import Count, F, Q
 
 from abdm.models.abha_number import AbhaNumber
 from abdm.models.transaction import Transaction, TransactionStatus, TransactionType
-from abdm.service.helper import care_context_dict_from_reference_id
+from abdm.service.helper import care_context_dict_from_reference_id, ABDMAPIException
 from abdm.service.v3.gateway import GatewayService
 
 logger = logging.getLogger(__name__)
@@ -61,9 +61,12 @@ def process_care_context_batch(self, transaction_ids: list[int]):
         )
 
         care_contexts = []
+        representative_transaction = None
         for transaction in patients_transactions:
             if transaction.meta_data.get("type") != "hip_initiated_linking":
                 continue
+
+            representative_transaction = transaction
 
             for care_context_reference in transaction.meta_data.get(
                 "care_contexts", []
@@ -78,28 +81,34 @@ def process_care_context_batch(self, transaction_ids: list[int]):
             transaction.status = TransactionStatus.CANCELLED
             transaction.save()
 
-        if len(care_contexts) == 0:
+        if len(care_contexts) == 0 or representative_transaction is None:
             continue
 
         for i in range(0, len(care_contexts), CARE_CONTEXT_BATCH_SIZE):
             batch = care_contexts[i : i + CARE_CONTEXT_BATCH_SIZE]
             try:
-                logger.info(
-                    f"ABDM_DEBUG__RETRY_CARE_CONTEXT_LINKING :: Initiated Care Context Linking for {batch!s} {patient!s} {transaction.meta_data.get('hf_id')}"
-                )
-
                 GatewayService.link__carecontext(
                     {
                         "patient": patient,
                         "care_contexts": batch,
-                        "user": transaction.created_by,
-                        "hf_id": transaction.meta_data.get("hf_id"),
+                        "user": representative_transaction.created_by,
+                        "hf_id": transaction_query["hf_id"],
                     }
                 )
+            except ABDMAPIException as e:
+                logger.warning(
+                    "retry care context linking failed transaction_id=%s reference_id=%s detail=%s",
+                    representative_transaction.id,
+                    representative_transaction.reference_id,
+                    e.detail,
+                )
+                continue
             except Exception as e:
-                logger.exception(
-                    "Error while retrying care context linking for transaction %s with error %s",
-                    transaction.id,
-                    str(e),
+                logger.error(
+                    "retry care context linking failed transaction_id=%s reference_id=%s error_type=%s",
+                    representative_transaction.id,
+                    representative_transaction.reference_id,
+                    type(e).__name__,
+                    exc_info=True,
                 )
                 continue

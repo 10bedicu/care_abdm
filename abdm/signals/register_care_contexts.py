@@ -29,6 +29,42 @@ from care.emr.resources.invoice.spec import InvoiceStatusOptions
 logger = logging.getLogger(__name__)
 
 
+def _schedule_care_context_link(
+    resource_type: str, instance, patient, hf_id, care_contexts, user
+):
+    def link():
+        try:
+            GatewayService.link__carecontext(
+                {
+                    "patient": patient,
+                    "care_contexts": care_contexts,
+                    "user": user,
+                    "hf_id": hf_id,
+                }
+            )
+        except ABDMAPIException as e:
+            logger.warning(
+                "Failed to link care context for %s resource_id=%s patient_id=%s hf_id=%s detail=%s",
+                resource_type,
+                instance.external_id,
+                patient.external_id,
+                hf_id,
+                e.detail,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to link care context for %s resource_id=%s patient_id=%s hf_id=%s error_type=%s",
+                resource_type,
+                instance.external_id,
+                patient.external_id,
+                hf_id,
+                type(e).__name__,
+                exc_info=True,
+            )
+
+    transaction.on_commit(link)
+
+
 @receiver(post_save, sender=MedicationRequest)
 def create_care_context_on_medication_request_creation(
     sender, instance: MedicationRequest, created: bool, **kwargs
@@ -49,24 +85,14 @@ def create_care_context_on_medication_request_creation(
     ):
         return
 
-    try:
-        transaction.on_commit(
-            lambda: GatewayService.link__carecontext(
-                {
-                    "patient": patient,
-                    "care_contexts": [create_medication_request_care_context(instance)],
-                    "user": instance.created_by,
-                    "hf_id": hf_id,
-                }
-            )
-        )
-    except ABDMAPIException as e:
-        warning = f"Failed to link care context for medication request {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
-        logger.warning(warning)
-
-    except Exception as e:
-        warning = f"Failed to link care context for medication request {instance.external_id} with patient {patient.external_id}, {e!s}"
-        logger.exception(warning)
+    _schedule_care_context_link(
+        "medication request",
+        instance,
+        patient,
+        hf_id,
+        [create_medication_request_care_context(instance)],
+        instance.created_by,
+    )
 
 
 @receiver(post_save, sender=Encounter)
@@ -84,24 +110,14 @@ def create_care_context_on_encounter_creation(
     ):
         return
 
-    try:
-        transaction.on_commit(
-            lambda: GatewayService.link__carecontext(
-                {
-                    "patient": patient,
-                    "care_contexts": [create_encounter_care_context(instance)],
-                    "user": instance.created_by,
-                    "hf_id": hf_id,
-                }
-            )
-        )
-    except ABDMAPIException as e:
-        warning = f"Failed to link care context for encounter {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
-        logger.warning(warning)
-
-    except Exception as e:
-        warning = f"Failed to link care context for encounter {instance.external_id} with patient {patient.external_id}, {e!s}"
-        logger.exception(warning)
+    _schedule_care_context_link(
+        "encounter",
+        instance,
+        patient,
+        hf_id,
+        [create_encounter_care_context(instance)],
+        instance.created_by,
+    )
 
 
 @receiver(pre_save, sender=FileUpload)
@@ -128,24 +144,14 @@ def create_care_context_on_file_upload_creation(sender, instance: FileUpload, **
     if not patient or not hf_id or getattr(patient, "abha_number", None) is None:
         return
 
-    try:
-        transaction.on_commit(
-            lambda: GatewayService.link__carecontext(
-                {
-                    "patient": patient,
-                    "care_contexts": [create_file_upload_care_context(instance)],
-                    "user": instance.created_by,
-                    "hf_id": hf_id,
-                }
-            )
-        )
-    except ABDMAPIException as e:
-        warning = f"Failed to link care context for file upload {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
-        logger.warning(warning)
-
-    except Exception as e:
-        warning = f"Failed to link care context for file upload {instance.external_id} with patient {patient.external_id}, {e!s}"
-        logger.exception(warning)
+    _schedule_care_context_link(
+        "file upload",
+        instance,
+        patient,
+        hf_id,
+        [create_file_upload_care_context(instance)],
+        instance.created_by,
+    )
 
 
 @receiver(post_save, sender=QuestionnaireResponse)
@@ -177,23 +183,14 @@ def create_care_context_on_questionnaire_response_creation(
         if not has_coded_observation:
             return
 
-        try:
-            GatewayService.link__carecontext(
-                {
-                    "patient": patient,
-                    "care_contexts": [
-                        create_questionnaire_response_care_context(instance)
-                    ],
-                    "user": instance.created_by,
-                    "hf_id": hf_id,
-                }
-            )
-        except ABDMAPIException as e:
-            warning = f"Failed to link care context for questionnaire response {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
-            logger.warning(warning)
-        except Exception as e:
-            warning = f"Failed to link care context for questionnaire response {instance.external_id} with patient {patient.external_id}, {e!s}"
-            logger.exception(warning)
+        _schedule_care_context_link(
+            "questionnaire response",
+            instance,
+            patient,
+            hf_id,
+            [create_questionnaire_response_care_context(instance)],
+            instance.created_by,
+        )
 
     transaction.on_commit(link_if_has_coded_observations)
 
@@ -213,24 +210,14 @@ def create_care_context_on_diagnostic_report_creation(
     ):
         return
 
-    try:
-        transaction.on_commit(
-            lambda: GatewayService.link__carecontext(
-                {
-                    "patient": patient,
-                    "care_contexts": [create_diagnostic_report_care_context(instance)],
-                    "user": instance.created_by,
-                    "hf_id": hf_id,
-                }
-            )
-        )
-    except ABDMAPIException as e:
-        warning = f"Failed to link care context for diagnostic report {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
-        logger.warning(warning)
-
-    except Exception as e:
-        warning = f"Failed to link care context for diagnostic report {instance.external_id} with patient {patient.external_id}, {e!s}"
-        logger.exception(warning)
+    _schedule_care_context_link(
+        "diagnostic report",
+        instance,
+        patient,
+        hf_id,
+        [create_diagnostic_report_care_context(instance)],
+        instance.created_by,
+    )
 
 
 @receiver(pre_save, sender=Invoice)
@@ -253,21 +240,11 @@ def create_care_context_on_invoice_issue(sender, instance: Invoice, **kwargs):
     if not patient or not hf_id or getattr(patient, "abha_number", None) is None:
         return
 
-    try:
-        transaction.on_commit(
-            lambda: GatewayService.link__carecontext(
-                {
-                    "patient": patient,
-                    "care_contexts": [create_invoice_care_context(instance)],
-                    "user": instance.created_by,
-                    "hf_id": hf_id,
-                }
-            )
-        )
-    except ABDMAPIException as e:
-        warning = f"Failed to link care context for invoice {instance.external_id} with patient {patient.external_id}, {e.detail!s}"
-        logger.warning(warning)
-
-    except Exception as e:
-        warning = f"Failed to link care context for invoice {instance.external_id} with patient {patient.external_id}, {e!s}"
-        logger.exception(warning)
+    _schedule_care_context_link(
+        "invoice",
+        instance,
+        patient,
+        hf_id,
+        [create_invoice_care_context(instance)],
+        instance.created_by,
+    )

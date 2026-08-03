@@ -204,11 +204,11 @@ class HIUCallbackViewSet(GenericViewSet):
             serializer.is_valid(raise_exception=True)
         except Exception as exception:
             logger.warning(
-                f"Validation failed for request data: {request.data}, "
-                f"Path: {request.path}, Method: {request.method}, "
-                f"Error details: {exception!s}"
+                "Validation failed path=%s method=%s fields=%s",
+                request.path,
+                request.method,
+                list(getattr(serializer, "errors", {}).keys()),
             )
-
             raise exception
 
         return serializer.validated_data
@@ -401,8 +401,12 @@ class HIUCallbackViewSet(GenericViewSet):
             artefact.save()
 
         if "error" in validated_data:
+            error = validated_data.get("error") or {}
             logger.warning(
-                f"Consent Artefact: {validated_data.get('response').get('requestId')}, Error in Health Information Request: {validated_data.get('error')}"
+                "Health information request error request_id=%s code=%s message=%s",
+                validated_data.get("response", {}).get("requestId"),
+                error.get("code"),
+                error.get("message"),
             )
 
         return Response(status=status.HTTP_202_ACCEPTED)
