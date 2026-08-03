@@ -271,8 +271,8 @@ def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911
 
 
 def clean_care_context_display(display: str) -> str:
-    # ABDM allows only alphanumeric characters, spaces, hyphens, and colons in displays
-    return re.sub(r"[^a-zA-Z0-9\-: ]", "", display.strip())
+    # ABDM allows only alphanumeric characters, spaces, hyphens, colons, and dots in displays
+    return re.sub(r"[^a-zA-Z0-9\-: .]", "", display.strip())
 
 
 def create_diagnostic_report_care_context(diagnostic_report: DiagnosticReport):
