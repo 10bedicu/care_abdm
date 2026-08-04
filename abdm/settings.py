@@ -124,6 +124,14 @@ DEFAULTS = {
     "ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM": "https://care.ohc.network/abha_number",
     "ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY": "ABHA Number",
     "ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,
+    "ABDM_LINK_OTP_SMS_CONTENT": (
+        "Your OTP to link health records is {otp}. Valid for 5 minutes."
+    ),
+    "ABDM_LINK_OTP_SEND_WINDOW_SECONDS": 3600,
+    "ABDM_LINK_OTP_MAX_SENDS_PER_WINDOW": 5,
+    "ABDM_LINK_OTP_MAX_VERIFY_ATTEMPTS": 3,
+    "ABDM_LINK_OTP_MAX_FAILURES": 5,
+    "ABDM_LINK_OTP_LOCKOUT_SECONDS": 3600,
     "ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT": True,
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",

@@ -32,10 +32,21 @@ from abdm.models import (
     TransactionStatus,
     TransactionType,
 )
-from abdm.service.helper import uuid, validate_and_format_date
+from abdm.service.helper import ABDMAPIException, validate_and_format_date
 from abdm.service.v3.gateway import GatewayService
 from abdm.settings import plugin_settings as settings
 from abdm.tasks.patient_share import patient_share_on_share
+from abdm.utils.link_otp import (
+    LinkOtpDeliveryError,
+    LinkOtpLockContention,
+    LinkOtpSendRateLimited,
+    LinkOtpThrottled,
+    LinkOtpVerifyStatus,
+    finalize_link_otp_confirmation,
+    init_link_otp,
+    rollback_link_otp_after_gateway_init_failure,
+    verify_link_otp,
+)
 from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
 from abdm.utils.token import (
     get_or_create_scan_and_share_token,
@@ -319,28 +330,57 @@ class HIPCallbackViewSet(GenericViewSet):
             [],
         )
 
-        reference_id = uuid()
-        cache.set(
-            "abdm_user_initiated_linking__" + reference_id,
-            {
-                "reference_id": reference_id,
-                # TODO: generate OTP and send it to the patient
-                "otp": "000000",
-                "abha_address": validated_data.get("abhaAddress"),
-                "patient_id": validated_data.get("patient", [{}])[0].get(
-                    "referenceNumber"
-                ),
-                "care_contexts": care_contexts,
-            },
-        )
+        patient_id = validated_data.get("patient", [{}])[0].get("referenceNumber")
+        patient = Patient.objects.filter(external_id=patient_id).first()
 
-        GatewayService.user_initiated_linking__link__care_context__on_init(
-            {
-                "transaction_id": str(validated_data.get("transactionId")),
-                "request_id": request.headers.get("REQUEST-ID"),
-                "reference_id": reference_id,
-            }
-        )
+        if not patient or not patient.phone_number:
+            logger.warning(
+                f"Patient with ID: {patient_id} not found or has no phone number"
+            )
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            reference_id = init_link_otp(
+                patient_id=patient_id,
+                phone_number=patient.phone_number,
+                abha_address=validated_data.get("abhaAddress"),
+                care_contexts=care_contexts,
+            )
+        except LinkOtpThrottled:
+            return Response(
+                {"detail": "Too many failed attempts. Try again later."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        except LinkOtpSendRateLimited:
+            return Response(
+                {"detail": "Too many OTP requests. Try again later."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        except LinkOtpDeliveryError:
+            logger.exception(
+                f"Failed to deliver link OTP for patient ID: {patient_id}"
+            )
+            return Response(status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except LinkOtpLockContention:
+            return Response(
+                {"detail": "OTP request already in progress. Try again shortly."},
+                status=status.HTTP_423_LOCKED,
+            )
+
+        try:
+            GatewayService.user_initiated_linking__link__care_context__on_init(
+                {
+                    "transaction_id": str(validated_data.get("transactionId")),
+                    "request_id": request.headers.get("REQUEST-ID"),
+                    "reference_id": reference_id,
+                }
+            )
+        except ABDMAPIException:
+            rollback_link_otp_after_gateway_init_failure(patient_id, reference_id)
+            logger.exception(
+                f"Gateway on-init failed for link OTP reference ID: {reference_id}"
+            )
+            return Response(status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         return Response(status=status.HTTP_200_OK)
 
@@ -348,40 +388,66 @@ class HIPCallbackViewSet(GenericViewSet):
     def hip__link__care_context__confirm(self, request):
         validated_data = self.validate_request(request)
 
-        cached_data = cache.get(
-            "abdm_user_initiated_linking__"
-            + validated_data.get("confirmation").get("linkRefNumber")
-        )
+        link_ref_number = validated_data.get("confirmation").get("linkRefNumber")
+        token = validated_data.get("confirmation").get("token")
 
-        if not cached_data:
-            logger.warning(
-                f"Reference ID: {validated_data.get('confirmation').get('linkRefNumber')} not found in cache"
+        try:
+            result = verify_link_otp(
+                reference_id=link_ref_number,
+                token=token,
+            )
+        except LinkOtpLockContention:
+            return Response(
+                {"detail": "OTP verification already in progress. Try again shortly."},
+                status=status.HTTP_423_LOCKED,
             )
 
+        if result.status == LinkOtpVerifyStatus.NOT_FOUND:
+            logger.warning(f"Reference ID: {link_ref_number} not found in cache")
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        if cached_data.get("otp") != validated_data.get("confirmation").get("token"):
-            logger.warning(
-                f"Invalid OTP: {validated_data.get('confirmation').get('token')} for Reference ID: {validated_data.get('confirmation').get('linkRefNumber')}"
+        if result.status in (LinkOtpVerifyStatus.LOCKED_OUT, LinkOtpVerifyStatus.THROTTLED):
+            return Response(
+                {"detail": "Too many failed attempts. Try again later."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
+        if result.status == LinkOtpVerifyStatus.ATTEMPTS_EXCEEDED:
+            return Response(
+                {"detail": "Too many wrong attempts. Please request a new OTP."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if result.status == LinkOtpVerifyStatus.INVALID:
+            logger.warning(f"Invalid OTP for Reference ID: {link_ref_number}")
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        patient_id = cached_data.get("patient_id")
-        patient = Patient.objects.filter(external_id=patient_id).first()
+        patient = Patient.objects.filter(external_id=result.patient_id).first()
 
         if not patient:
-            logger.warning(f"Patient with ID: {patient_id} not found in the database")
-
+            logger.warning(
+                f"Patient with ID: {result.patient_id} not found in the database"
+            )
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        GatewayService.user_initiated_linking__link__care_context__on_confirm(
-            {
-                "request_id": request.headers.get("REQUEST-ID"),
-                "patient": patient,
-                "care_contexts": cached_data.get("care_contexts"),
-                "hf_id": request.headers.get("x-hip-id"),
-            }
+        try:
+            GatewayService.user_initiated_linking__link__care_context__on_confirm(
+                {
+                    "request_id": request.headers.get("REQUEST-ID"),
+                    "patient": patient,
+                    "care_contexts": result.care_contexts,
+                    "hf_id": request.headers.get("x-hip-id"),
+                }
+            )
+        except ABDMAPIException:
+            logger.exception(
+                f"Gateway on-confirm failed for Reference ID: {link_ref_number}"
+            )
+            return Response(status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        finalize_link_otp_confirmation(
+            reference_id=link_ref_number,
+            patient_id=result.patient_id,
         )
 
         return Response(status=status.HTTP_202_ACCEPTED)
