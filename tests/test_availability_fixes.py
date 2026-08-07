@@ -138,3 +138,32 @@ class ReferenceIdTests(TestCase):
 
             payload = gateway.link__carecontext.call_args.args[0]
             self.assertEqual(payload["reference_id"], "ref-1")
+
+
+class TaskSignatureCompatibilityTests(TestCase):
+    """A message enqueued by the previous revision must still bind.
+
+    Adding a required parameter to a celery task signature breaks every message
+    already on the queue at deploy time -- they fail with TypeError before the task
+    body runs, so no Transaction row is written and the nightly sweep cannot find
+    them. The work is lost silently.
+    """
+
+    def test_message_without_reference_id_still_runs(self):
+        with (
+            patch("abdm.tasks.link_care_context.Patient") as patient_model,
+            patch("abdm.tasks.link_care_context.GatewayService") as gateway,
+        ):
+            patient_model.objects.filter.return_value.first.return_value = object()
+
+            # exactly the kwargs the pre-deploy revision enqueued
+            link_care_context.run(
+                patient_external_id="0f1d2c3b-4a59-6879-8a9b-0c1d2e3f4a5b",
+                care_context=CARE_CONTEXT,
+                hf_id="IN1410000017_4",
+                user_id=None,
+                questionnaire_response_external_id=None,
+            )
+
+            payload = gateway.link__carecontext.call_args.args[0]
+            self.assertTrue(payload["reference_id"])
