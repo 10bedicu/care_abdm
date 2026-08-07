@@ -1,9 +1,11 @@
 import logging
 
+import requests
 from celery import shared_task
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 
+from abdm.service.helper import uuid
 from abdm.service.v3.gateway import GatewayService
 from abdm.tasks.process_inbound_callback import LOW_PRIORITY
 from care.emr.models.observation import Observation
@@ -13,6 +15,13 @@ from care.emr.models.questionnaire import QuestionnaireResponse
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
+
+# Only network-level failures are worth retrying here. An ABDM-side rejection is
+# deterministic -- retrying it four times just multiplies load on a gateway that is
+# already unhealthy. Those leave an INITIATED Transaction for the nightly
+# retry_failed_care_contexts sweep to pick up, which is fine: linking is not
+# time sensitive.
+RETRY_FOR = (requests.Timeout, requests.ConnectionError)
 
 
 def enqueue_link_care_context(
@@ -24,6 +33,10 @@ def enqueue_link_care_context(
 ):
     link_care_context.apply_async(
         kwargs={
+            # generated here, not per attempt, so the update_or_create in
+            # link__carecontext updates one Transaction instead of inserting a new
+            # row -- and a duplicate link request -- on every retry
+            "reference_id": uuid(),
             "patient_external_id": patient_external_id,
             "care_context": care_context,
             "hf_id": hf_id,
@@ -37,7 +50,7 @@ def enqueue_link_care_context(
 @shared_task(
     name="abdm.link_care_context",
     bind=True,
-    autoretry_for=(Exception,),
+    autoretry_for=RETRY_FOR,
     retry_backoff=True,
     retry_backoff_max=600,
     retry_jitter=True,
@@ -45,6 +58,7 @@ def enqueue_link_care_context(
 )
 def link_care_context(
     self,
+    reference_id: str,
     patient_external_id: str,
     care_context: dict,
     hf_id: str,
@@ -89,6 +103,7 @@ def link_care_context(
 
     GatewayService.link__carecontext(
         {
+            "reference_id": reference_id,
             "patient": patient,
             "care_contexts": [care_context],
             "user": user,
