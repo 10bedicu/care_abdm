@@ -1,7 +1,8 @@
 from decimal import Decimal
 from unittest.mock import patch
 
-from abdm.models import AbhaNumber, HealthFacility, PaymentOrder
+from abdm.models import AbhaNumber, HealthFacility, InboundCallback, PaymentOrder
+from abdm.models.inbound_callback import CallbackStatus
 from abdm.models.payment_order import PaymentOrderStatus
 from abdm.service.helper import uuid
 from model_bakery import baker
@@ -75,8 +76,8 @@ class ScanPayTestBase(CareAPITestBase):
 
 
 class TestShareOpenOrder(ScanPayTestBase):
-    @patch("abdm.api.v3.viewsets.scan_pay.scan_pay_on_share_open_order.delay")
-    def test_share_open_order_success(self, mock_task):
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
+    def test_share_open_order_success(self, mock_gateway):
         self.create_charge_item()
         request_id = uuid()
 
@@ -91,15 +92,19 @@ class TestShareOpenOrder(ScanPayTestBase):
         self.assertTrue(
             PaymentOrder.objects.filter(open_order_request_id=request_id).exists()
         )
-        payload = mock_task.call_args[0][0]
+
+        callback = InboundCallback.objects.get(request_id=request_id)
+        self.assertEqual(callback.status, CallbackStatus.COMPLETED)
+
+        payload = mock_gateway.call_args[0][0]
         self.assertEqual(payload["abha_address"], self.abha_number.health_id)
         self.assertEqual(len(payload["procedures"]), 1)
         self.assertEqual(
             payload["procedures"][0]["category"], "Laboratory and Diagnostics"
         )
 
-    @patch("abdm.api.v3.viewsets.scan_pay.scan_pay_on_share_open_order.delay")
-    def test_share_open_order_unknown_patient(self, mock_task):
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
+    def test_share_open_order_unknown_patient(self, mock_gateway):
         response = self.client.post(
             SHARE_OPEN_ORDER_URL,
             self.share_open_order_payload(abha_address="unknown@sbx"),
@@ -107,11 +112,11 @@ class TestShareOpenOrder(ScanPayTestBase):
             headers={"REQUEST-ID": uuid()},
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("error", mock_task.call_args[0][0])
+        self.assertEqual(response.status_code, 202)
+        self.assertIn("error", mock_gateway.call_args[0][0])
 
-    @patch("abdm.api.v3.viewsets.scan_pay.scan_pay_on_share_open_order.delay")
-    def test_share_open_order_no_open_orders(self, mock_task):
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
+    def test_share_open_order_no_open_orders(self, mock_gateway):
         response = self.client.post(
             SHARE_OPEN_ORDER_URL,
             self.share_open_order_payload(),
@@ -119,20 +124,44 @@ class TestShareOpenOrder(ScanPayTestBase):
             headers={"REQUEST-ID": uuid()},
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("error", mock_task.call_args[0][0])
+        self.assertEqual(response.status_code, 202)
+        self.assertIn("error", mock_gateway.call_args[0][0])
 
-    @patch("abdm.api.v3.viewsets.scan_pay.scan_pay_on_share_open_order.delay")
-    def test_share_open_order_unknown_facility(self, mock_task):
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
+    def test_share_open_order_unknown_facility(self, mock_gateway):
+        request_id = uuid()
+
         response = self.client.post(
             SHARE_OPEN_ORDER_URL,
             self.share_open_order_payload(hip_id="UNKNOWN_HIP"),
             format="json",
-            headers={"REQUEST-ID": uuid()},
+            headers={"REQUEST-ID": request_id},
         )
 
-        self.assertEqual(response.status_code, 404)
-        self.assertIn("error", mock_task.call_args[0][0])
+        self.assertEqual(response.status_code, 202)
+        self.assertIn("error", mock_gateway.call_args[0][0])
+
+        callback = InboundCallback.objects.get(request_id=request_id)
+        self.assertEqual(callback.status, CallbackStatus.FAILED)
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
+    def test_share_open_order_is_deduplicated_by_request_id(self, mock_gateway):
+        self.create_charge_item()
+        request_id = uuid()
+
+        for _ in range(2):
+            response = self.client.post(
+                SHARE_OPEN_ORDER_URL,
+                self.share_open_order_payload(),
+                format="json",
+                headers={"REQUEST-ID": request_id},
+            )
+            self.assertEqual(response.status_code, 202)
+
+        self.assertEqual(
+            InboundCallback.objects.filter(request_id=request_id).count(), 1
+        )
+        self.assertEqual(mock_gateway.call_count, 1)
 
 
 class TestSelection(ScanPayTestBase):
@@ -163,9 +192,9 @@ class TestSelection(ScanPayTestBase):
             ],
         }
 
-    @patch("abdm.api.v3.viewsets.scan_pay.create_scan_pay_payment_link")
-    @patch("abdm.api.v3.viewsets.scan_pay.scan_pay_on_selection.delay")
-    def test_selection_success(self, mock_task, mock_payment_link):
+    @patch("abdm.service.v3.callback_handlers.scan_pay.create_scan_pay_payment_link")
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    def test_selection_success(self, mock_gateway, mock_payment_link):
         mock_payment_link.return_value = {
             "id": "plink_test",
             "short_url": "https://rzp.io/test",
@@ -194,14 +223,14 @@ class TestSelection(ScanPayTestBase):
         self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
         self.assertEqual(invoice.total_gross, Decimal(100))
 
-        payload = mock_task.call_args[0][0]
+        payload = mock_gateway.call_args[0][0]
         self.assertEqual(
             payload["payment_bundle"]["payment_url"], "https://rzp.io/test"
         )
         self.assertEqual(payload["payment_bundle"]["amount"], 100.0)
 
-    @patch("abdm.api.v3.viewsets.scan_pay.scan_pay_on_selection.delay")
-    def test_selection_rejects_unavailable_items(self, mock_task):
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    def test_selection_rejects_unavailable_items(self, mock_gateway):
         order = self.create_order()
         charge_item = self.create_charge_item(
             status=ChargeItemStatusOptions.billed.value
@@ -214,11 +243,11 @@ class TestSelection(ScanPayTestBase):
             headers={"REQUEST-ID": uuid()},
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("error", mock_task.call_args[0][0])
+        self.assertEqual(response.status_code, 202)
+        self.assertIn("error", mock_gateway.call_args[0][0])
 
-    @patch("abdm.api.v3.viewsets.scan_pay.scan_pay_on_selection.delay")
-    def test_selection_unknown_order(self, mock_task):
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    def test_selection_unknown_order(self, mock_gateway):
         charge_item = self.create_charge_item()
         order = PaymentOrder(open_order_request_id=uuid())
 
@@ -229,8 +258,8 @@ class TestSelection(ScanPayTestBase):
             headers={"REQUEST-ID": uuid()},
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("error", mock_task.call_args[0][0])
+        self.assertEqual(response.status_code, 202)
+        self.assertIn("error", mock_gateway.call_args[0][0])
 
 
 class TestPaymentNotify(ScanPayTestBase):
@@ -318,8 +347,8 @@ class TestPaymentNotify(ScanPayTestBase):
 
 
 class TestOrderStatus(ScanPayTestBase):
-    @patch("abdm.api.v3.viewsets.scan_pay.scan_pay_on_order_status.delay")
-    def test_order_status_success(self, mock_task):
+    @patch("abdm.service.v3.gateway.GatewayService.patient__scan_pay_on_order_status")
+    def test_order_status_success(self, mock_gateway):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
@@ -342,11 +371,11 @@ class TestOrderStatus(ScanPayTestBase):
         )
 
         self.assertEqual(response.status_code, 202)
-        payload = mock_task.call_args[0][0]
+        payload = mock_gateway.call_args[0][0]
         self.assertEqual(payload["acknowledgement"]["status"], "PENDING")
 
-    @patch("abdm.api.v3.viewsets.scan_pay.scan_pay_on_order_status.delay")
-    def test_order_status_unknown_order(self, mock_task):
+    @patch("abdm.service.v3.gateway.GatewayService.patient__scan_pay_on_order_status")
+    def test_order_status_unknown_order(self, mock_gateway):
         response = self.client.post(
             ORDER_STATUS_URL,
             {
@@ -360,8 +389,8 @@ class TestOrderStatus(ScanPayTestBase):
             headers={"REQUEST-ID": uuid()},
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("error", mock_task.call_args[0][0])
+        self.assertEqual(response.status_code, 202)
+        self.assertIn("error", mock_gateway.call_args[0][0])
 
 
 class TestReceipt(ScanPayTestBase):

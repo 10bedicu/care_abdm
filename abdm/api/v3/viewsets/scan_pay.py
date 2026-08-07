@@ -1,7 +1,6 @@
 import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Q
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from drf_spectacular.utils import extend_schema
@@ -19,23 +18,15 @@ from abdm.api.v3.serializers.scan_pay import (
     PatientShareOpenOrderSerializer,
 )
 from abdm.authentication import ABDMAuthentication
-from abdm.models import AbhaNumber, HealthFacility, PaymentOrder
-from abdm.models.payment_order import PAYMENT_ORDER_PAID_STATUSES, PaymentOrderStatus
-from abdm.service.v3.scan_pay import (
-    build_procedures,
-    build_scan_pay_acknowledgement,
-    create_scan_pay_invoice,
-    create_scan_pay_payment_link,
-    get_open_charge_items,
-)
-from abdm.settings import plugin_settings as settings
+from abdm.models import CallbackType, PaymentOrder
+from abdm.models.payment_order import PAYMENT_ORDER_PAID_STATUSES
 from abdm.tasks.scan_pay import (
     scan_pay_on_order_status,
     scan_pay_on_selection,
     scan_pay_on_share_open_order,
 )
+from abdm.utils.callback import store_and_enqueue_callback
 from care.emr.models.charge_item import ChargeItem
-from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +76,7 @@ class ScanPayCallbackViewSet(GenericViewSet):
             )
 
         try:
-            validated_data = self.validate_request(request)
+            self.validate_request(request)
         except Exception:
             scan_pay_on_share_open_order.delay(
                 {
@@ -98,90 +89,12 @@ class ScanPayCallbackViewSet(GenericViewSet):
             )
             return Response(status=status.HTTP_200_OK)
 
-        hip_id = validated_data.get("metadata").get("hipId")
-        patient_data = validated_data.get("profile").get("patient")
-        abha_address = patient_data.get("abhaAddress")
-
-        health_facility = HealthFacility.objects.filter(hf_id=hip_id).first()
-        if not health_facility:
-            logger.warning(
-                f"Health Facility with ID: {hip_id} not found in the database"
-            )
-            scan_pay_on_share_open_order.delay(
-                {
-                    "abha_address": abha_address,
-                    "error": {
-                        "message": "HIP is not available",
-                        "code": "ABDM-9999",
-                    },
-                    "request_id": request_id,
-                }
-            )
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        abha_number = (
-            AbhaNumber.objects.filter(
-                Q(health_id=abha_address)
-                | (
-                    Q(abha_number=patient_data.get("abhaNumber"))
-                    & Q(abha_number__isnull=False)
-                )
-            )
-            .select_related("patient")
-            .first()
+        return store_and_enqueue_callback(
+            request, CallbackType.PATIENT_SHARE_OPEN_ORDER
         )
-
-        if not abha_number or not abha_number.patient_id:
-            scan_pay_on_share_open_order.delay(
-                {
-                    "abha_address": abha_address,
-                    "error": {
-                        "message": "Patient not found for the given ABHA",
-                        "code": "ABDM-9999",
-                    },
-                    "request_id": request_id,
-                }
-            )
-            return Response(status=status.HTTP_200_OK)
-
-        charge_items = get_open_charge_items(
-            abha_number.patient, health_facility.facility
-        )
-
-        if not charge_items:
-            scan_pay_on_share_open_order.delay(
-                {
-                    "abha_address": abha_number.health_id,
-                    "error": {
-                        "message": "No open orders found for the patient",
-                        "code": "ABDM-9999",
-                    },
-                    "request_id": request_id,
-                }
-            )
-            return Response(status=status.HTTP_200_OK)
-
-        PaymentOrder.objects.update_or_create(
-            open_order_request_id=request_id,
-            defaults={
-                "abha_number": abha_number,
-                "health_facility": health_facility,
-            },
-        )
-
-        scan_pay_on_share_open_order.delay(
-            {
-                "abha_address": abha_number.health_id,
-                "patient_uid": str(abha_number.patient.external_id),
-                "procedures": build_procedures(charge_items),
-                "request_id": request_id,
-            }
-        )
-
-        return Response(status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=["POST"], url_path="patient/selection")
-    def patient__selection(self, request):  # noqa: PLR0911
+    def patient__selection(self, request):
         request_id = request.headers.get("REQUEST-ID")
 
         if not request_id:
@@ -191,7 +104,7 @@ class ScanPayCallbackViewSet(GenericViewSet):
             )
 
         try:
-            validated_data = self.validate_request(request)
+            self.validate_request(request)
         except Exception:
             scan_pay_on_selection.delay(
                 {
@@ -204,123 +117,18 @@ class ScanPayCallbackViewSet(GenericViewSet):
             )
             return Response(status=status.HTTP_200_OK)
 
-        open_order_request_id = str(validated_data.get("openOrderRequestId"))
-        abha_address = validated_data.get("abhaAddress")
-
-        def error_response(message):
-            scan_pay_on_selection.delay(
-                {
-                    "open_order_request_id": open_order_request_id,
-                    "abha_address": abha_address,
-                    "error": {"message": message, "code": "ABDM-9999"},
-                    "request_id": request_id,
-                }
-            )
-            return Response(status=status.HTTP_200_OK)
-
-        order = (
-            PaymentOrder.objects.filter(open_order_request_id=open_order_request_id)
-            .select_related("abha_number__patient", "health_facility__facility")
-            .first()
-        )
-
-        if not order:
-            return error_response("Open order not found")
-
-        if order.abha_number.health_id != abha_address:
-            return error_response("Open order does not belong to the given ABHA")
-
-        if order.invoice_id:
-            return error_response("Payment is already initiated for this order")
-
-        service_ids = [
-            service.get("serviceId")
-            for procedure in validated_data.get("procedures")
-            for service in procedure.get("services")
-        ]
-
-        if not service_ids:
-            return error_response("No services selected")
-
-        charge_items = list(
-            ChargeItem.objects.filter(
-                external_id__in=service_ids,
-                patient=order.abha_number.patient,
-                facility=order.health_facility.facility,
-                status=ChargeItemStatusOptions.billable.value,
-            ).select_related("account")
-        )
-
-        if len(charge_items) != len(set(service_ids)):
-            return error_response(
-                "One or more selected services are no longer available for payment"
-            )
-
-        if len({item.account_id for item in charge_items}) > 1:
-            return error_response("Selected services must belong to a single account")
-
-        try:
-            invoice = create_scan_pay_invoice(
-                charge_items,
-                charge_items[0].account,
-                order.health_facility.facility,
-                order.abha_number.patient,
-                abha_address,
-            )
-        except Exception:
-            logger.exception(
-                f"Failed to create invoice for scan and pay order {open_order_request_id}"
-            )
-            return error_response("Failed to create payment order")
-
-        try:
-            payment_link = create_scan_pay_payment_link(invoice)
-        except Exception:
-            logger.exception(
-                f"Failed to create payment link for scan and pay order {open_order_request_id}"
-            )
-            return error_response("Failed to create payment link")
-
-        order.invoice = invoice
-        order.order_number = invoice.number or str(invoice.external_id)
-        order.payment_link_id = payment_link.get("id")
-        order.status = PaymentOrderStatus.PAYMENT_INITIATED
-        order.save(
-            update_fields=["invoice", "order_number", "payment_link_id", "status"]
-        )
-
-        scan_pay_on_selection.delay(
-            {
-                "open_order_request_id": open_order_request_id,
-                "abha_address": abha_address,
-                "procedures": build_procedures(charge_items),
-                "payment_bundle": {
-                    "payment_mode": "GATEWAY",
-                    "payment_url": payment_link.get("short_url"),
-                    "order_number": order.order_number,
-                    "amount": float(invoice.total_gross),
-                    "merchant_id": settings.ABDM_SCAN_AND_PAY_MERCHANT_ID,
-                    "description": invoice.title,
-                },
-                "request_id": request_id,
-            }
-        )
-
-        return Response(status=status.HTTP_202_ACCEPTED)
+        return store_and_enqueue_callback(request, CallbackType.PATIENT_SELECTION)
 
     @action(detail=False, methods=["POST"], url_path="patient/scan-pay/on-notify")
     def patient__scan_pay__on_notify(self, request):
         try:
-            validated_data = self.validate_request(request)
+            self.validate_request(request)
         except Exception:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        acknowledgement = validated_data.get("acknowledgement") or {}
-        logger.info(
-            f"Scan and pay notify acknowledged by PHR for order {acknowledgement.get('openOrderRequestId')}"
+        return store_and_enqueue_callback(
+            request, CallbackType.PATIENT_SCAN_PAY_ON_NOTIFY
         )
-
-        return Response(status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=["POST"], url_path="patient/scan-pay/order-status")
     def patient__scan_pay__order_status(self, request):
@@ -333,7 +141,7 @@ class ScanPayCallbackViewSet(GenericViewSet):
             )
 
         try:
-            validated_data = self.validate_request(request)
+            self.validate_request(request)
         except Exception:
             scan_pay_on_order_status.delay(
                 {
@@ -346,35 +154,9 @@ class ScanPayCallbackViewSet(GenericViewSet):
             )
             return Response(status=status.HTTP_200_OK)
 
-        query_status = validated_data.get("queryStatus")
-        order = (
-            PaymentOrder.objects.filter(
-                open_order_request_id=str(query_status.get("openOrderRequestId"))
-            )
-            .select_related("abha_number")
-            .first()
+        return store_and_enqueue_callback(
+            request, CallbackType.PATIENT_SCAN_PAY_ORDER_STATUS
         )
-
-        if not order or (
-            order.order_number
-            and order.order_number != query_status.get("orderNumber")
-        ):
-            scan_pay_on_order_status.delay(
-                {
-                    "error": {"message": "Order not found", "code": "ABDM-9999"},
-                    "request_id": request_id,
-                }
-            )
-            return Response(status=status.HTTP_200_OK)
-
-        scan_pay_on_order_status.delay(
-            {
-                "acknowledgement": build_scan_pay_acknowledgement(order),
-                "request_id": request_id,
-            }
-        )
-
-        return Response(status=status.HTTP_202_ACCEPTED)
 
 
 @extend_schema(tags=["ABDM: Scan and Pay"])

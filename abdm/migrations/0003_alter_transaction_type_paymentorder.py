@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('abdm', '0001_initial_squashed'),
+        ('abdm', '0002_inboundcallback'),
         ('emr', '0080_alter_activitydefinition_category_and_more'),
     ]
 
@@ -17,6 +17,11 @@ class Migration(migrations.Migration):
             model_name='transaction',
             name='type',
             field=models.SmallIntegerField(choices=[(1, 'Create Or Link Abha Number'), (2, 'Create Abha Address'), (3, 'Scan And Share'), (4, 'Link Care Context'), (5, 'Exchange Data'), (6, 'Access Data'), (7, 'Scan And Pay')]),
+        ),
+        migrations.AlterField(
+            model_name='inboundcallback',
+            name='callback_type',
+            field=models.CharField(choices=[('token__on_generate_token', 'hip/token/on-generate-token'), ('link__on_carecontext', 'link/on_carecontext'), ('patient__care_context__discover', 'hip/patient/care-context/discover'), ('link__care_context__init', 'hip/link/care-context/init'), ('link__care_context__confirm', 'hip/link/care-context/confirm'), ('consent__request__hip__notify', 'consent/request/hip/notify'), ('health_information__request', 'hip/health-information/request'), ('patient__share', 'hip/patient/share'), ('consent__request__on_init', 'hiu/consent/request/on-init'), ('consent__request__on_status', 'hiu/consent/request/on-status'), ('consent__request__notify', 'hiu/consent/request/notify'), ('consent__on_fetch', 'hiu/consent/on-fetch'), ('health_information__on_request', 'hiu/health-information/on-request'), ('health_information__transfer', 'hiu/health-information/transfer'), ('patient__share__open_order', 'patient/share/open-order'), ('patient__selection', 'patient/selection'), ('patient__scan_pay__on_notify', 'patient/scan-pay/on-notify'), ('patient__scan_pay__order_status', 'patient/scan-pay/order-status')], db_index=True, max_length=64),
         ),
         migrations.CreateModel(
             name='PaymentOrder',
