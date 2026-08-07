@@ -4,6 +4,7 @@ from datetime import datetime
 
 import jwt
 import requests
+from django.core.cache import cache
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken
 
@@ -13,18 +14,49 @@ from care.users.models import User
 
 logger = logging.getLogger(__name__)
 
+JWK_CACHE_KEY_PREFIX = "abdm_gateway_jwk"
+JWK_CACHE_TTL = 60 * 60 * 24  # ABDM rotates its signing key rarely
+
 
 class ABDMAuthentication(JWTAuthentication):
-    def open_id_authenticate(self, url, token):
-        public_key = requests.get(
+    def gateway_jwk(self, url, *, use_cache=True):
+        """Fetch the gateway's signing key, cached.
+
+        This runs on every inbound callback. Uncached and without a timeout it was
+        a blocking call to ABDM in front of every callback endpoint -- so a slow or
+        unreachable gateway held a worker open indefinitely, before the view could
+        store the callback and hand it to celery.
+        """
+        cache_key = f"{JWK_CACHE_KEY_PREFIX}__{url}"
+
+        if use_cache:
+            jwk = cache.get(cache_key)
+            if jwk:
+                return jwk
+
+        response = requests.get(
             url,
             headers={
                 "REQUEST-ID": uuid(),
                 "TIMESTAMP": timestamp(),
                 "X-CM-ID": cm_id(),
             },
+            timeout=settings.ABDM_REQUEST_TIMEOUT,
         )
-        jwk = public_key.json()["keys"][0]
+        response.raise_for_status()
+        jwk = response.json()["keys"][0]
+        cache.set(cache_key, jwk, JWK_CACHE_TTL)
+        return jwk
+
+    def open_id_authenticate(self, url, token):
+        try:
+            return self.decode(token, self.gateway_jwk(url))
+        except jwt.InvalidTokenError:
+            # a rotated key would otherwise fail every callback until the TTL expires
+            logger.info("ABDM token failed against cached JWK, refetching")
+            return self.decode(token, self.gateway_jwk(url, use_cache=False))
+
+    def decode(self, token, jwk):
         public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
         return jwt.decode(
             token, key=public_key, audience="account", algorithms=["RS256"]

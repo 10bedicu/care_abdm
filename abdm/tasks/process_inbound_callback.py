@@ -1,5 +1,6 @@
 import logging
 
+import requests
 from celery import shared_task
 
 from abdm.models import CallbackStatus, CallbackType, InboundCallback
@@ -8,6 +9,12 @@ from care.utils.lock import ObjectLocked
 logger = logging.getLogger(__name__)
 
 LOCK_RETRY_COUNTDOWN = 2
+
+# Retry only what a later attempt could plausibly fix: lock contention and network
+# failures reaching ABDM. A payload ABDM will always reject, or a bug in a handler,
+# is recorded on the InboundCallback row for replay instead of being retried four
+# times against an already-degraded gateway.
+RETRY_FOR = (ObjectLocked, requests.Timeout, requests.ConnectionError)
 
 # redis broker priorities are inverted: 0 is consumed first (steps 0/3/6/9)
 HIGH_PRIORITY = 0
@@ -93,7 +100,7 @@ def enqueue_inbound_callback(callback: InboundCallback):
 @shared_task(
     bind=True,
     name="abdm.process_inbound_callback",
-    autoretry_for=(Exception,),
+    autoretry_for=RETRY_FOR,
     retry_backoff=True,
     retry_backoff_max=600,
     retry_jitter=True,
@@ -106,9 +113,7 @@ def process_inbound_callback(self, callback_id: int):
         return
 
     if callback.status == CallbackStatus.COMPLETED:
-        logger.info(
-            "ABDM inbound callback %s already completed; skipping", callback_id
-        )
+        logger.info("ABDM inbound callback %s already completed; skipping", callback_id)
         return
 
     callback.mark_processing()
