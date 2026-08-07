@@ -34,7 +34,9 @@ def retry_failed_care_contexts():
         process_care_context_batch.delay(batch_ids)
 
 
-@shared_task(bind=True, queue="care_context_queue")
+# No queue= here: the worker (scripts/celery_worker.sh) starts without -Q, so it
+# consumes only the default `celery` queue. A named queue silently discards the work.
+@shared_task(bind=True)
 def process_care_context_batch(self, transaction_ids: list[int]):
     filtered_transactions = Transaction.objects.filter(id__in=transaction_ids)
 
