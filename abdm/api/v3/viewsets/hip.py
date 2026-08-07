@@ -1,11 +1,5 @@
 import logging
-from datetime import datetime
-from functools import reduce
 
-from django.contrib.postgres.search import TrigramSimilarity
-from django.core.cache import cache
-from django.db import transaction
-from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
@@ -24,34 +18,12 @@ from abdm.api.v3.serializers.hip import (
     LinkOnCarecontextSerializer,
 )
 from abdm.authentication import ABDMAuthentication
-from abdm.models import (
-    AbhaNumber,
-    ConsentArtefact,
-    HealthFacility,
-    Transaction,
-    TransactionStatus,
-    TransactionType,
-)
-from abdm.service.helper import uuid, validate_and_format_date
-from abdm.service.v3.gateway import GatewayService
-from abdm.settings import plugin_settings as settings
+from abdm.models import CallbackType
 from abdm.tasks.patient_share import patient_share_on_share
-from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
-from abdm.utils.token import (
-    get_or_create_scan_and_share_token,
-    get_scan_and_share_token_by_token_number,
-)
-from abdm.utils.user import get_or_create_abdm_user
-from care.emr.locks.billing import PatientCreateLock
-from care.emr.models.organization import Organization
-from care.emr.models.patient import Patient
-from care.emr.resources.organization.spec import OrganizationTypeChoices
-from care.emr.resources.patient.spec import GenderChoices, PatientRetrieveSpec
-from care.emr.resources.patient_identifier.default_expression_evaluator import (
-    evaluate_patient_instance_default_values,
-)
+from abdm.utils.callback import store_and_enqueue_callback
+from abdm.utils.token import get_scan_and_share_token_by_token_number
+from care.emr.resources.patient.spec import PatientRetrieveSpec
 from care.facility.models.facility import Facility
-from care.utils.lock import ObjectLocked
 
 logger = logging.getLogger(__name__)
 
@@ -129,17 +101,6 @@ class HIPCallbackViewSet(GenericViewSet):
         "hip__patient__share": HipPatientShareSerializer,
     }
 
-    def get_patient_by_abha_id(self, abha_id: str):
-        patient = Patient.objects.filter(
-            Q(abha_number__abha_number=abha_id) | Q(abha_number__health_id=abha_id)
-        ).first()
-
-        if not patient and "@" in abha_id:
-            # TODO: get abha number using gateway api and search patient
-            pass
-
-        return patient
-
     def get_serializer_class(self):
         if self.action in self.serializer_action_classes:
             return self.serializer_action_classes[self.action]
@@ -164,353 +125,64 @@ class HIPCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hip/token/on-generate-token")
     def hip__token__on_generate_token(self, request):
-        logger.info(
-            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Request for {request.data!s} {request.headers!s}"
+        self.validate_request(request)
+
+        return store_and_enqueue_callback(
+            request, CallbackType.TOKEN_ON_GENERATE_TOKEN
         )
-
-        validated_data = self.validate_request(request)
-
-        logger.info(
-            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Validated data for {validated_data}"
-        )
-
-        hf_id = request.headers.get("X-HIP-ID")
-        health_id = validated_data.get("abhaAddress")
-
-        abha_number = AbhaNumber.objects.filter(health_id=health_id).first()
-
-        if not abha_number:
-            logger.warning(
-                f"ON_GENERATE_TOKEN :: {health_id} not found in the database"
-            )
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        cache.set(
-            f"abdm_link_token__{hf_id}__{health_id}",
-            validated_data.get("linkToken"),
-            timeout=60 * 30,
-        )
-
-        link_care_context_request_cache_keys = cache.keys(
-            f"abdm_link_care_context__{hf_id}__{health_id}__*"
-        )
-
-        logger.info(
-            f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Link Care Context Request Cache Keys for {link_care_context_request_cache_keys}"
-        )
-
-        for request_cache_key in link_care_context_request_cache_keys:
-            cached_data = cache.get(request_cache_key)
-
-            if cached_data.get("purpose") == "LINK_CARECONTEXT":
-                logger.info(
-                    f"ABDM_DEBUG__HIP_TOKEN_ON_GENERATE_TOKEN :: Initiated Care Context Linking for {cached_data.get('reference_id')} {cached_data.get('patient')} {cached_data.get('care_contexts')} {cached_data.get('hf_id')}"
-                )
-
-                GatewayService.link__carecontext(
-                    {
-                        "reference_id": cached_data.get("reference_id"),
-                        "patient": abha_number.patient,
-                        "care_contexts": cached_data.get("care_contexts", []),
-                        "user": request.user,
-                        "hf_id": cached_data.get("hf_id"),
-                    }
-                )
-
-                cache.delete(request_cache_key)
-
-        return Response(status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=["POST"], url_path="link/on_carecontext")
     def link__on_carecontext(self, request):
-        logger.info(
-            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Request for {request.data!s} {request.headers!s}"
-        )
+        self.validate_request(request)
 
-        data = self.validate_request(request)
-        request_id = data.get("response", {}).get("requestId")
-
-        logger.info(f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Validated data for {data}")
-
-        Transaction.objects.filter(reference_id=request_id).update(
-            status=TransactionStatus.COMPLETED
-        )
-
-        logger.info(
-            f"ABDM_DEBUG__LINK_ON_CARECONTEXT :: Transaction status updated for {request_id} to {TransactionStatus.COMPLETED.label}"
-        )
-
-        return Response(status=status.HTTP_202_ACCEPTED)
+        return store_and_enqueue_callback(request, CallbackType.LINK_ON_CARECONTEXT)
 
     @action(
         detail=False, methods=["POST"], url_path="hip/patient/care-context/discover"
     )
     def hip__patient__care_context__discover(self, request):
-        validated_data = self.validate_request(request)
+        self.validate_request(request)
 
-        patient_data = validated_data.get("patient", {})
-        identifiers = [
-            *(patient_data.get("verifiedIdentifiers", []) or []),
-            *(patient_data.get("unverifiedIdentifiers", []) or []),
-        ]
-
-        health_id_number = next(
-            filter(lambda x: x.get("type") == "ABHA_NUMBER", identifiers), {}
-        ).get("value")
-        patient = Patient.objects.filter(
-            Q(abha_number__abha_number=health_id_number)
-            | Q(abha_number__health_id=patient_data.get("id"))
-        ).first()
-        matched_by = "ABHA_NUMBER"
-
-        if not patient:
-            mobile = next(
-                filter(lambda x: x.get("type") == "MOBILE", identifiers), {}
-            ).get("value")
-            patient = (
-                Patient.objects.annotate(
-                    similarity=TrigramSimilarity("name", patient_data.get("name"))
-                )
-                .filter(
-                    Q(phone_number=mobile) | Q(phone_number="+91" + mobile),
-                    Q(
-                        date_of_birth__year__gte=patient_data.get("yearOfBirth") - 5,
-                        date_of_birth__year__lte=patient_data.get("yearOfBirth") + 5,
-                    )
-                    | Q(year_of_birth__gte=patient_data.get("yearOfBirth") - 5),
-                    year_of_birth__lte=patient_data.get("yearOfBirth") + 5,
-                    gender={"M": 1, "F": 2, "O": 3}.get(patient_data.get("gender"), 3),
-                    similarity__gt=0.3,
-                )
-                .order_by("-similarity")
-                .first()
-            )
-            matched_by = "MOBILE"
-
-        if not patient:
-            # TODO: handle MR matching
-            pass
-
-        GatewayService.user_initiated_linking__patient__care_context__on_discover(
-            {
-                "transaction_id": str(validated_data.get("transactionId")),
-                "request_id": request.headers.get("REQUEST-ID"),
-                "patient": patient,
-                "matched_by": [matched_by],
-                "hf_id": request.headers.get("x-hip-id"),
-            }
+        return store_and_enqueue_callback(
+            request, CallbackType.PATIENT_CARE_CONTEXT_DISCOVER
         )
-
-        return Response(status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["POST"], url_path="hip/link/care-context/init")
     def hip__link__care_context__init(self, request):
-        validated_data = self.validate_request(request)
-        care_contexts = reduce(
-            lambda acc, patient: (
-                acc
-                + [
-                    context.get("referenceNumber")
-                    for context in patient.get("careContexts", [])
-                ]
-            ),
-            validated_data.get("patient", []),
-            [],
-        )
+        self.validate_request(request)
 
-        reference_id = uuid()
-        cache.set(
-            "abdm_user_initiated_linking__" + reference_id,
-            {
-                "reference_id": reference_id,
-                # TODO: generate OTP and send it to the patient
-                "otp": "000000",
-                "abha_address": validated_data.get("abhaAddress"),
-                "patient_id": validated_data.get("patient", [{}])[0].get(
-                    "referenceNumber"
-                ),
-                "care_contexts": care_contexts,
-            },
+        return store_and_enqueue_callback(
+            request, CallbackType.LINK_CARE_CONTEXT_INIT
         )
-
-        GatewayService.user_initiated_linking__link__care_context__on_init(
-            {
-                "transaction_id": str(validated_data.get("transactionId")),
-                "request_id": request.headers.get("REQUEST-ID"),
-                "reference_id": reference_id,
-            }
-        )
-
-        return Response(status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["POST"], url_path="hip/link/care-context/confirm")
     def hip__link__care_context__confirm(self, request):
-        validated_data = self.validate_request(request)
+        self.validate_request(request)
 
-        cached_data = cache.get(
-            "abdm_user_initiated_linking__"
-            + validated_data.get("confirmation").get("linkRefNumber")
+        return store_and_enqueue_callback(
+            request, CallbackType.LINK_CARE_CONTEXT_CONFIRM
         )
-
-        if not cached_data:
-            logger.warning(
-                f"Reference ID: {validated_data.get('confirmation').get('linkRefNumber')} not found in cache"
-            )
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        if cached_data.get("otp") != validated_data.get("confirmation").get("token"):
-            logger.warning(
-                f"Invalid OTP: {validated_data.get('confirmation').get('token')} for Reference ID: {validated_data.get('confirmation').get('linkRefNumber')}"
-            )
-
-            return Response(status=status.HTTP_400_BAD_REQUEST)
-
-        patient_id = cached_data.get("patient_id")
-        patient = Patient.objects.filter(external_id=patient_id).first()
-
-        if not patient:
-            logger.warning(f"Patient with ID: {patient_id} not found in the database")
-
-            return Response(status=status.HTTP_400_BAD_REQUEST)
-
-        GatewayService.user_initiated_linking__link__care_context__on_confirm(
-            {
-                "request_id": request.headers.get("REQUEST-ID"),
-                "patient": patient,
-                "care_contexts": cached_data.get("care_contexts"),
-                "hf_id": request.headers.get("x-hip-id"),
-            }
-        )
-
-        return Response(status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=["POST"], url_path="consent/request/hip/notify")
     def consent__request__hip__notify(self, request):
-        # TODO: handle the case where hip/notify is called before hip/on-init
+        self.validate_request(request)
 
-        validated_data = self.validate_request(request)
-
-        notification = validated_data.get("notification")
-        consent_detail = notification.get("consentDetail")
-        permission = consent_detail.get("permission")
-        frequency = permission.get("frequency")
-
-        patient = self.get_patient_by_abha_id(consent_detail.get("patient").get("id"))
-
-        if not patient:
-            logger.warning(
-                f"Patient with ABHA ID: {consent_detail.get('patient').get('id')} not found in the database"
-            )
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        ConsentArtefact.objects.update_or_create(
-            consent_id=notification.get("consentId"),
-            defaults={
-                "patient_abha": patient.abha_number,
-                "care_contexts": consent_detail.get("careContexts"),
-                "status": notification.get("status"),
-                "purpose": consent_detail.get("purpose").get("code"),
-                "hi_types": consent_detail.get("hiTypes"),
-                "hip": consent_detail.get("hip").get("id"),
-                "cm": consent_detail.get("consentManager").get("id"),
-                "requester": request.user,
-                "access_mode": permission.get("accessMode"),
-                "from_time": permission.get("dateRange").get("fromTime"),
-                "to_time": permission.get("dateRange").get("toTime"),
-                "expiry": permission.get("dataEraseAt"),
-                "frequency_unit": frequency.get("unit"),
-                "frequency_value": frequency.get("value"),
-                "frequency_repeats": frequency.get("repeats"),
-                "signature": notification.get("signature"),
-            },
+        return store_and_enqueue_callback(
+            request, CallbackType.CONSENT_REQUEST_HIP_NOTIFY
         )
-
-        GatewayService.consent__request__hip__on_notify(
-            {
-                "consent_id": str(notification.get("consentId")),
-                "request_id": request.headers.get("REQUEST-ID"),
-            }
-        )
-
-        return Response(status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=["POST"], url_path="hip/health-information/request")
     def hip__health_information__request(self, request):
-        validated_data = self.validate_request(request)
+        self.validate_request(request)
 
-        hi_request = validated_data.get("hiRequest")
-        key_material = hi_request.get("keyMaterial")
-
-        consent = ConsentArtefact.objects.filter(
-            consent_id=hi_request.get("consent").get("id")
-        ).first()
-
-        if not consent:
-            logger.warning(
-                f"Consent with ID: {hi_request.get('consent').get('id')} not found in the database"
-            )
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        GatewayService.data_flow__health_information__hip__on_request(
-            {
-                "request_id": request.headers.get("REQUEST-ID"),
-                "transaction_id": str(validated_data.get("transactionId")),
-            }
+        return store_and_enqueue_callback(
+            request, CallbackType.HEALTH_INFORMATION_REQUEST
         )
-
-        try:
-            GatewayService.data_flow__health_information__transfer(
-                {
-                    "transaction_id": str(validated_data.get("transactionId")),
-                    "consent": consent,
-                    "url": hi_request.get("dataPushUrl"),
-                    "key_material__crypto_algorithm": key_material.get("cryptoAlg"),
-                    "key_material__curve": key_material.get("curve"),
-                    "key_material__public_key": key_material.get("dhPublicKey").get(
-                        "keyValue"
-                    ),
-                    "key_material__nonce": key_material.get("nonce"),
-                }
-            )
-
-            GatewayService.data_flow__health_information__notify(
-                {
-                    "consent": consent,
-                    "consent_id": str(consent.consent_id),
-                    "transaction_id": str(validated_data.get("transactionId")),
-                    "notifier__type": "HIP",
-                    "notifier__id": request.headers.get("X-HIP-ID"),
-                    "status": "TRANSFERRED",
-                    "hip_id": request.headers.get("X-HIP-ID"),
-                }
-            )
-        except Exception as exception:
-            logger.error(
-                f"Error occurred while transferring health information: {exception!s}"
-            )
-
-            GatewayService.data_flow__health_information__notify(
-                {
-                    "consent": consent,
-                    "consent_id": str(consent.consent_id),
-                    "transaction_id": str(validated_data.get("transactionId")),
-                    "notifier__type": "HIP",
-                    "notifier__id": request.headers.get("X-HIP-ID"),
-                    "status": "FAILED",
-                    "hip_id": request.headers.get("X-HIP-ID"),
-                }
-            )
-
-        return Response(status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=["POST"], url_path="hip/patient/share")
     def hip__patient__share(self, request):
         try:
-            validated_data = self.validate_request(request)
+            self.validate_request(request)
         except Exception:
             patient_share_on_share.delay(
                 {
@@ -524,181 +196,4 @@ class HIPCallbackViewSet(GenericViewSet):
 
             return Response(status=status.HTTP_200_OK)
 
-        hip_id = validated_data.get("metaData").get("hipId")
-        health_facility = HealthFacility.objects.filter(hf_id=hip_id).first()
-
-        if not health_facility:
-            logger.warning(
-                f"Health Facility with ID: {hip_id} not found in the database"
-            )
-
-            patient_share_on_share.delay(
-                {
-                    "error": {
-                        "message": "HIP is not available",
-                        "code": "ABDM-9999",
-                    },
-                    "request_id": request.headers.get("REQUEST-ID"),
-                }
-            )
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        patient_data = validated_data.get("profile").get("patient")
-        abha_number = AbhaNumber.objects.filter(
-            Q(health_id=patient_data.get("abhaAddress"))
-            | (
-                Q(abha_number=patient_data.get("abhaNumber"))
-                & Q(abha_number__isnull=False)
-            )
-        ).first()
-        (abha_number, created) = AbhaNumber.objects.update_or_create(
-            pk=abha_number.pk if abha_number else None,
-            defaults={
-                "abha_number": patient_data.get("abhaNumber"),
-                "health_id": patient_data.get("abhaAddress"),
-                "name": patient_data.get("name"),
-                "gender": patient_data.get("gender"),
-                "date_of_birth": validate_and_format_date(
-                    patient_data.get("yearOfBirth"),
-                    patient_data.get("monthOfBirth"),
-                    patient_data.get("dayOfBirth"),
-                ),
-                "address": patient_data.get("address", {}).get("line"),
-                "district": patient_data.get("address", {}).get("district"),
-                "state": patient_data.get("address", {}).get("state"),
-                "pincode": patient_data.get("address", {}).get("pinCode"),
-                "mobile": patient_data.get("phoneNumber"),
-            },
-        )
-
-        is_existing_patient = True
-        if not abha_number.patient_id:
-            lock = PatientCreateLock()
-            try:
-                lock.acquire()
-            except ObjectLocked:
-                logger.warning(
-                    "Patient creation lock unavailable during scan and share for %s",
-                    patient_data.get("abhaAddress"),
-                )
-                patient_share_on_share.delay(
-                    {
-                        "error": {
-                            "message": "Patient creation failed, try again after a while",
-                            "code": "ABDM-9999",
-                        },
-                        "request_id": request.headers.get("REQUEST-ID"),
-                    }
-                )
-                return Response(status=status.HTTP_200_OK)
-
-            try:
-                with transaction.atomic():
-                    abha_number.refresh_from_db()
-                    if not abha_number.patient_id:
-                        is_existing_patient = False
-                        full_address = ", ".join(
-                            filter(
-                                lambda x: x,
-                                [
-                                    patient_data.get("address").get("line"),
-                                    patient_data.get("address").get("district"),
-                                    patient_data.get("address").get("state"),
-                                    patient_data.get("address").get("pinCode"),
-                                ],
-                            )
-                        )
-                        phone_number = (
-                            "+91"
-                            + patient_data.get("phoneNumber", "").replace(" ", "")[-10:]
-                        )
-                        date_of_birth = datetime.strptime(
-                            f"{patient_data.get('yearOfBirth')}-{patient_data.get('monthOfBirth', 1):02d}-{patient_data.get('dayOfBirth', 1):02d}",
-                            "%Y-%m-%d",
-                        ).date()
-
-                        state_name = patient_data.get("address", {}).get("state")
-                        state_organization = None
-                        if state_name:
-                            state_organization = Organization.objects.filter(
-                                name__iexact=state_name,
-                                org_type=OrganizationTypeChoices.govt.value,
-                                metadata__govt_org_type="state",
-                            ).first()
-
-                        district_organization = None
-                        district_name = patient_data.get("address", {}).get(
-                            "district"
-                        )
-                        if state_organization and district_name:
-                            district_organization = Organization.objects.filter(
-                                name__iexact=district_name,
-                                org_type=OrganizationTypeChoices.govt.value,
-                                parent=state_organization,
-                                metadata__govt_org_type="district",
-                            ).first()
-
-                        # TODO: consider the case of existing patient without abha number
-                        patient = Patient.objects.create(
-                            name=patient_data.get("name"),
-                            gender={
-                                "M": GenderChoices.male,
-                                "F": GenderChoices.female,
-                                "O": GenderChoices.non_binary,
-                            }.get(patient_data.get("gender"), "O"),
-                            date_of_birth=date_of_birth,
-                            phone_number=phone_number,
-                            emergency_phone_number=phone_number,
-                            address=full_address,
-                            permanent_address=full_address,
-                            pincode=patient_data.get("address").get("pinCode"),
-                            geo_organization=district_organization
-                            if district_organization
-                            else state_organization,
-                        )
-                        evaluate_patient_instance_default_values(patient)
-                        abha_number.patient = patient
-                        abha_number.save(update_fields=["patient"])
-
-                        if abha_number.abha_number:
-                            abdm_user = get_or_create_abdm_user()
-                            ensure_abdm_patient_identifier(
-                                patient,
-                                system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                                display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                                value=abha_number.abha_number,
-                                created_by=abdm_user,
-                            )
-
-                        patient.build_instance_identifiers()
-                        patient.save()
-
-                transaction.on_commit(lock.release)
-            except Exception:
-                lock.release()
-                raise
-
-        patient = abha_number.patient
-
-        token = get_or_create_scan_and_share_token(patient, health_facility.facility)
-
-        patient_share_on_share.delay(
-            on_share_payload={
-                "acknowledgement": {
-                    "status": "SUCCESS",
-                    "abha_address": abha_number.health_id,
-                    "context": validated_data.get("metaData").get("context"),
-                    "token_number": token.number,
-                    "expiry": settings.ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
-                },
-                "request_id": request.headers.get("REQUEST-ID"),
-            },
-            transaction_meta={
-                "abha_number": str(abha_number.external_id),
-                "is_existing_patient": is_existing_patient,
-                "token": str(token.external_id),
-            },
-        )
-
-        return Response(validated_data, status=status.HTTP_200_OK)
+        return store_and_enqueue_callback(request, CallbackType.PATIENT_SHARE)
