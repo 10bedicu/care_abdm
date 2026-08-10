@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 
@@ -35,6 +36,6 @@ def store_and_enqueue_callback(request, callback_type: CallbackType) -> Response
         },
     )
 
-    enqueue_inbound_callback(callback)
+    transaction.on_commit(lambda: enqueue_inbound_callback(callback))
 
     return Response(status=status.HTTP_202_ACCEPTED)
