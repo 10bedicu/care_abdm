@@ -21,6 +21,7 @@ requirements = [
     "fhir.resources>=7.1.0,<8.0.0",
     "fastecdsa==2.3.2",
     "pycryptodome",
+    "razorpay",
 ]
 
 test_requirements = []

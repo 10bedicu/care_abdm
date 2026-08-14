@@ -58,6 +58,21 @@ class CallbackType(models.TextChoices):
         "hiu/health-information/transfer",
     )
 
+    # Scan and Pay
+    PATIENT_SHARE_OPEN_ORDER = (
+        "patient__share__open_order",
+        "patient/share/open-order",
+    )
+    PATIENT_SELECTION = ("patient__selection", "patient/selection")
+    PATIENT_SCAN_PAY_ON_NOTIFY = (
+        "patient__scan_pay__on_notify",
+        "patient/scan-pay/on-notify",
+    )
+    PATIENT_SCAN_PAY_ORDER_STATUS = (
+        "patient__scan_pay__order_status",
+        "patient/scan-pay/order-status",
+    )
+
 
 class CallbackStatus(models.TextChoices):
     PENDING = "pending", "Pending"

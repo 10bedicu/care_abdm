@@ -196,3 +196,83 @@ class PatientShareOnShareBody(TypedDict):
 
 class PatientShareOnShareResponse(TypedDict):
     pass
+
+
+class ScanPayService(TypedDict):
+    service_id: str
+    name: str
+    description: str
+    amount: float
+
+
+class ScanPayProcedure(TypedDict):
+    category: str
+    services: list[ScanPayService]
+
+
+class ScanPayError(TypedDict):
+    message: str
+    code: str
+
+
+class ScanPayPaymentBundle(TypedDict):
+    payment_mode: str
+    payment_url: str
+    order_number: str
+    amount: float
+    merchant_id: str
+    description: str
+
+
+class ScanPayAcknowledgement(TypedDict):
+    status: str
+    abha_address: str
+    transaction_id: str | None = None
+    order_number: str
+    open_order_request_id: str
+    payment_date: str | None = None
+    payment_receipt_link: str | None = None
+
+
+class PatientOnShareOpenOrderBody(TypedDict):
+    abha_address: str | None = None
+    patient_uid: str | None = None
+    procedures: list[ScanPayProcedure] | None = None
+    error: ScanPayError | None = None
+    request_id: str
+
+
+class PatientOnShareOpenOrderResponse(TypedDict):
+    pass
+
+
+class PatientOnSelectionBody(TypedDict):
+    open_order_request_id: str | None = None
+    abha_address: str | None = None
+    procedures: list[ScanPayProcedure] | None = None
+    payment_bundle: ScanPayPaymentBundle | None = None
+    error: ScanPayError | None = None
+    request_id: str
+
+
+class PatientOnSelectionResponse(TypedDict):
+    pass
+
+
+class PatientScanPayNotifyBody(TypedDict):
+    acknowledgement: ScanPayAcknowledgement
+    hip_id: str
+
+
+class PatientScanPayNotifyResponse(TypedDict):
+    pass
+
+
+class PatientScanPayOnOrderStatusBody(TypedDict):
+    acknowledgement: ScanPayAcknowledgement | None = None
+    error: ScanPayError | None = None
+    request_id: str
+
+
+class PatientScanPayOnOrderStatusResponse(TypedDict):
+    pass

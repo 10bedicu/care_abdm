@@ -10,10 +10,6 @@ logger = logging.getLogger(__name__)
 
 LOCK_RETRY_COUNTDOWN = 2
 
-# Retry only what a later attempt could plausibly fix: lock contention and network
-# failures reaching ABDM. A payload ABDM will always reject, or a bug in a handler,
-# is recorded on the InboundCallback row for replay instead of being retried four
-# times against an already-degraded gateway.
 RETRY_FOR = (ObjectLocked, requests.Timeout, requests.ConnectionError)
 
 # redis broker priorities are inverted: 0 is consumed first (steps 0/3/6/9)
@@ -25,7 +21,8 @@ def _dispatch_table():
     # built lazily to avoid circular imports at app load time
     from abdm.api.v3.serializers import hip as hip_serializers
     from abdm.api.v3.serializers import hiu as hiu_serializers
-    from abdm.service.v3.callback_handlers import hip, hiu
+    from abdm.api.v3.serializers import scan_pay as scan_pay_serializers
+    from abdm.service.v3.callback_handlers import hip, hiu, scan_pay
 
     return {
         CallbackType.TOKEN_ON_GENERATE_TOKEN: (
@@ -84,13 +81,39 @@ def _dispatch_table():
             hiu_serializers.HiuHealthInformationTransferSerializer,
             hiu.handle_health_information_transfer,
         ),
+        CallbackType.PATIENT_SHARE_OPEN_ORDER: (
+            scan_pay_serializers.PatientShareOpenOrderSerializer,
+            scan_pay.handle_patient_share_open_order,
+        ),
+        CallbackType.PATIENT_SELECTION: (
+            scan_pay_serializers.PatientSelectionSerializer,
+            scan_pay.handle_patient_selection,
+        ),
+        CallbackType.PATIENT_SCAN_PAY_ON_NOTIFY: (
+            scan_pay_serializers.PatientScanPayOnNotifySerializer,
+            scan_pay.handle_scan_pay_on_notify,
+        ),
+        CallbackType.PATIENT_SCAN_PAY_ORDER_STATUS: (
+            scan_pay_serializers.PatientScanPayOrderStatusSerializer,
+            scan_pay.handle_scan_pay_order_status,
+        ),
     }
+
+
+# callbacks where a patient is actively waiting on their PHR app for a response
+INTERACTIVE_CALLBACK_TYPES = {
+    CallbackType.PATIENT_SHARE,
+    CallbackType.PATIENT_SHARE_OPEN_ORDER,
+    CallbackType.PATIENT_SELECTION,
+    CallbackType.PATIENT_SCAN_PAY_ON_NOTIFY,
+    CallbackType.PATIENT_SCAN_PAY_ORDER_STATUS,
+}
 
 
 def enqueue_inbound_callback(callback: InboundCallback):
     priority = (
         HIGH_PRIORITY
-        if callback.callback_type == CallbackType.PATIENT_SHARE
+        if callback.callback_type in INTERACTIVE_CALLBACK_TYPES
         else LOW_PRIORITY
     )
 

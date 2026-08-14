@@ -40,6 +40,14 @@ from abdm.service.v3.types.gateway import (
     IdentityAuthenticationResponse,
     LinkCarecontextBody,
     LinkCarecontextResponse,
+    PatientOnSelectionBody,
+    PatientOnSelectionResponse,
+    PatientOnShareOpenOrderBody,
+    PatientOnShareOpenOrderResponse,
+    PatientScanPayNotifyBody,
+    PatientScanPayNotifyResponse,
+    PatientScanPayOnOrderStatusBody,
+    PatientScanPayOnOrderStatusResponse,
     PatientShareOnShareBody,
     PatientShareOnShareResponse,
     TokenGenerateTokenBody,
@@ -1085,6 +1093,197 @@ class GatewayService:
             }
 
         path = "/patient-share/v3/on-share"
+        response = GatewayService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-CM-ID": cm_id(),
+            },
+        )
+
+        if response.status_code != 202:
+            raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
+
+        return {}
+
+    @staticmethod
+    def serialize_scan_pay_procedures(procedures):
+        return [
+            {
+                "category": procedure.get("category"),
+                "services": [
+                    {
+                        "serviceId": service.get("service_id"),
+                        "name": service.get("name"),
+                        "description": service.get("description"),
+                        "amount": service.get("amount"),
+                    }
+                    for service in procedure.get("services", [])
+                ],
+            }
+            for procedure in procedures
+        ]
+
+    @staticmethod
+    def serialize_scan_pay_acknowledgement(acknowledgement):
+        # gateway swagger uses misspelled paymentRecipetLink while postman uses paymentReceiptLink, send both
+        return {
+            "status": acknowledgement.get("status"),
+            "abhaAddress": acknowledgement.get("abha_address"),
+            "transactionId": acknowledgement.get("transaction_id"),
+            "orderNumber": acknowledgement.get("order_number"),
+            "openOrderRequestId": acknowledgement.get("open_order_request_id"),
+            "paymentDate": acknowledgement.get("payment_date"),
+            "paymentReceiptLink": acknowledgement.get("payment_receipt_link"),
+            "paymentRecipetLink": acknowledgement.get("payment_receipt_link"),
+        }
+
+    @staticmethod
+    def patient__on_share_open_order(
+        data: PatientOnShareOpenOrderBody,
+    ) -> PatientOnShareOpenOrderResponse:
+        payload = {
+            "intent": "OPEN_PAYMENT_ORDER",
+            "response": {"requestId": data.get("request_id")},
+        }
+
+        if data.get("abha_address"):
+            payload["abhaAddress"] = data.get("abha_address")
+
+        if data.get("patient_uid"):
+            payload["patientUid"] = data.get("patient_uid")
+
+        if data.get("procedures") is not None:
+            payload["procedures"] = GatewayService.serialize_scan_pay_procedures(
+                data.get("procedures")
+            )
+
+        if data.get("error"):
+            payload["error"] = {
+                "message": data.get("error").get("message"),
+                "code": data.get("error").get("code"),
+            }
+
+        path = "/scan-gateway/v3/patient/on-share/open-order"
+        response = GatewayService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-CM-ID": cm_id(),
+            },
+        )
+
+        if response.status_code != 202:
+            raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
+
+        return {}
+
+    @staticmethod
+    def patient__on_selection(
+        data: PatientOnSelectionBody,
+    ) -> PatientOnSelectionResponse:
+        payload = {
+            "intent": "PAYMENT_ORDER",
+            "response": {"requestId": data.get("request_id")},
+        }
+
+        if data.get("open_order_request_id"):
+            payload["openOrderRequestId"] = data.get("open_order_request_id")
+
+        if data.get("abha_address"):
+            payload["abhaAddress"] = data.get("abha_address")
+
+        if data.get("procedures") is not None:
+            payload["procedures"] = GatewayService.serialize_scan_pay_procedures(
+                data.get("procedures")
+            )
+
+        if data.get("payment_bundle"):
+            payment_bundle = data.get("payment_bundle")
+            payload["paymentBundle"] = {
+                "paymentMode": payment_bundle.get("payment_mode"),
+                "paymentUrl": payment_bundle.get("payment_url"),
+                "orderNumber": payment_bundle.get("order_number"),
+                "amount": payment_bundle.get("amount"),
+                "merchantId": payment_bundle.get("merchant_id"),
+                "description": payment_bundle.get("description"),
+            }
+
+        if data.get("error"):
+            payload["error"] = {
+                "message": data.get("error").get("message"),
+                "code": data.get("error").get("code"),
+            }
+
+        path = "/scan-gateway/v3/patient/on-selection"
+        response = GatewayService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-CM-ID": cm_id(),
+            },
+        )
+
+        if response.status_code != 202:
+            raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
+
+        return {}
+
+    @staticmethod
+    def patient__scan_pay_notify(
+        data: PatientScanPayNotifyBody,
+    ) -> PatientScanPayNotifyResponse:
+        payload = {
+            "acknowledgement": GatewayService.serialize_scan_pay_acknowledgement(
+                data.get("acknowledgement")
+            ),
+        }
+
+        path = "/scan-gateway/v3/patient/scan-pay/notify"
+        response = GatewayService.request.post(
+            path,
+            payload,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-CM-ID": cm_id(),
+                "X-HIP-ID": data.get("hip_id"),
+            },
+        )
+
+        if response.status_code != 202:
+            raise ABDMAPIException(detail=GatewayService.handle_error(response.json()))
+
+        return {}
+
+    @staticmethod
+    def patient__scan_pay_on_order_status(
+        data: PatientScanPayOnOrderStatusBody,
+    ) -> PatientScanPayOnOrderStatusResponse:
+        payload = {
+            "response": {"requestId": data.get("request_id")},
+        }
+
+        if data.get("acknowledgement"):
+            payload["acknowledgement"] = (
+                GatewayService.serialize_scan_pay_acknowledgement(
+                    data.get("acknowledgement")
+                )
+            )
+
+        if data.get("error"):
+            payload["error"] = {
+                "message": data.get("error").get("message"),
+                "code": data.get("error").get("code"),
+            }
+
+        path = "/scan-gateway/v3/patient/scan-pay/on-order-status"
         response = GatewayService.request.post(
             path,
             payload,
