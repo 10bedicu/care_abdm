@@ -36,7 +36,7 @@ class PaymentOrder(BaseModel):
     order_number = models.CharField(
         max_length=100, null=True, blank=True, db_index=True
     )
-    payment_link_id = models.CharField(max_length=100, null=True, blank=True)
+    payment_link_id = models.CharField(max_length=500, null=True, blank=True)
     transaction_id = models.CharField(max_length=100, null=True, blank=True)
     payment_date = models.DateTimeField(null=True, blank=True)
 

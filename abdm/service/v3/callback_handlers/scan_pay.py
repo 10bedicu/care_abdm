@@ -180,7 +180,7 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
         return send_error("Failed to create payment order")
 
     try:
-        payment_link = create_scan_pay_payment_link(invoice)
+        payment = create_scan_pay_payment_link(invoice)
     except Exception:
         logger.exception(
             f"Failed to create payment link for scan and pay order {open_order_request_id}"
@@ -188,8 +188,8 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
         return send_error("Failed to create payment link")
 
     order.invoice = invoice
-    order.order_number = invoice.number or str(invoice.external_id)
-    order.payment_link_id = payment_link.get("id")
+    order.order_number = payment["order_number"]
+    order.payment_link_id = payment["payment_link_id"]
     order.status = PaymentOrderStatus.PAYMENT_INITIATED
     order.save(
         update_fields=["invoice", "order_number", "payment_link_id", "status"]
@@ -202,7 +202,7 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
             "procedures": build_procedures(charge_items),
             "payment_bundle": {
                 "payment_mode": "GATEWAY",
-                "payment_url": payment_link.get("short_url"),
+                "payment_url": payment["payment_url"],
                 "order_number": order.order_number,
                 "amount": float(invoice.total_gross),
                 "merchant_id": settings.ABDM_SCAN_AND_PAY_MERCHANT_ID,

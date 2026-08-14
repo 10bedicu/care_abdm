@@ -4,6 +4,7 @@ from abdm.api.v3.viewsets.health_id import HealthIdViewSet
 from abdm.api.v3.viewsets.hip import HIPCallbackViewSet, HIPViewSet
 from abdm.api.v3.viewsets.hiu import HIUCallbackViewSet, HIUViewSet
 from abdm.api.v3.viewsets.scan_pay import ScanPayCallbackViewSet, ScanPayViewSet
+from abdm.api.v3.viewsets.sbi_epay import SbiEpayViewSet
 from abdm.api.v3.viewsets.utility import UtilityViewSet
 from abdm.api.viewsets.abha_number import AbhaNumberViewSet
 from abdm.api.viewsets.consent import ConsentViewSet
@@ -36,6 +37,7 @@ router.register("v3/health_id", HealthIdViewSet, basename="abdm__v3__health_id")
 router.register("v3/hip", HIPViewSet, basename="abdm__v3__hip")
 router.register("v3/hiu", HIUViewSet, basename="abdm__v3__hiu")
 router.register("v3/scan-pay", ScanPayViewSet, basename="abdm__v3__scan_pay")
+router.register("v3/sbi-epay", SbiEpayViewSet, basename="abdm__v3__sbi_epay")
 
 ## Utility Routes
 router.register(
