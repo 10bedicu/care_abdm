@@ -1,16 +1,26 @@
 import logging
+from datetime import timedelta
 
 import requests
 from celery import shared_task
 
-from abdm.models import Transaction, TransactionType
+from abdm.models import PaymentOrder, Transaction, TransactionType
+from abdm.models.payment_order import PaymentOrderStatus
 from abdm.service.helper import ABDMAPIException, uuid
 from abdm.service.v3.gateway import GatewayService
+from abdm.service.v3.payment_providers import get_provider
+from abdm.settings import plugin_settings as settings
+from care.utils.time_util import care_now
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 5
 RETRY_COUNTDOWN = 30
+
+PAYMENT_ORDER_POLLABLE_STATUSES = [
+    PaymentOrderStatus.PAYMENT_INITIATED,
+    PaymentOrderStatus.PENDING,
+]
 
 
 def _call_gateway(task, method, payload, label):
@@ -61,3 +71,35 @@ def scan_pay_on_order_status(self, payload: dict):
     _call_gateway(
         self, GatewayService.patient__scan_pay_on_order_status, payload, "on_order_status"
     )
+
+
+@shared_task
+def reconcile_pending_payment_orders():
+    """Poll the provider for each pending scan-and-pay order; fail stale ones."""
+    if not settings.ABDM_SCAN_AND_PAY_POLLING_ENABLED:
+        return
+
+    cutoff = care_now() - timedelta(seconds=settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE)
+    orders = (
+        PaymentOrder.objects.filter(
+            status__in=PAYMENT_ORDER_POLLABLE_STATUSES,
+            invoice__isnull=False,
+        )
+        .exclude(order_number__isnull=True)
+        .exclude(order_number="")
+        .select_related("invoice__account", "health_facility__facility")
+    )
+    for order in orders:
+        if order.created_date and order.created_date < cutoff:
+            order.status = PaymentOrderStatus.FAIL
+            order.save(update_fields=["status", "modified_date"])
+            continue
+        try:
+            provider = get_provider(
+                order.provider or settings.ABDM_SCAN_AND_PAY_PROVIDER
+            )
+            provider.reconcile_order(order)
+        except Exception:
+            logger.exception(
+                "Failed to reconcile scan-and-pay order %s", order.order_number
+            )

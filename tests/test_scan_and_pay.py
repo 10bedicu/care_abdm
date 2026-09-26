@@ -5,6 +5,10 @@ from abdm.models import AbhaNumber, HealthFacility, InboundCallback, PaymentOrde
 from abdm.models.inbound_callback import CallbackStatus
 from abdm.models.payment_order import PaymentOrderStatus
 from abdm.service.helper import uuid
+from abdm.service.v3 import payment_providers
+from abdm.service.v3 import scan_pay as scan_pay_service
+from abdm.utils import user as abdm_user
+from django.core.exceptions import ImproperlyConfigured
 from model_bakery import baker
 
 from care.emr.models.charge_item import ChargeItem
@@ -25,6 +29,8 @@ ORDER_STATUS_URL = "/api/abdm/api/v3/patient/scan-pay/order-status"
 
 class ScanPayTestBase(CareAPITestBase):
     def setUp(self):
+        # cached across tests but each test rolls back; reset to avoid stale FK.
+        abdm_user.ABDM_USER = None
         self.user = self.create_super_user()
         self.facility = self.create_facility(self.user)
         self.health_facility = baker.make(
@@ -196,8 +202,9 @@ class TestSelection(ScanPayTestBase):
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
     def test_selection_success(self, mock_gateway, mock_payment_link):
         mock_payment_link.return_value = {
-            "id": "plink_test",
-            "short_url": "https://rzp.io/test",
+            "order_number": "INV-1",
+            "payment_link_id": "plink_test",
+            "payment_url": "https://rzp.io/test",
         }
         order = self.create_order()
         charge_item = self.create_charge_item()
@@ -215,6 +222,7 @@ class TestSelection(ScanPayTestBase):
         charge_item.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
         self.assertEqual(order.payment_link_id, "plink_test")
+        self.assertEqual(order.order_number, "INV-1")
         self.assertIsNotNone(order.invoice_id)
         self.assertEqual(charge_item.status, ChargeItemStatusOptions.billed.value)
         self.assertEqual(charge_item.paid_invoice_id, order.invoice_id)
@@ -430,3 +438,50 @@ class TestReceipt(ScanPayTestBase):
         response = self.client.get(f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
+
+
+class TestPaymentProviderRegistry(ScanPayTestBase):
+    def make_invoice(self):
+        return baker.make(
+            Invoice,
+            facility=self.facility,
+            patient=self.patient,
+            account=self.account,
+            status=InvoiceStatusOptions.issued.value,
+            total_gross=Decimal(100),
+            number="INV-REG",
+        )
+
+    def test_dispatches_to_registered_provider(self):
+        captured = {}
+
+        class DummyProvider(payment_providers.PaymentProvider):
+            name = "dummy_test"
+
+            def create_payment_link(self, invoice):
+                captured["invoice"] = invoice
+                return {
+                    "order_number": "ord1",
+                    "payment_link_id": "pl1",
+                    "payment_url": "https://pay/x",
+                }
+
+        payment_providers.register_provider(DummyProvider)
+        self.addCleanup(payment_providers.unregister_provider, "dummy_test")
+
+        invoice = self.make_invoice()
+        with patch.object(
+            scan_pay_service.settings, "ABDM_SCAN_AND_PAY_PROVIDER", "dummy_test"
+        ):
+            result = scan_pay_service.create_scan_pay_payment_link(invoice)
+
+        self.assertEqual(result["payment_url"], "https://pay/x")
+        self.assertIs(captured["invoice"], invoice)
+
+    def test_unknown_provider_raises(self):
+        invoice = self.make_invoice()
+        with patch.object(
+            scan_pay_service.settings, "ABDM_SCAN_AND_PAY_PROVIDER", "does_not_exist"
+        ), self.assertRaises(ImproperlyConfigured):
+            scan_pay_service.create_scan_pay_payment_link(invoice)
+

@@ -190,9 +190,16 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
     order.invoice = invoice
     order.order_number = payment["order_number"]
     order.payment_link_id = payment["payment_link_id"]
+    order.provider = payment.get("provider", "")
     order.status = PaymentOrderStatus.PAYMENT_INITIATED
     order.save(
-        update_fields=["invoice", "order_number", "payment_link_id", "status"]
+        update_fields=[
+            "invoice",
+            "order_number",
+            "payment_link_id",
+            "provider",
+            "status",
+        ]
     )
 
     GatewayService.patient__on_selection(
