@@ -30,6 +30,7 @@ PAYMENT_ORDER_PENDING_STATUSES = [
 class PaymentOrder(BaseModel):
     open_order_request_id = models.UUIDField(unique=True, db_index=True)
     abha_number = models.ForeignKey("abdm.AbhaNumber", on_delete=models.PROTECT)
+    abha_address = models.CharField(max_length=100, blank=True, default="")
     health_facility = models.ForeignKey("abdm.HealthFacility", on_delete=models.PROTECT)
     invoice = models.ForeignKey(
         "emr.Invoice", on_delete=models.PROTECT, null=True, blank=True
@@ -46,8 +47,11 @@ class PaymentOrder(BaseModel):
     payment_link_id = models.CharField(max_length=500, null=True, blank=True)
     transaction_id = models.CharField(max_length=100, null=True, blank=True)
     payment_date = models.DateTimeField(null=True, blank=True)
-    # what the payment link was created for; confirmations are checked against it
     amount = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
 
     def __str__(self):
         return f"PaymentOrder: {self.open_order_request_id} - {self.status}"
+
+    @property
+    def requesting_abha_address(self) -> str:
+        return self.abha_address or self.abha_number.health_id

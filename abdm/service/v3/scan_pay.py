@@ -10,6 +10,7 @@ from abdm.models.payment_order import (
 )
 from abdm.service.v3.payment_providers import get_provider
 from abdm.settings import plugin_settings as settings
+from abdm.tasks.scan_pay import scan_pay_notify
 from abdm.utils.user import get_or_create_abdm_user
 from care.emr.locks.billing import AccountLock, InvoiceCreateLock
 from care.emr.models.charge_item import ChargeItem
@@ -121,7 +122,9 @@ def create_scan_pay_payment_link(invoice):
 
 
 def scan_pay_receipt_link(order: PaymentOrder):
-    return f"{settings.BACKEND_DOMAIN}/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+    return (
+        f"{settings.BACKEND_DOMAIN}/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+    )
 
 
 def build_scan_pay_acknowledgement(order: PaymentOrder):
@@ -135,7 +138,7 @@ def build_scan_pay_acknowledgement(order: PaymentOrder):
     is_paid = order.status in PAYMENT_ORDER_PAID_STATUSES
     return {
         "status": ack_status,
-        "abha_address": order.abha_number.health_id,
+        "abha_address": order.requesting_abha_address,
         "transaction_id": order.transaction_id,
         "order_number": order.order_number,
         "open_order_request_id": str(order.open_order_request_id),
@@ -144,3 +147,22 @@ def build_scan_pay_acknowledgement(order: PaymentOrder):
         else None,
         "payment_receipt_link": scan_pay_receipt_link(order) if is_paid else None,
     }
+
+
+def notify_scan_pay_order(order: PaymentOrder) -> None:
+    """Tell the PHR the order's outcome (paid, pending, failed, cancelled).
+
+    Queued on commit so the PHR is never told about a state that rolls back.
+    """
+    payload = {
+        "acknowledgement": build_scan_pay_acknowledgement(order),
+        "hip_id": order.health_facility.hf_id,
+    }
+    transaction_meta = {
+        "abha_number": str(order.abha_number.external_id),
+        "payment_order": str(order.external_id),
+        "status": order.status,
+    }
+    transaction.on_commit(
+        lambda: scan_pay_notify.delay(payload, transaction_meta=transaction_meta)
+    )

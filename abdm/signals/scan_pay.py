@@ -1,6 +1,5 @@
 import logging
 
-from django.db import transaction
 from django.db.models import Sum
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -10,8 +9,7 @@ from abdm.models.payment_order import (
     PaymentOrder,
     PaymentOrderStatus,
 )
-from abdm.service.v3.scan_pay import build_scan_pay_acknowledgement
-from abdm.tasks.scan_pay import scan_pay_notify
+from abdm.service.v3.scan_pay import notify_scan_pay_order
 from care.emr.models.payment_reconciliation import PaymentReconciliation
 from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationStatusOptions,
@@ -56,17 +54,4 @@ def notify_scan_pay_payment(sender, instance, created, **kwargs):
     order.save(
         update_fields=["status", "transaction_id", "payment_date", "modified_date"]
     )
-
-    payload = {
-        "acknowledgement": build_scan_pay_acknowledgement(order),
-        "hip_id": order.health_facility.hf_id,
-    }
-    transaction_meta = {
-        "abha_number": str(order.abha_number.external_id),
-        "payment_order": str(order.external_id),
-        "status": order.status,
-    }
-    # tell the PHR only once the payment is durably recorded
-    transaction.on_commit(
-        lambda: scan_pay_notify.delay(payload, transaction_meta=transaction_meta)
-    )
+    notify_scan_pay_order(order)

@@ -88,13 +88,17 @@ def void_scan_pay_invoice(invoice: Invoice, reason: str) -> bool:
 
 def close_payment_order(order: PaymentOrder, status: PaymentOrderStatus) -> bool:
     """
-    Move a still-pending order to a terminal state (``FAIL`` or ``CANCELED``)
-    and void its invoice so the selected services can be paid for again.
+    Move a still-pending order to a terminal state (``FAIL`` or ``CANCELED``),
+    void its invoice so the selected services can be paid for again, and tell
+    the PHR about the outcome.
 
     Providers call this when the gateway reports the payment link expired,
     cancelled or failed, so the order stops being polled. Orders that already
     reached a terminal state are left untouched; returns whether it changed.
     """
+    # imported here: service.v3.scan_pay imports this package at module level
+    from abdm.service.v3.scan_pay import notify_scan_pay_order
+
     with PaymentOrderLock(order), transaction.atomic():
         order = _fresh(order)
         if order.status not in PAYMENT_ORDER_PENDING_STATUSES:
@@ -107,6 +111,7 @@ def close_payment_order(order: PaymentOrder, status: PaymentOrderStatus) -> bool
             )
         order.status = status
         order.save(update_fields=["status", "modified_date"])
+        notify_scan_pay_order(order)
     return True
 
 

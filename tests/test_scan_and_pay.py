@@ -8,7 +8,11 @@ from abdm.models.payment_order import PaymentOrderStatus
 from abdm.service.helper import uuid
 from abdm.service.v3 import payment_providers
 from abdm.service.v3 import scan_pay as scan_pay_service
-from abdm.service.v3.callback_handlers.scan_pay import handle_patient_selection
+from abdm.service.v3.callback_handlers.scan_pay import (
+    handle_patient_selection,
+    handle_patient_share_open_order,
+    handle_scan_pay_order_status,
+)
 from abdm.settings import plugin_settings as abdm_settings
 from abdm.tasks.scan_pay import reconcile_pending_payment_orders
 from abdm.utils import user as abdm_user
@@ -126,6 +130,32 @@ class TestShareOpenOrder(ScanPayTestBase):
 
         self.assertEqual(response.status_code, 202)
         self.assertIn("error", mock_gateway.call_args[0][0])
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
+    def test_replies_echo_the_requesting_abha_address(self, mock_gateway):
+        # patient known under another address; matched via ABHA number
+        payload = self.share_open_order_payload(abha_address="other@sbx")
+        payload["profile"]["patient"]["abhaNumber"] = self.abha_number.abha_number
+
+        handle_patient_share_open_order(payload, {"REQUEST-ID": uuid()})
+        no_orders = mock_gateway.call_args[0][0]
+        self.assertIn("error", no_orders)
+        self.assertEqual(no_orders["abha_address"], "other@sbx")
+
+        self.create_charge_item()
+        request_id = uuid()
+        handle_patient_share_open_order(payload, {"REQUEST-ID": request_id})
+
+        shared = mock_gateway.call_args[0][0]
+        self.assertEqual(shared["abha_address"], "other@sbx")
+        order = PaymentOrder.objects.get(open_order_request_id=request_id)
+        self.assertEqual(order.abha_number, self.abha_number)
+        self.assertEqual(order.abha_address, "other@sbx")
+        self.assertEqual(order.requesting_abha_address, "other@sbx")
+        self.assertEqual(
+            scan_pay_service.build_scan_pay_acknowledgement(order)["abha_address"],
+            "other@sbx",
+        )
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
     def test_share_open_order_no_open_orders(self, mock_gateway):
@@ -275,6 +305,31 @@ class TestSelection(ScanPayTestBase):
         self.assertEqual(response.status_code, 202)
         self.assertIn("error", mock_gateway.call_args[0][0])
 
+    @patch("abdm.service.v3.scan_pay.create_scan_pay_payment_link")
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    def test_selection_accepts_the_address_that_opened_the_order(
+        self, mock_gateway, mock_payment_link
+    ):
+        mock_payment_link.return_value = {
+            "order_number": "INV-1",
+            "payment_link_id": "plink_test",
+            "payment_url": "https://rzp.io/test",
+        }
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            abha_address="other@sbx",
+            health_facility=self.health_facility,
+        )
+        payload = self.selection_payload(order, [self.create_charge_item()])
+        payload["abhaAddress"] = "other@sbx"
+
+        handle_patient_selection(payload, {"REQUEST-ID": uuid()})
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
+        self.assertNotIn("error", mock_gateway.call_args[0][0])
+
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
     @patch("abdm.service.v3.scan_pay.create_scan_pay_payment_link")
     def test_selection_without_payment_link_creates_no_invoice(
@@ -329,7 +384,7 @@ class TestSelection(ScanPayTestBase):
 
 
 class TestPaymentNotify(ScanPayTestBase):
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_payment_reconciliation_triggers_notify(self, mock_task):
         invoice = baker.make(
             Invoice,
@@ -373,7 +428,7 @@ class TestPaymentNotify(ScanPayTestBase):
         self.assertEqual(payload["hip_id"], self.health_facility.hf_id)
         self.assertIn("receipt", payload["acknowledgement"]["payment_receipt_link"])
 
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_notify_waits_for_commit(self, mock_task):
         invoice = baker.make(
             Invoice,
@@ -411,7 +466,7 @@ class TestPaymentNotify(ScanPayTestBase):
         mock_task.assert_not_called()
         self.assertEqual(len(callbacks), 1)
 
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_partial_payment_notifies_pending(self, mock_task):
         invoice = baker.make(
             Invoice,
@@ -474,8 +529,10 @@ class TestCreatePaymentReconciliation(ScanPayTestBase):
             **fields,
         )
 
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
-    @patch("abdm.service.v3.payment_providers.reconciliation.rebalance_account_task.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
+    @patch(
+        "abdm.service.v3.payment_providers.reconciliation.rebalance_account_task.delay"
+    )
     def test_records_once_and_rebalances_on_commit(self, mock_rebalance, mock_task):
         order = self.make_order()
 
@@ -494,7 +551,7 @@ class TestCreatePaymentReconciliation(ScanPayTestBase):
         mock_rebalance.assert_called_once_with(self.account.id)
         mock_task.assert_called_once()
 
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_stale_snapshots_cannot_double_credit(self, _task):
         order = self.make_order()
         snapshot = PaymentOrder.objects.get(pk=order.pk)
@@ -521,7 +578,7 @@ class TestCreatePaymentReconciliation(ScanPayTestBase):
             PaymentReconciliation.objects.filter(target_invoice=order.invoice).exists()
         )
 
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_records_confirmed_amount_not_invoice_total(self, _task):
         order = self.make_order()
         Invoice.objects.filter(pk=order.invoice_id).update(total_gross=Decimal(150))
@@ -532,7 +589,7 @@ class TestCreatePaymentReconciliation(ScanPayTestBase):
         self.assertEqual(reconciliation.amount, Decimal(100))
         self.assertNotIn("Needs review", reconciliation.note)
 
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_falls_back_to_order_amount_and_flags_mismatch(self, _task):
         order = self.make_order(amount=Decimal(80))
 
@@ -546,12 +603,14 @@ class TestCreatePaymentReconciliation(ScanPayTestBase):
         self.assertEqual(reconciliation.amount, Decimal(60))
         self.assertIn("amount mismatch", reconciliation.note)
 
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_late_payment_after_void_is_recorded_and_flagged(self, mock_task):
         order = self.make_order()
         payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
         order.refresh_from_db()
-        self.assertEqual(order.invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertEqual(
+            order.invoice.status, InvoiceStatusOptions.entered_in_error.value
+        )
 
         with self.captureOnCommitCallbacks(execute=True):
             payment_providers.reconcile_payment_order("INV-REC", "late-ref")
@@ -609,6 +668,48 @@ class TestOrderStatus(ScanPayTestBase):
         self.assertEqual(response.status_code, 202)
         self.assertIn("error", mock_gateway.call_args[0][0])
 
+    def query_status(self, order):
+        return {
+            "queryStatus": {
+                "orderNumber": order.order_number,
+                "abhaAddress": self.abha_number.health_id,
+                "openOrderRequestId": order.open_order_request_id,
+            }
+        }
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__scan_pay_on_order_status")
+    def test_order_status_for_failed_order_carries_error(self, mock_gateway):
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            order_number="INV-FAILED",
+            status=PaymentOrderStatus.FAIL,
+        )
+
+        handle_scan_pay_order_status(self.query_status(order), {"REQUEST-ID": uuid()})
+
+        payload = mock_gateway.call_args[0][0]
+        self.assertEqual(payload["acknowledgement"]["status"], "FAIL")
+        self.assertEqual(payload["error"]["code"], "ABDM-9999")
+        self.assertIn("failed", payload["error"]["message"].lower())
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__scan_pay_on_order_status")
+    def test_order_status_for_pending_order_has_no_error(self, mock_gateway):
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            order_number="INV-PENDING",
+            status=PaymentOrderStatus.PAYMENT_INITIATED,
+        )
+
+        handle_scan_pay_order_status(self.query_status(order), {"REQUEST-ID": uuid()})
+
+        payload = mock_gateway.call_args[0][0]
+        self.assertEqual(payload["acknowledgement"]["status"], "PENDING")
+        self.assertIsNone(payload["error"])
+
 
 class TestReceipt(ScanPayTestBase):
     def test_receipt_not_available_for_unpaid_order(self):
@@ -619,7 +720,9 @@ class TestReceipt(ScanPayTestBase):
             status=PaymentOrderStatus.PAYMENT_INITIATED,
         )
 
-        response = self.client.get(f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/")
+        response = self.client.get(
+            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+        )
         self.assertEqual(response.status_code, 404)
 
     def test_receipt_for_paid_order(self):
@@ -644,7 +747,9 @@ class TestReceipt(ScanPayTestBase):
             transaction_id="pay_test",
         )
 
-        response = self.client.get(f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/")
+        response = self.client.get(
+            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
 
@@ -690,9 +795,14 @@ class TestPaymentProviderRegistry(ScanPayTestBase):
 
     def test_unknown_provider_raises(self):
         invoice = self.make_invoice()
-        with patch.object(
-            scan_pay_service.settings, "ABDM_SCAN_AND_PAY_PROVIDER", "does_not_exist"
-        ), self.assertRaises(ImproperlyConfigured):
+        with (
+            patch.object(
+                scan_pay_service.settings,
+                "ABDM_SCAN_AND_PAY_PROVIDER",
+                "does_not_exist",
+            ),
+            self.assertRaises(ImproperlyConfigured),
+        ):
             scan_pay_service.create_scan_pay_payment_link(invoice)
 
 
@@ -741,6 +851,43 @@ class TestClosePaymentOrder(ScanPayTestBase):
         self.assertTrue(changed)
         self.assertEqual(order.status, PaymentOrderStatus.FAIL)
 
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
+    def test_closing_notifies_phr_after_commit(self, mock_task):
+        order = self.make_order(PaymentOrderStatus.PAYMENT_INITIATED)
+
+        with self.captureOnCommitCallbacks() as callbacks:
+            payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
+        mock_task.assert_not_called()
+        self.assertEqual(len(callbacks), 1)
+
+        callbacks[0]()
+
+        payload, kwargs = mock_task.call_args.args[0], mock_task.call_args.kwargs
+        self.assertEqual(payload["acknowledgement"]["status"], "FAIL")
+        self.assertEqual(payload["acknowledgement"]["order_number"], "INV-CLOSE")
+        self.assertIsNone(payload["acknowledgement"]["payment_receipt_link"])
+        self.assertEqual(payload["hip_id"], self.health_facility.hf_id)
+        self.assertEqual(kwargs["transaction_meta"]["status"], "FAIL")
+
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
+    def test_cancelling_notifies_phr(self, mock_task):
+        order = self.make_order(PaymentOrderStatus.PAYMENT_INITIATED)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            payment_providers.close_payment_order(order, PaymentOrderStatus.CANCELED)
+
+        payload = mock_task.call_args.args[0]
+        self.assertEqual(payload["acknowledgement"]["status"], "CANCELED")
+
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
+    def test_closing_a_closed_order_does_not_notify_again(self, mock_task):
+        order = self.make_order(PaymentOrderStatus.FAIL)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
+
+        mock_task.assert_not_called()
+
     def test_leaves_paid_order_untouched(self):
         order = self.make_order(PaymentOrderStatus.SUCCESS)
 
@@ -775,7 +922,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
         self.assertIn("cancelled", invoice.cancelled_reason)
 
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_closing_keeps_invoice_that_received_a_payment(self, mock_task):
         order, invoice, charge_item = self.make_invoiced_order()
         baker.make(
@@ -840,7 +987,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         )
         return order, invoice
 
-    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_stale_order_is_polled_before_being_failed(self, _task):
         self.register_sweep_provider(
             lambda order: payment_providers.create_payment_reconciliation(
@@ -879,4 +1026,3 @@ class TestClosePaymentOrder(ScanPayTestBase):
 
         order.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
-

@@ -177,9 +177,7 @@ class ScanPayViewSet(GenericViewSet):
                     status__in=PAYMENT_ORDER_PAID_STATUSES,
                     invoice__isnull=False,
                 )
-                .select_related(
-                    "abha_number", "health_facility__facility", "invoice"
-                )
+                .select_related("abha_number", "health_facility__facility", "invoice")
                 .first()
             )
         except (DjangoValidationError, ValueError):
@@ -199,7 +197,7 @@ class ScanPayViewSet(GenericViewSet):
                 "facility": order.health_facility.facility,
                 "hf_id": order.health_facility.hf_id,
                 "patient": order.abha_number.patient,
-                "abha_address": order.abha_number.health_id,
+                "abha_address": order.requesting_abha_address,
                 "charge_items": charge_items,
             },
         )

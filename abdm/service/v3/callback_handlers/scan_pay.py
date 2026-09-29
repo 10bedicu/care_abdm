@@ -20,6 +20,11 @@ from care.utils.lock import ObjectLocked
 
 logger = logging.getLogger(__name__)
 
+ORDER_FAILURE_MESSAGES = {
+    PaymentOrderStatus.FAIL: "Payment failed. Please try again.",
+    PaymentOrderStatus.CANCELED: "Payment was cancelled.",
+}
+
 
 def handle_patient_share_open_order(validated_data: dict, headers: dict):
     request_id = headers.get("REQUEST-ID")
@@ -70,14 +75,14 @@ def handle_patient_share_open_order(validated_data: dict, headers: dict):
         )
         return
 
-    charge_items = get_open_charge_items(
-        abha_number.patient, health_facility.facility
-    )
+    charge_items = get_open_charge_items(abha_number.patient, health_facility.facility)
 
+    # the gateway rejects replies whose abhaAddress differs from the request's,
+    # even when the patient was matched by ABHA number under another address
     if not charge_items:
         GatewayService.patient__on_share_open_order(
             {
-                "abha_address": abha_number.health_id,
+                "abha_address": abha_address,
                 "error": {
                     "message": "No open orders found for the patient",
                     "code": "ABDM-9999",
@@ -91,13 +96,14 @@ def handle_patient_share_open_order(validated_data: dict, headers: dict):
         open_order_request_id=request_id,
         defaults={
             "abha_number": abha_number,
+            "abha_address": abha_address,
             "health_facility": health_facility,
         },
     )
 
     GatewayService.patient__on_share_open_order(
         {
-            "abha_address": abha_number.health_id,
+            "abha_address": abha_address,
             "patient_uid": str(abha_number.patient.external_id),
             "procedures": build_procedures(charge_items),
             "request_id": request_id,
@@ -130,7 +136,7 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
     if not order:
         return send_error("Open order not found")
 
-    if order.abha_number.health_id != abha_address:
+    if order.requesting_abha_address != abha_address:
         return send_error("Open order does not belong to the given ABHA")
 
     if order.invoice_id:
@@ -240,8 +246,7 @@ def handle_scan_pay_order_status(validated_data: dict, headers: dict):
     )
 
     if not order or (
-        order.order_number
-        and order.order_number != query_status.get("orderNumber")
+        order.order_number and order.order_number != query_status.get("orderNumber")
     ):
         GatewayService.patient__scan_pay_on_order_status(
             {
@@ -255,5 +260,11 @@ def handle_scan_pay_order_status(validated_data: dict, headers: dict):
         {
             "acknowledgement": build_scan_pay_acknowledgement(order),
             "request_id": request_id,
+            "error": {
+                "message": ORDER_FAILURE_MESSAGES[order.status],
+                "code": "ABDM-9999",
+            }
+            if order.status in ORDER_FAILURE_MESSAGES
+            else None,
         }
     )
