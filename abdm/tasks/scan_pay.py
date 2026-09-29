@@ -5,10 +5,13 @@ import requests
 from celery import shared_task
 
 from abdm.models import PaymentOrder, Transaction, TransactionType
-from abdm.models.payment_order import PaymentOrderStatus
+from abdm.models.payment_order import (
+    PAYMENT_ORDER_PENDING_STATUSES,
+    PaymentOrderStatus,
+)
 from abdm.service.helper import ABDMAPIException, uuid
 from abdm.service.v3.gateway import GatewayService
-from abdm.service.v3.payment_providers import get_provider
+from abdm.service.v3.payment_providers import close_payment_order, get_provider
 from abdm.settings import plugin_settings as settings
 from care.utils.time_util import care_now
 
@@ -16,11 +19,6 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 5
 RETRY_COUNTDOWN = 30
-
-PAYMENT_ORDER_POLLABLE_STATUSES = [
-    PaymentOrderStatus.PAYMENT_INITIATED,
-    PaymentOrderStatus.PENDING,
-]
 
 
 def _call_gateway(task, method, payload, label):
@@ -82,7 +80,7 @@ def reconcile_pending_payment_orders():
     cutoff = care_now() - timedelta(seconds=settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE)
     orders = (
         PaymentOrder.objects.filter(
-            status__in=PAYMENT_ORDER_POLLABLE_STATUSES,
+            status__in=PAYMENT_ORDER_PENDING_STATUSES,
             invoice__isnull=False,
         )
         .exclude(order_number__isnull=True)
@@ -90,11 +88,10 @@ def reconcile_pending_payment_orders():
         .select_related("invoice__account", "health_facility__facility")
     )
     for order in orders:
-        if order.created_date and order.created_date < cutoff:
-            order.status = PaymentOrderStatus.FAIL
-            order.save(update_fields=["status", "modified_date"])
-            continue
         try:
+            if order.created_date and order.created_date < cutoff:
+                close_payment_order(order, PaymentOrderStatus.FAIL)
+                continue
             provider = get_provider(
                 order.provider or settings.ABDM_SCAN_AND_PAY_PROVIDER
             )

@@ -7,10 +7,10 @@ from abdm.models.payment_order import PaymentOrderStatus
 from abdm.service.v3.callback_handlers import CallbackProcessingError
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.scan_pay import (
+    ScanPayPaymentLinkError,
     build_procedures,
     build_scan_pay_acknowledgement,
-    create_scan_pay_invoice,
-    create_scan_pay_payment_link,
+    create_scan_pay_invoice_with_payment_link,
     get_open_charge_items,
 )
 from abdm.settings import plugin_settings as settings
@@ -163,7 +163,7 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
         return send_error("Selected services must belong to a single account")
 
     try:
-        invoice = create_scan_pay_invoice(
+        invoice, payment = create_scan_pay_invoice_with_payment_link(
             charge_items,
             charge_items[0].account,
             order.health_facility.facility,
@@ -173,19 +173,16 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
     except ObjectLocked:
         # propagates to the task which retries shortly after
         raise
+    except ScanPayPaymentLinkError:
+        logger.exception(
+            f"Failed to create payment link for scan and pay order {open_order_request_id}"
+        )
+        return send_error("Failed to create payment link")
     except Exception:
         logger.exception(
             f"Failed to create invoice for scan and pay order {open_order_request_id}"
         )
         return send_error("Failed to create payment order")
-
-    try:
-        payment = create_scan_pay_payment_link(invoice)
-    except Exception:
-        logger.exception(
-            f"Failed to create payment link for scan and pay order {open_order_request_id}"
-        )
-        return send_error("Failed to create payment link")
 
     order.invoice = invoice
     order.order_number = payment["order_number"]

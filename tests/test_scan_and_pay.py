@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -7,6 +8,9 @@ from abdm.models.payment_order import PaymentOrderStatus
 from abdm.service.helper import uuid
 from abdm.service.v3 import payment_providers
 from abdm.service.v3 import scan_pay as scan_pay_service
+from abdm.service.v3.callback_handlers.scan_pay import handle_patient_selection
+from abdm.settings import plugin_settings as abdm_settings
+from abdm.tasks.scan_pay import reconcile_pending_payment_orders
 from abdm.utils import user as abdm_user
 from django.core.exceptions import ImproperlyConfigured
 from model_bakery import baker
@@ -21,6 +25,7 @@ from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationTypeOptions,
 )
 from care.utils.tests.base import CareAPITestBase
+from care.utils.time_util import care_now
 
 SHARE_OPEN_ORDER_URL = "/api/abdm/api/v3/patient/share/open-order"
 SELECTION_URL = "/api/abdm/api/v3/patient/selection"
@@ -198,7 +203,7 @@ class TestSelection(ScanPayTestBase):
             ],
         }
 
-    @patch("abdm.service.v3.callback_handlers.scan_pay.create_scan_pay_payment_link")
+    @patch("abdm.service.v3.scan_pay.create_scan_pay_payment_link")
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
     def test_selection_success(self, mock_gateway, mock_payment_link):
         mock_payment_link.return_value = {
@@ -268,6 +273,58 @@ class TestSelection(ScanPayTestBase):
 
         self.assertEqual(response.status_code, 202)
         self.assertIn("error", mock_gateway.call_args[0][0])
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    @patch("abdm.service.v3.scan_pay.create_scan_pay_payment_link")
+    def test_selection_without_payment_link_creates_no_invoice(
+        self, mock_payment_link, mock_gateway
+    ):
+        mock_payment_link.side_effect = RuntimeError("gateway down")
+        order = self.create_order()
+        charge_item = self.create_charge_item()
+
+        handle_patient_selection(
+            self.selection_payload(order, [charge_item]), {"REQUEST-ID": uuid()}
+        )
+
+        order.refresh_from_db()
+        charge_item.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.OPEN_ORDER_SHARED)
+        self.assertIsNone(order.invoice_id)
+        self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
+        self.assertIsNone(charge_item.paid_invoice_id)
+        self.assertFalse(Invoice.objects.filter(account=self.account).exists())
+        payload = mock_gateway.call_args[0][0]
+        self.assertEqual(payload["error"]["message"], "Failed to create payment link")
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    @patch("abdm.service.v3.scan_pay.create_scan_pay_payment_link")
+    def test_selection_keeps_items_selectable_after_link_failure(
+        self, mock_payment_link, mock_gateway
+    ):
+        mock_payment_link.side_effect = [
+            RuntimeError("gateway down"),
+            {
+                "order_number": "INV-1",
+                "payment_link_id": "plink_retry",
+                "payment_url": "https://rzp.io/retry",
+            },
+        ]
+        order = self.create_order()
+        charge_item = self.create_charge_item()
+
+        for _ in range(2):
+            handle_patient_selection(
+                self.selection_payload(order, [charge_item]), {"REQUEST-ID": uuid()}
+            )
+
+        order.refresh_from_db()
+        charge_item.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
+        self.assertEqual(order.payment_link_id, "plink_retry")
+        self.assertEqual(charge_item.status, ChargeItemStatusOptions.billed.value)
+        self.assertEqual(charge_item.paid_invoice_id, order.invoice_id)
+        self.assertEqual(Invoice.objects.filter(account=self.account).count(), 1)
 
 
 class TestPaymentNotify(ScanPayTestBase):
@@ -484,4 +541,127 @@ class TestPaymentProviderRegistry(ScanPayTestBase):
             scan_pay_service.settings, "ABDM_SCAN_AND_PAY_PROVIDER", "does_not_exist"
         ), self.assertRaises(ImproperlyConfigured):
             scan_pay_service.create_scan_pay_payment_link(invoice)
+
+
+class TestClosePaymentOrder(ScanPayTestBase):
+    def make_order(self, order_status):
+        return PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            order_number="INV-CLOSE",
+            status=order_status,
+        )
+
+    def make_invoiced_order(self, order_status=PaymentOrderStatus.PAYMENT_INITIATED):
+        charge_item = self.create_charge_item(
+            status=ChargeItemStatusOptions.billed.value
+        )
+        invoice = baker.make(
+            Invoice,
+            facility=self.facility,
+            patient=self.patient,
+            account=self.account,
+            status=InvoiceStatusOptions.issued.value,
+            total_gross=Decimal(100),
+            number="INV-CLOSE",
+            charge_items=[charge_item.id],
+        )
+        charge_item.paid_invoice = invoice
+        charge_item.save(update_fields=["paid_invoice"])
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            invoice=invoice,
+            order_number="INV-CLOSE",
+            status=order_status,
+        )
+        return order, invoice, charge_item
+
+    def test_closes_pending_order(self):
+        order = self.make_order(PaymentOrderStatus.PAYMENT_INITIATED)
+
+        changed = payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
+
+        order.refresh_from_db()
+        self.assertTrue(changed)
+        self.assertEqual(order.status, PaymentOrderStatus.FAIL)
+
+    def test_leaves_paid_order_untouched(self):
+        order = self.make_order(PaymentOrderStatus.SUCCESS)
+
+        changed = payment_providers.close_payment_order(
+            order, PaymentOrderStatus.CANCELED
+        )
+
+        order.refresh_from_db()
+        self.assertFalse(changed)
+        self.assertEqual(order.status, PaymentOrderStatus.SUCCESS)
+
+    def test_closing_voids_invoice_and_releases_charge_items(self):
+        order, invoice, charge_item = self.make_invoiced_order()
+
+        payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
+
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        charge_item.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.FAIL)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertIn("failed", invoice.cancelled_reason)
+        self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
+        self.assertIsNone(charge_item.paid_invoice_id)
+
+    def test_cancelling_records_reason(self):
+        order, invoice, _ = self.make_invoiced_order()
+
+        payment_providers.close_payment_order(order, PaymentOrderStatus.CANCELED)
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertIn("cancelled", invoice.cancelled_reason)
+
+    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    def test_closing_keeps_invoice_that_received_a_payment(self, mock_task):
+        order, invoice, charge_item = self.make_invoiced_order()
+        baker.make(
+            PaymentReconciliation,
+            facility=self.facility,
+            account=self.account,
+            target_invoice=invoice,
+            reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
+            status=PaymentReconciliationStatusOptions.active.value,
+            amount=Decimal(40),
+            tendered_amount=Decimal(40),
+            returned_amount=Decimal(0),
+            reference_number="pay_partial",
+        )
+        order.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.PENDING)
+
+        payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
+
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        charge_item.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.FAIL)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
+        self.assertEqual(charge_item.status, ChargeItemStatusOptions.billed.value)
+
+    def test_stale_order_sweep_voids_invoice(self):
+        order, invoice, charge_item = self.make_invoiced_order()
+        stale = care_now() - timedelta(
+            seconds=abdm_settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE + 60
+        )
+        PaymentOrder.objects.filter(pk=order.pk).update(created_date=stale)
+
+        reconcile_pending_payment_orders()
+
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        charge_item.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.FAIL)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
 

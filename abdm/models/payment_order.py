@@ -20,6 +20,12 @@ PAYMENT_ORDER_PAID_STATUSES = [
     PaymentOrderStatus.REFUND_SUCCESS,
 ]
 
+# Orders awaiting a gateway outcome; the only ones polled.
+PAYMENT_ORDER_PENDING_STATUSES = [
+    PaymentOrderStatus.PAYMENT_INITIATED,
+    PaymentOrderStatus.PENDING,
+]
+
 
 class PaymentOrder(BaseModel):
     open_order_request_id = models.UUIDField(unique=True, db_index=True)

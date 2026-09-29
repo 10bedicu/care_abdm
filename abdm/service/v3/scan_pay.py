@@ -33,6 +33,10 @@ SERVICE_RESOURCE_CATEGORY_MAP = {
 DEFAULT_CATEGORY = "Miscellaneous/Other"
 
 
+class ScanPayPaymentLinkError(Exception):
+    pass
+
+
 def get_open_charge_items(patient, facility):
     return list(
         ChargeItem.objects.filter(
@@ -63,28 +67,49 @@ def build_procedures(charge_items):
     ]
 
 
-def create_scan_pay_invoice(charge_items, account, facility, patient, abha_address):
-    with transaction.atomic(), AccountLock(account):
-        invoice = Invoice(
-            facility=facility,
-            patient=patient,
-            account=account,
-            title=f"Scan and Pay - {abha_address}",
-            status=InvoiceStatusOptions.issued.value,
-            issue_date=care_now(),
-            charge_items=[item.id for item in charge_items],
-            created_by=get_or_create_abdm_user(),
-        )
-        with InvoiceCreateLock():
-            invoice.number = evaluate_invoice_identifier_default_expression(facility)
-            invoice.save()
-        ChargeItem.objects.filter(id__in=invoice.charge_items).update(
-            status=ChargeItemStatusOptions.billed.value, paid_invoice=invoice
-        )
-        sync_invoice_items(invoice)
+def _create_invoice(charge_items, account, facility, patient, abha_address, created_by):
+    invoice = Invoice(
+        facility=facility,
+        patient=patient,
+        account=account,
+        title=f"Scan and Pay - {abha_address}",
+        status=InvoiceStatusOptions.issued.value,
+        issue_date=care_now(),
+        charge_items=[item.id for item in charge_items],
+        created_by=created_by,
+    )
+    with InvoiceCreateLock():
+        invoice.number = evaluate_invoice_identifier_default_expression(facility)
         invoice.save()
-    rebalance_account_task.delay(account.id)
+    ChargeItem.objects.filter(id__in=invoice.charge_items).update(
+        status=ChargeItemStatusOptions.billed.value, paid_invoice=invoice
+    )
+    sync_invoice_items(invoice)
+    invoice.save()
     return invoice
+
+
+def create_scan_pay_invoice_with_payment_link(
+    charge_items, account, facility, patient, abha_address
+):
+    """
+    Invoice the selected charge items and get a payment link for the invoice.
+
+    Runs in one transaction under the account lock: if the gateway does not
+    return a link, the invoice and charge item updates are rolled back so the
+    items stay billable.
+    """
+    created_by = get_or_create_abdm_user()
+    with transaction.atomic(), AccountLock(account):
+        invoice = _create_invoice(
+            charge_items, account, facility, patient, abha_address, created_by
+        )
+        try:
+            payment = create_scan_pay_payment_link(invoice)
+        except Exception as exc:
+            raise ScanPayPaymentLinkError(str(exc)) from exc
+        transaction.on_commit(lambda: rebalance_account_task.delay(account.id))
+    return invoice, payment
 
 
 def create_scan_pay_payment_link(invoice):
