@@ -90,6 +90,16 @@ class ScanPayTestBase(CareAPITestBase):
             },
         }
 
+    def post_callback(self, url, payload, request_id=None):
+        # the callback is enqueued on commit, which the test transaction never reaches
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client.post(
+                url,
+                payload,
+                format="json",
+                headers={"REQUEST-ID": request_id or uuid()},
+            )
+
 
 class TestShareOpenOrder(ScanPayTestBase):
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
@@ -97,11 +107,8 @@ class TestShareOpenOrder(ScanPayTestBase):
         self.create_charge_item()
         request_id = uuid()
 
-        response = self.client.post(
-            SHARE_OPEN_ORDER_URL,
-            self.share_open_order_payload(),
-            format="json",
-            headers={"REQUEST-ID": request_id},
+        response = self.post_callback(
+            SHARE_OPEN_ORDER_URL, self.share_open_order_payload(), request_id
         )
 
         self.assertEqual(response.status_code, 202)
@@ -121,11 +128,9 @@ class TestShareOpenOrder(ScanPayTestBase):
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
     def test_share_open_order_unknown_patient(self, mock_gateway):
-        response = self.client.post(
+        response = self.post_callback(
             SHARE_OPEN_ORDER_URL,
             self.share_open_order_payload(abha_address="unknown@sbx"),
-            format="json",
-            headers={"REQUEST-ID": uuid()},
         )
 
         self.assertEqual(response.status_code, 202)
@@ -159,11 +164,8 @@ class TestShareOpenOrder(ScanPayTestBase):
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
     def test_share_open_order_no_open_orders(self, mock_gateway):
-        response = self.client.post(
-            SHARE_OPEN_ORDER_URL,
-            self.share_open_order_payload(),
-            format="json",
-            headers={"REQUEST-ID": uuid()},
+        response = self.post_callback(
+            SHARE_OPEN_ORDER_URL, self.share_open_order_payload()
         )
 
         self.assertEqual(response.status_code, 202)
@@ -173,11 +175,10 @@ class TestShareOpenOrder(ScanPayTestBase):
     def test_share_open_order_unknown_facility(self, mock_gateway):
         request_id = uuid()
 
-        response = self.client.post(
+        response = self.post_callback(
             SHARE_OPEN_ORDER_URL,
             self.share_open_order_payload(hip_id="UNKNOWN_HIP"),
-            format="json",
-            headers={"REQUEST-ID": request_id},
+            request_id,
         )
 
         self.assertEqual(response.status_code, 202)
@@ -192,11 +193,8 @@ class TestShareOpenOrder(ScanPayTestBase):
         request_id = uuid()
 
         for _ in range(2):
-            response = self.client.post(
-                SHARE_OPEN_ORDER_URL,
-                self.share_open_order_payload(),
-                format="json",
-                headers={"REQUEST-ID": request_id},
+            response = self.post_callback(
+                SHARE_OPEN_ORDER_URL, self.share_open_order_payload(), request_id
             )
             self.assertEqual(response.status_code, 202)
 
@@ -245,11 +243,8 @@ class TestSelection(ScanPayTestBase):
         order = self.create_order()
         charge_item = self.create_charge_item()
 
-        response = self.client.post(
-            SELECTION_URL,
-            self.selection_payload(order, [charge_item]),
-            format="json",
-            headers={"REQUEST-ID": uuid()},
+        response = self.post_callback(
+            SELECTION_URL, self.selection_payload(order, [charge_item])
         )
 
         self.assertEqual(response.status_code, 202)
@@ -280,11 +275,8 @@ class TestSelection(ScanPayTestBase):
             status=ChargeItemStatusOptions.billed.value
         )
 
-        response = self.client.post(
-            SELECTION_URL,
-            self.selection_payload(order, [charge_item]),
-            format="json",
-            headers={"REQUEST-ID": uuid()},
+        response = self.post_callback(
+            SELECTION_URL, self.selection_payload(order, [charge_item])
         )
 
         self.assertEqual(response.status_code, 202)
@@ -295,11 +287,8 @@ class TestSelection(ScanPayTestBase):
         charge_item = self.create_charge_item()
         order = PaymentOrder(open_order_request_id=uuid())
 
-        response = self.client.post(
-            SELECTION_URL,
-            self.selection_payload(order, [charge_item]),
-            format="json",
-            headers={"REQUEST-ID": uuid()},
+        response = self.post_callback(
+            SELECTION_URL, self.selection_payload(order, [charge_item])
         )
 
         self.assertEqual(response.status_code, 202)
@@ -633,7 +622,7 @@ class TestOrderStatus(ScanPayTestBase):
             status=PaymentOrderStatus.PAYMENT_INITIATED,
         )
 
-        response = self.client.post(
+        response = self.post_callback(
             ORDER_STATUS_URL,
             {
                 "queryStatus": {
@@ -642,8 +631,6 @@ class TestOrderStatus(ScanPayTestBase):
                     "openOrderRequestId": str(order.open_order_request_id),
                 }
             },
-            format="json",
-            headers={"REQUEST-ID": uuid()},
         )
 
         self.assertEqual(response.status_code, 202)
@@ -652,7 +639,7 @@ class TestOrderStatus(ScanPayTestBase):
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__scan_pay_on_order_status")
     def test_order_status_unknown_order(self, mock_gateway):
-        response = self.client.post(
+        response = self.post_callback(
             ORDER_STATUS_URL,
             {
                 "queryStatus": {
@@ -661,8 +648,6 @@ class TestOrderStatus(ScanPayTestBase):
                     "openOrderRequestId": uuid(),
                 }
             },
-            format="json",
-            headers={"REQUEST-ID": uuid()},
         )
 
         self.assertEqual(response.status_code, 202)

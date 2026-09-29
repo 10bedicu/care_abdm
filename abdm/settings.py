@@ -121,6 +121,9 @@ DEFAULTS = {
     "ABDM_CM_ID": "sbx",
     "ABDM_BENEFIT_NAME": "",
     "ABDM_REQUEST_TIMEOUT": 30,
+    # seconds the gateway holds a request open for an on-* reply (ABDM: 30s);
+    # later or repeated replies are rejected with ABDM-2406
+    "ABDM_CALLBACK_RESPONSE_WINDOW": 30,
     "ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM": "https://care.ohc.network/abha_number",
     "ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY": "ABHA Number",
     "ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,

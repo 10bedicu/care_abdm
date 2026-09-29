@@ -22,10 +22,20 @@ MAX_RETRIES = 5
 RETRY_COUNTDOWN = 30
 
 
-def _call_gateway(task, method, payload, label):
+def _call_gateway(task, method, payload, label, retry_transient=True):
     try:
         method(payload)
     except (requests.Timeout, requests.ConnectionError) as exc:
+        if not retry_transient:
+            # a reply correlated by requestId may already have reached the gateway;
+            # sending it again is rejected with ABDM-2406
+            logger.exception(
+                "scan_pay %s transient failure for request %s; not retrying a "
+                "correlated reply",
+                label,
+                payload.get("request_id"),
+            )
+            raise
         logger.warning(
             "scan_pay %s transient failure for request %s (attempt %s/%s)",
             label,
@@ -48,12 +58,19 @@ def scan_pay_on_share_open_order(self, payload: dict):
         GatewayService.patient__on_share_open_order,
         payload,
         "on_share_open_order",
+        retry_transient=False,
     )
 
 
 @shared_task(bind=True, max_retries=MAX_RETRIES)
 def scan_pay_on_selection(self, payload: dict):
-    _call_gateway(self, GatewayService.patient__on_selection, payload, "on_selection")
+    _call_gateway(
+        self,
+        GatewayService.patient__on_selection,
+        payload,
+        "on_selection",
+        retry_transient=False,
+    )
 
 
 @shared_task(bind=True, max_retries=MAX_RETRIES)
@@ -75,6 +92,7 @@ def scan_pay_on_order_status(self, payload: dict):
         GatewayService.patient__scan_pay_on_order_status,
         payload,
         "on_order_status",
+        retry_transient=False,
     )
 
 

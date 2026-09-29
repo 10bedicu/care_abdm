@@ -2,15 +2,19 @@ import logging
 
 import requests
 from celery import shared_task
+from django.utils import timezone
 
 from abdm.models import CallbackStatus, CallbackType, InboundCallback
+from abdm.service.v3.callback_handlers import CallbackProcessingError
+from abdm.settings import plugin_settings as settings
 from care.utils.lock import ObjectLocked
 
 logger = logging.getLogger(__name__)
 
 LOCK_RETRY_COUNTDOWN = 2
 
-RETRY_FOR = (ObjectLocked, requests.Timeout, requests.ConnectionError)
+TRANSIENT_ERRORS = (requests.Timeout, requests.ConnectionError)
+RETRY_FOR = (ObjectLocked, *TRANSIENT_ERRORS)
 
 # redis broker priorities are inverted: 0 is consumed first (steps 0/3/6/9)
 HIGH_PRIORITY = 0
@@ -109,6 +113,28 @@ INTERACTIVE_CALLBACK_TYPES = {
     CallbackType.PATIENT_SCAN_PAY_ORDER_STATUS,
 }
 
+# callbacks answered with an on-* reply correlated by REQUEST-ID; the gateway holds
+# the request only for ABDM_CALLBACK_RESPONSE_WINDOW and rejects a late or repeated
+# reply with ABDM-2406, so these must be answered at most once and in time
+TIME_BOXED_CALLBACK_TYPES = {
+    CallbackType.PATIENT_SHARE,
+    CallbackType.PATIENT_SHARE_OPEN_ORDER,
+    CallbackType.PATIENT_SELECTION,
+    CallbackType.PATIENT_SCAN_PAY_ORDER_STATUS,
+}
+
+
+def is_time_boxed(callback_type) -> bool:
+    return callback_type in TIME_BOXED_CALLBACK_TYPES
+
+
+def has_response_window_elapsed(callback: InboundCallback) -> bool:
+    if not callback.created_date:
+        return False
+
+    elapsed = (timezone.now() - callback.created_date).total_seconds()
+    return elapsed > settings.ABDM_CALLBACK_RESPONSE_WINDOW
+
 
 def enqueue_inbound_callback(callback: InboundCallback):
     priority = (
@@ -139,6 +165,20 @@ def process_inbound_callback(self, callback_id: int):
         logger.info("ABDM inbound callback %s already completed; skipping", callback_id)
         return
 
+    if is_time_boxed(callback.callback_type) and has_response_window_elapsed(callback):
+        callback.mark_failed(
+            f"expired: not processed within {settings.ABDM_CALLBACK_RESPONSE_WINDOW}s; "
+            "the gateway rejects late replies (ABDM-2406)"
+        )
+        logger.warning(
+            "ABDM inbound callback %s type=%s request_id=%s expired before processing; "
+            "skipping reply",
+            callback.pk,
+            callback.callback_type,
+            callback.request_id,
+        )
+        return
+
     callback.mark_processing()
     logger.info(
         "Processing ABDM inbound callback id=%s type=%s request_id=%s attempt=%s",
@@ -160,6 +200,25 @@ def process_inbound_callback(self, callback_id: int):
             "ABDM inbound callback %s blocked on lock; retrying", callback.pk
         )
         raise self.retry(exc=exc, countdown=LOCK_RETRY_COUNTDOWN) from exc
+    except TRANSIENT_ERRORS as exc:
+        callback.mark_failed(f"{type(exc).__name__}: {exc}")
+        if is_time_boxed(callback.callback_type):
+            # the gateway may have received the reply before the connection failed;
+            # re-running the handler would send it twice
+            logger.exception(
+                "ABDM inbound callback %s failed on attempt %s; not retrying a "
+                "correlated reply",
+                callback.pk,
+                callback.attempts,
+            )
+            message = f"{type(exc).__name__} while replying to {callback.callback_type}"
+            raise CallbackProcessingError(message) from exc
+        logger.warning(
+            "ABDM inbound callback %s failed on attempt %s; retrying",
+            callback.pk,
+            callback.attempts,
+        )
+        raise
     except Exception as exc:
         callback.mark_failed(f"{type(exc).__name__}: {exc}")
         logger.exception(
