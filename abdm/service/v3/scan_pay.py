@@ -116,6 +116,7 @@ def create_scan_pay_payment_link(invoice):
     provider = get_provider(settings.ABDM_SCAN_AND_PAY_PROVIDER)
     result = provider.create_payment_link(invoice)
     result.setdefault("provider", provider.name)
+    result.setdefault("amount", invoice.total_gross)
     return result
 
 

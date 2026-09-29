@@ -23,7 +23,9 @@ class PaymentProvider(ABC):
         Create a payment link for the given invoice.
 
         Must return a dict with the keys ``order_number``, ``payment_link_id``
-        and ``payment_url``.
+        and ``payment_url``. May include ``amount`` (what the link was created
+        for; defaults to the invoice total) so confirmations can be checked
+        against it.
         """
 
     def reconcile_order(self, order) -> None:  # noqa: B027

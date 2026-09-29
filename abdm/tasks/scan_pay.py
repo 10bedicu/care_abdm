@@ -13,6 +13,7 @@ from abdm.service.helper import ABDMAPIException, uuid
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.payment_providers import close_payment_order, get_provider
 from abdm.settings import plugin_settings as settings
+from care.utils.lock import ObjectLocked
 from care.utils.time_util import care_now
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,10 @@ def _call_gateway(task, method, payload, label):
 @shared_task(bind=True, max_retries=MAX_RETRIES)
 def scan_pay_on_share_open_order(self, payload: dict):
     _call_gateway(
-        self, GatewayService.patient__on_share_open_order, payload, "on_share_open_order"
+        self,
+        GatewayService.patient__on_share_open_order,
+        payload,
+        "on_share_open_order",
     )
 
 
@@ -67,13 +71,20 @@ def scan_pay_notify(self, payload: dict, transaction_meta: dict | None = None):
 @shared_task(bind=True, max_retries=MAX_RETRIES)
 def scan_pay_on_order_status(self, payload: dict):
     _call_gateway(
-        self, GatewayService.patient__scan_pay_on_order_status, payload, "on_order_status"
+        self,
+        GatewayService.patient__scan_pay_on_order_status,
+        payload,
+        "on_order_status",
     )
 
 
 @shared_task
 def reconcile_pending_payment_orders():
-    """Poll the provider for each pending scan-and-pay order; fail stale ones."""
+    """Poll the provider for each pending scan-and-pay order; fail stale ones.
+
+    A stale order is only failed after the provider was asked about it, so a
+    payment that landed late is recorded instead of being dropped.
+    """
     if not settings.ABDM_SCAN_AND_PAY_POLLING_ENABLED:
         return
 
@@ -89,13 +100,17 @@ def reconcile_pending_payment_orders():
     )
     for order in orders:
         try:
-            if order.created_date and order.created_date < cutoff:
-                close_payment_order(order, PaymentOrderStatus.FAIL)
-                continue
             provider = get_provider(
                 order.provider or settings.ABDM_SCAN_AND_PAY_PROVIDER
             )
             provider.reconcile_order(order)
+            if order.created_date and order.created_date < cutoff:
+                close_payment_order(order, PaymentOrderStatus.FAIL)
+        except ObjectLocked:
+            logger.info(
+                "Scan-and-pay order %s is being settled elsewhere; skipping",
+                order.order_number,
+            )
         except Exception:
             logger.exception(
                 "Failed to reconcile scan-and-pay order %s", order.order_number

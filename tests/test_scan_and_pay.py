@@ -24,6 +24,7 @@ from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationStatusOptions,
     PaymentReconciliationTypeOptions,
 )
+from care.utils.lock import ObjectLocked
 from care.utils.tests.base import CareAPITestBase
 from care.utils.time_util import care_now
 
@@ -348,18 +349,19 @@ class TestPaymentNotify(ScanPayTestBase):
             status=PaymentOrderStatus.PAYMENT_INITIATED,
         )
 
-        baker.make(
-            PaymentReconciliation,
-            facility=self.facility,
-            account=self.account,
-            target_invoice=invoice,
-            reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
-            status=PaymentReconciliationStatusOptions.active.value,
-            amount=Decimal(100),
-            tendered_amount=Decimal(100),
-            returned_amount=Decimal(0),
-            reference_number="pay_test",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            baker.make(
+                PaymentReconciliation,
+                facility=self.facility,
+                account=self.account,
+                target_invoice=invoice,
+                reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
+                status=PaymentReconciliationStatusOptions.active.value,
+                amount=Decimal(100),
+                tendered_amount=Decimal(100),
+                returned_amount=Decimal(0),
+                reference_number="pay_test",
+            )
 
         order.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.SUCCESS)
@@ -370,6 +372,44 @@ class TestPaymentNotify(ScanPayTestBase):
         self.assertEqual(payload["acknowledgement"]["status"], "SUCCESS")
         self.assertEqual(payload["hip_id"], self.health_facility.hf_id)
         self.assertIn("receipt", payload["acknowledgement"]["payment_receipt_link"])
+
+    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    def test_notify_waits_for_commit(self, mock_task):
+        invoice = baker.make(
+            Invoice,
+            facility=self.facility,
+            patient=self.patient,
+            account=self.account,
+            status=InvoiceStatusOptions.issued.value,
+            total_gross=Decimal(100),
+            number="INV-COMMIT",
+        )
+        PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            invoice=invoice,
+            order_number="INV-COMMIT",
+            status=PaymentOrderStatus.PAYMENT_INITIATED,
+        )
+
+        with self.captureOnCommitCallbacks() as callbacks:
+            baker.make(
+                PaymentReconciliation,
+                facility=self.facility,
+                account=self.account,
+                target_invoice=invoice,
+                reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
+                status=PaymentReconciliationStatusOptions.active.value,
+                amount=Decimal(100),
+                tendered_amount=Decimal(100),
+                returned_amount=Decimal(0),
+                reference_number="pay_commit",
+            )
+
+        # the PHR is only told once the payment is durably recorded
+        mock_task.assert_not_called()
+        self.assertEqual(len(callbacks), 1)
 
     @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
     def test_partial_payment_notifies_pending(self, mock_task):
@@ -391,24 +431,136 @@ class TestPaymentNotify(ScanPayTestBase):
             status=PaymentOrderStatus.PAYMENT_INITIATED,
         )
 
-        baker.make(
-            PaymentReconciliation,
-            facility=self.facility,
-            account=self.account,
-            target_invoice=invoice,
-            reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
-            status=PaymentReconciliationStatusOptions.active.value,
-            amount=Decimal(40),
-            tendered_amount=Decimal(40),
-            returned_amount=Decimal(0),
-            reference_number="pay_partial",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            baker.make(
+                PaymentReconciliation,
+                facility=self.facility,
+                account=self.account,
+                target_invoice=invoice,
+                reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
+                status=PaymentReconciliationStatusOptions.active.value,
+                amount=Decimal(40),
+                tendered_amount=Decimal(40),
+                returned_amount=Decimal(0),
+                reference_number="pay_partial",
+            )
 
         order.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.PENDING)
         payload = mock_task.call_args[0][0]
         self.assertEqual(payload["acknowledgement"]["status"], "PENDING")
         self.assertIsNone(payload["acknowledgement"]["payment_receipt_link"])
+
+
+class TestCreatePaymentReconciliation(ScanPayTestBase):
+    def make_order(self, amount=Decimal(100), **fields):
+        invoice = baker.make(
+            Invoice,
+            facility=self.facility,
+            patient=self.patient,
+            account=self.account,
+            status=InvoiceStatusOptions.issued.value,
+            total_gross=Decimal(100),
+            number="INV-REC",
+        )
+        return PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            invoice=invoice,
+            order_number="INV-REC",
+            status=PaymentOrderStatus.PAYMENT_INITIATED,
+            amount=amount,
+            **fields,
+        )
+
+    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    @patch("abdm.service.v3.payment_providers.reconciliation.rebalance_account_task.delay")
+    def test_records_once_and_rebalances_on_commit(self, mock_rebalance, mock_task):
+        order = self.make_order()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            first = payment_providers.create_payment_reconciliation(order, "ref1")
+            second = payment_providers.create_payment_reconciliation(order, "ref1")
+            by_number = payment_providers.reconcile_payment_order("INV-REC", "ref2")
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertEqual(by_number, order)
+        self.assertEqual(
+            PaymentReconciliation.objects.filter(target_invoice=order.invoice).count(),
+            1,
+        )
+        mock_rebalance.assert_called_once_with(self.account.id)
+        mock_task.assert_called_once()
+
+    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    def test_stale_snapshots_cannot_double_credit(self, _task):
+        order = self.make_order()
+        snapshot = PaymentOrder.objects.get(pk=order.pk)
+
+        payment_providers.create_payment_reconciliation(order, "ref1")
+        recorded = payment_providers.create_payment_reconciliation(snapshot, "ref2")
+
+        self.assertFalse(recorded)
+        self.assertEqual(
+            PaymentReconciliation.objects.filter(target_invoice=order.invoice).count(),
+            1,
+        )
+
+    def test_settlement_in_progress_elsewhere_raises(self):
+        order = self.make_order()
+
+        with (
+            payment_providers.PaymentOrderLock(order),
+            self.assertRaises(ObjectLocked),
+        ):
+            payment_providers.create_payment_reconciliation(order, "ref1")
+
+        self.assertFalse(
+            PaymentReconciliation.objects.filter(target_invoice=order.invoice).exists()
+        )
+
+    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    def test_records_confirmed_amount_not_invoice_total(self, _task):
+        order = self.make_order()
+        Invoice.objects.filter(pk=order.invoice_id).update(total_gross=Decimal(150))
+
+        payment_providers.create_payment_reconciliation(order, "ref1", amount="100.00")
+
+        reconciliation = PaymentReconciliation.objects.get(target_invoice=order.invoice)
+        self.assertEqual(reconciliation.amount, Decimal(100))
+        self.assertNotIn("Needs review", reconciliation.note)
+
+    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    def test_falls_back_to_order_amount_and_flags_mismatch(self, _task):
+        order = self.make_order(amount=Decimal(80))
+
+        payment_providers.create_payment_reconciliation(order, "ref1")
+        reconciliation = PaymentReconciliation.objects.get(target_invoice=order.invoice)
+        self.assertEqual(reconciliation.amount, Decimal(80))
+
+        other = self.make_order()
+        payment_providers.create_payment_reconciliation(other, "ref2", amount="60")
+        reconciliation = PaymentReconciliation.objects.get(target_invoice=other.invoice)
+        self.assertEqual(reconciliation.amount, Decimal(60))
+        self.assertIn("amount mismatch", reconciliation.note)
+
+    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    def test_late_payment_after_void_is_recorded_and_flagged(self, mock_task):
+        order = self.make_order()
+        payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
+        order.refresh_from_db()
+        self.assertEqual(order.invoice.status, InvoiceStatusOptions.entered_in_error.value)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            payment_providers.reconcile_payment_order("INV-REC", "late-ref")
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.SUCCESS)
+        reconciliation = PaymentReconciliation.objects.get(target_invoice=order.invoice)
+        self.assertIn("voided", reconciliation.note)
+        mock_task.assert_called_once()
 
 
 class TestOrderStatus(ScanPayTestBase):
@@ -533,6 +685,7 @@ class TestPaymentProviderRegistry(ScanPayTestBase):
             result = scan_pay_service.create_scan_pay_payment_link(invoice)
 
         self.assertEqual(result["payment_url"], "https://pay/x")
+        self.assertEqual(result["amount"], Decimal(100))
         self.assertIs(captured["invoice"], invoice)
 
     def test_unknown_provider_raises(self):
@@ -664,4 +817,66 @@ class TestClosePaymentOrder(ScanPayTestBase):
         self.assertEqual(order.status, PaymentOrderStatus.FAIL)
         self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
         self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
+
+    def register_sweep_provider(self, reconcile):
+        class SweepProvider(payment_providers.PaymentProvider):
+            name = "sweep_test"
+
+            def create_payment_link(self, invoice):
+                raise NotImplementedError
+
+            def reconcile_order(self, order):
+                reconcile(order)
+
+        payment_providers.register_provider(SweepProvider)
+        self.addCleanup(payment_providers.unregister_provider, "sweep_test")
+
+    def make_stale_order(self):
+        order, invoice, charge_item = self.make_invoiced_order()
+        PaymentOrder.objects.filter(pk=order.pk).update(
+            provider="sweep_test",
+            created_date=care_now()
+            - timedelta(seconds=abdm_settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE + 60),
+        )
+        return order, invoice
+
+    @patch("abdm.signals.scan_pay.scan_pay_notify.delay")
+    def test_stale_order_is_polled_before_being_failed(self, _task):
+        self.register_sweep_provider(
+            lambda order: payment_providers.create_payment_reconciliation(
+                order, "late-pay"
+            )
+        )
+        order, invoice = self.make_stale_order()
+
+        reconcile_pending_payment_orders()
+
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.SUCCESS)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
+
+    def test_stale_order_survives_unreachable_provider(self):
+        def unreachable(order):
+            raise ConnectionError("gateway down")
+
+        self.register_sweep_provider(unreachable)
+        order, invoice = self.make_stale_order()
+
+        reconcile_pending_payment_orders()
+
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
+
+    def test_sweep_skips_order_being_settled_elsewhere(self):
+        self.register_sweep_provider(lambda order: None)
+        order, invoice = self.make_stale_order()
+
+        with payment_providers.PaymentOrderLock(order):
+            reconcile_pending_payment_orders()
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
 

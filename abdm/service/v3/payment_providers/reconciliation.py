@@ -28,9 +28,23 @@ from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationStatusOptions,
     PaymentReconciliationTypeOptions,
 )
+from care.utils.lock import Lock
 from care.utils.time_util import care_now
 
 logger = logging.getLogger(__name__)
+
+
+class PaymentOrderLock(Lock):
+    """Serialises settlement/closure of one order across webhook and polling workers."""
+
+    def __init__(self, order: PaymentOrder):
+        super().__init__(f"abdm:payment_order:{order.id}")
+
+
+def _fresh(order: PaymentOrder) -> PaymentOrder:
+    return PaymentOrder.objects.select_related(
+        "invoice__account", "health_facility__facility"
+    ).get(pk=order.pk)
 
 
 def void_scan_pay_invoice(invoice: Invoice, reason: str) -> bool:
@@ -81,9 +95,10 @@ def close_payment_order(order: PaymentOrder, status: PaymentOrderStatus) -> bool
     cancelled or failed, so the order stops being polled. Orders that already
     reached a terminal state are left untouched; returns whether it changed.
     """
-    if order.status not in PAYMENT_ORDER_PENDING_STATUSES:
-        return False
-    with transaction.atomic():
+    with PaymentOrderLock(order), transaction.atomic():
+        order = _fresh(order)
+        if order.status not in PAYMENT_ORDER_PENDING_STATUSES:
+            return False
         if order.invoice_id:
             outcome = "cancelled" if status == PaymentOrderStatus.CANCELED else "failed"
             void_scan_pay_invoice(
@@ -95,51 +110,97 @@ def close_payment_order(order: PaymentOrder, status: PaymentOrderStatus) -> bool
     return True
 
 
-def create_payment_reconciliation(order: PaymentOrder, reference) -> None:
+def create_payment_reconciliation(order: PaymentOrder, reference, amount=None) -> bool:
     """
-    Record a successful online payment against the order's invoice.
+    Record a successful online payment against the order's invoice, once.
 
-    The post-save signal on ``PaymentReconciliation`` marks the order paid and
-    notifies the PHR. Payment providers call this once they have confirmed a
-    payment (via status query or webhook).
+    Runs under the order lock with a fresh copy of the order so concurrent
+    webhook/polling confirmations cannot credit the invoice twice. The amount
+    recorded is what the provider confirmed (else what the link was created
+    for), never the invoice's current total; a deviation, or an invoice that
+    was voided before the payment landed, is noted for review. The post-save
+    signal on ``PaymentReconciliation`` marks the order paid and notifies the
+    PHR. Returns whether a reconciliation was recorded by this call.
     """
-    invoice = order.invoice
-    PaymentReconciliation.objects.create(
-        facility=order.health_facility.facility,
-        target_invoice=invoice,
-        account=invoice.account,
-        reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
-        status=PaymentReconciliationStatusOptions.active.value,
-        kind=PaymentReconciliationKindOptions.online.value,
-        issuer_type=PaymentReconciliationIssuerTypeOptions.patient.value,
-        outcome=PaymentReconciliationOutcomeOptions.complete.value,
-        method=PaymentReconciliationPaymentMethodOptions.ccca.value,
-        payment_datetime=care_now(),
-        reference_number=reference,
-        note=f"Scan and pay via {order.provider or 'gateway'} (order {order.order_number}).",
-        tendered_amount=invoice.total_gross,
-        returned_amount=Decimal(0),
-        amount=invoice.total_gross,
-        created_by=get_or_create_abdm_user(),
-    )
-    rebalance_account_task.delay(invoice.account_id)
+    with PaymentOrderLock(order), transaction.atomic():
+        order = _fresh(order)
+        if not order.invoice_id or order.status in PAYMENT_ORDER_PAID_STATUSES:
+            return False
+        invoice = order.invoice
+        if (
+            reference
+            and PaymentReconciliation.objects.filter(
+                target_invoice=invoice,
+                reference_number=reference,
+                status=PaymentReconciliationStatusOptions.active.value,
+            ).exists()
+        ):
+            return False
+
+        expected = order.amount if order.amount is not None else invoice.total_gross
+        recorded = Decimal(str(amount)) if amount is not None else expected
+        notes = [
+            f"Scan and pay via {order.provider or 'gateway'} (order {order.order_number})."
+        ]
+        if recorded != expected:
+            notes.append(
+                f"Needs review: amount mismatch, expected {expected}, got {recorded}."
+            )
+            logger.warning(
+                "Scan and pay order %s confirmed %s but link was for %s",
+                order.order_number,
+                recorded,
+                expected,
+            )
+        if invoice.status in INVOICE_CANCELLED_STATUS:
+            notes.append(
+                "Needs review: invoice was voided before the payment was confirmed."
+            )
+            logger.warning(
+                "Scan and pay order %s paid after its invoice %s was voided",
+                order.order_number,
+                invoice.number or invoice.external_id,
+            )
+
+        PaymentReconciliation.objects.create(
+            facility=order.health_facility.facility,
+            target_invoice=invoice,
+            account=invoice.account,
+            reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
+            status=PaymentReconciliationStatusOptions.active.value,
+            kind=PaymentReconciliationKindOptions.online.value,
+            issuer_type=PaymentReconciliationIssuerTypeOptions.patient.value,
+            outcome=PaymentReconciliationOutcomeOptions.complete.value,
+            method=PaymentReconciliationPaymentMethodOptions.ccca.value,
+            payment_datetime=care_now(),
+            reference_number=reference,
+            note=" ".join(notes),
+            tendered_amount=recorded,
+            returned_amount=Decimal(0),
+            amount=recorded,
+            created_by=get_or_create_abdm_user(),
+        )
+        account_id = invoice.account_id
+        transaction.on_commit(lambda: rebalance_account_task.delay(account_id))
+    return True
 
 
-def reconcile_payment_order(order_number: str, reference) -> PaymentOrder | None:
+def reconcile_payment_order(
+    order_number: str, reference, amount=None
+) -> PaymentOrder | None:
     """
-    Look up an unpaid order by its provider order number and reconcile it.
+    Look up an order by its provider order number and reconcile it.
 
     Intended for provider webhooks that only carry the order number. Returns the
-    matched order (if any).
+    matched order (if any) whether or not anything new was recorded.
     """
     order = (
         PaymentOrder.objects.filter(order_number=order_number)
-        .exclude(status__in=PAYMENT_ORDER_PAID_STATUSES)
         .select_related("invoice__account", "health_facility__facility")
         .first()
     )
     if not order or not order.invoice_id:
         return order
 
-    create_payment_reconciliation(order, reference)
+    create_payment_reconciliation(order, reference, amount)
     return order

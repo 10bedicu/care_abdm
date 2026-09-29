@@ -6,6 +6,7 @@ from abdm.service.v3.payment_providers.base import (
     unregister_provider,
 )
 from abdm.service.v3.payment_providers.reconciliation import (
+    PaymentOrderLock,
     close_payment_order,
     create_payment_reconciliation,
     reconcile_payment_order,
@@ -13,6 +14,7 @@ from abdm.service.v3.payment_providers.reconciliation import (
 )
 
 __all__ = [
+    "PaymentOrderLock",
     "PaymentProvider",
     "available_providers",
     "close_payment_order",

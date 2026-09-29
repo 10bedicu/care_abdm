@@ -46,6 +46,8 @@ class PaymentOrder(BaseModel):
     payment_link_id = models.CharField(max_length=500, null=True, blank=True)
     transaction_id = models.CharField(max_length=100, null=True, blank=True)
     payment_date = models.DateTimeField(null=True, blank=True)
+    # what the payment link was created for; confirmations are checked against it
+    amount = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
 
     def __str__(self):
         return f"PaymentOrder: {self.open_order_request_id} - {self.status}"

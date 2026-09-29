@@ -188,6 +188,7 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
     order.order_number = payment["order_number"]
     order.payment_link_id = payment["payment_link_id"]
     order.provider = payment.get("provider", "")
+    order.amount = payment.get("amount")
     order.status = PaymentOrderStatus.PAYMENT_INITIATED
     order.save(
         update_fields=[
@@ -195,6 +196,7 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
             "order_number",
             "payment_link_id",
             "provider",
+            "amount",
             "status",
         ]
     )

@@ -1,5 +1,6 @@
 import logging
 
+from django.db import transaction
 from django.db.models import Sum
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -52,16 +53,20 @@ def notify_scan_pay_payment(sender, instance, created, **kwargs):
     )
     order.transaction_id = instance.reference_number or str(instance.external_id)
     order.payment_date = instance.payment_datetime or care_now()
-    order.save(update_fields=["status", "transaction_id", "payment_date"])
+    order.save(
+        update_fields=["status", "transaction_id", "payment_date", "modified_date"]
+    )
 
-    scan_pay_notify.delay(
-        {
-            "acknowledgement": build_scan_pay_acknowledgement(order),
-            "hip_id": order.health_facility.hf_id,
-        },
-        transaction_meta={
-            "abha_number": str(order.abha_number.external_id),
-            "payment_order": str(order.external_id),
-            "status": order.status,
-        },
+    payload = {
+        "acknowledgement": build_scan_pay_acknowledgement(order),
+        "hip_id": order.health_facility.hf_id,
+    }
+    transaction_meta = {
+        "abha_number": str(order.abha_number.external_id),
+        "payment_order": str(order.external_id),
+        "status": order.status,
+    }
+    # tell the PHR only once the payment is durably recorded
+    transaction.on_commit(
+        lambda: scan_pay_notify.delay(payload, transaction_meta=transaction_meta)
     )
