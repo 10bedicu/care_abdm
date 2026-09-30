@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+import requests
 from abdm.models import AbhaNumber, HealthFacility, InboundCallback, PaymentOrder
 from abdm.models.inbound_callback import CallbackStatus
 from abdm.models.payment_order import PaymentOrderStatus
@@ -14,7 +15,7 @@ from abdm.service.v3.callback_handlers.scan_pay import (
     handle_scan_pay_order_status,
 )
 from abdm.settings import plugin_settings as abdm_settings
-from abdm.tasks.scan_pay import reconcile_pending_payment_orders
+from abdm.tasks.scan_pay import POLL_LOCK_KEY, reconcile_pending_payment_orders
 from abdm.utils import user as abdm_user
 from django.core.exceptions import ImproperlyConfigured
 from model_bakery import baker
@@ -29,7 +30,7 @@ from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationStatusOptions,
     PaymentReconciliationTypeOptions,
 )
-from care.utils.lock import ObjectLocked
+from care.utils.lock import Lock, ObjectLocked
 from care.utils.tests.base import CareAPITestBase
 from care.utils.time_util import care_now
 
@@ -1079,4 +1080,31 @@ class TestClosePaymentOrder(ScanPayTestBase):
             reconcile_pending_payment_orders()
 
         order.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
+
+    def test_sweep_logs_unreachable_provider_without_a_traceback(self):
+        def unreachable(order):
+            raise requests.Timeout("read timed out")
+
+        self.register_sweep_provider(unreachable)
+        order, _ = self.make_stale_order()
+
+        with self.assertLogs("abdm.tasks.scan_pay", level="WARNING") as logs:
+            reconcile_pending_payment_orders()
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
+        self.assertEqual([record.levelname for record in logs.records], ["WARNING"])
+        self.assertIsNone(logs.records[0].exc_info)
+
+    def test_sweep_skips_tick_while_previous_run_is_going(self):
+        polled = []
+        self.register_sweep_provider(polled.append)
+        order, _ = self.make_stale_order()
+
+        with Lock(POLL_LOCK_KEY):
+            reconcile_pending_payment_orders()
+
+        order.refresh_from_db()
+        self.assertEqual(polled, [])
         self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)

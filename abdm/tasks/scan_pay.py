@@ -13,13 +13,15 @@ from abdm.service.helper import ABDMAPIException, uuid
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.payment_providers import close_payment_order, get_provider
 from abdm.settings import plugin_settings as settings
-from care.utils.lock import ObjectLocked
+from care.utils.lock import Lock, ObjectLocked
 from care.utils.time_util import care_now
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 5
 RETRY_COUNTDOWN = 30
+POLL_LOCK_KEY = "abdm:reconcile_pending_payment_orders"
+POLL_LOCK_TIMEOUT = 300
 
 
 def _call_gateway(task, method, payload, label, retry_transient=True):
@@ -101,11 +103,21 @@ def reconcile_pending_payment_orders():
     """Poll the provider for each pending scan-and-pay order; fail stale ones.
 
     A stale order is only failed after the provider was asked about it, so a
-    payment that landed late is recorded instead of being dropped.
+    payment that landed late is recorded instead of being dropped. A tick that
+    finds the previous run still going is skipped so a slow provider cannot
+    tie up one worker per tick.
     """
     if not settings.ABDM_SCAN_AND_PAY_POLLING_ENABLED:
         return
 
+    try:
+        with Lock(POLL_LOCK_KEY, POLL_LOCK_TIMEOUT):
+            _reconcile_pending_payment_orders()
+    except ObjectLocked:
+        logger.info("Previous scan-and-pay poll is still running; skipping this tick")
+
+
+def _reconcile_pending_payment_orders():
     cutoff = care_now() - timedelta(seconds=settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE)
     orders = (
         PaymentOrder.objects.filter(
@@ -128,6 +140,12 @@ def reconcile_pending_payment_orders():
             logger.info(
                 "Scan-and-pay order %s is being settled elsewhere; skipping",
                 order.order_number,
+            )
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            logger.warning(
+                "Scan-and-pay provider unreachable for order %s: %s",
+                order.order_number,
+                exc,
             )
         except Exception:
             logger.exception(
