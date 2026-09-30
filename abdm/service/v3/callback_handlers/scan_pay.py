@@ -1,7 +1,5 @@
 import logging
 
-from django.db.models import Q
-
 from abdm.models import AbhaNumber, HealthFacility, PaymentOrder
 from abdm.models.payment_order import PaymentOrderStatus
 from abdm.service.v3.callback_handlers import CallbackProcessingError
@@ -49,13 +47,7 @@ def handle_patient_share_open_order(validated_data: dict, headers: dict):
         )
 
     abha_number = (
-        AbhaNumber.objects.filter(
-            Q(health_id=abha_address)
-            | (
-                Q(abha_number=patient_data.get("abhaNumber"))
-                & Q(abha_number__isnull=False)
-            )
-        )
+        AbhaNumber.objects.filter(health_id=abha_address)
         .select_related("patient")
         .first()
     )
@@ -65,7 +57,7 @@ def handle_patient_share_open_order(validated_data: dict, headers: dict):
             {
                 "abha_address": abha_address,
                 "error": {
-                    "message": "Patient not found for the given ABHA",
+                    "message": "Patient not found for the given ABHA address",
                     "code": "ABDM-9999",
                 },
                 "request_id": request_id,
@@ -75,8 +67,6 @@ def handle_patient_share_open_order(validated_data: dict, headers: dict):
 
     charge_items = get_open_charge_items(abha_number.patient, health_facility.facility)
 
-    # the gateway rejects replies whose abhaAddress differs from the request's,
-    # even when the patient was matched by ABHA number under another address
     if not charge_items:
         GatewayService.patient__on_share_open_order(
             {

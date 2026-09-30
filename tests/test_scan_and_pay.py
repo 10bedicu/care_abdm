@@ -143,29 +143,20 @@ class TestShareOpenOrder(ScanPayTestBase):
         self.assertIn("error", mock_gateway.call_args[0][0])
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
-    def test_replies_echo_the_requesting_abha_address(self, mock_gateway):
-        # patient known under another address; matched via ABHA number
+    def test_share_open_order_rejects_address_not_in_system(self, mock_gateway):
+        # same ABHA number, but under an address CARE has not stored
+        self.create_charge_item()
         payload = self.share_open_order_payload(abha_address="other@sbx")
         payload["profile"]["patient"]["abhaNumber"] = self.abha_number.abha_number
-
-        handle_patient_share_open_order(payload, {"REQUEST-ID": uuid()})
-        no_orders = mock_gateway.call_args[0][0]
-        self.assertIn("error", no_orders)
-        self.assertEqual(no_orders["abha_address"], "other@sbx")
-
-        self.create_charge_item()
         request_id = uuid()
+
         handle_patient_share_open_order(payload, {"REQUEST-ID": request_id})
 
-        shared = mock_gateway.call_args[0][0]
-        self.assertEqual(shared["abha_address"], "other@sbx")
-        order = PaymentOrder.objects.get(open_order_request_id=request_id)
-        self.assertEqual(order.abha_number, self.abha_number)
-        self.assertEqual(order.abha_address, "other@sbx")
-        self.assertEqual(order.requesting_abha_address, "other@sbx")
-        self.assertEqual(
-            scan_pay_service.build_scan_pay_acknowledgement(order)["abha_address"],
-            "other@sbx",
+        reply = mock_gateway.call_args[0][0]
+        self.assertIn("error", reply)
+        self.assertEqual(reply["abha_address"], "other@sbx")
+        self.assertFalse(
+            PaymentOrder.objects.filter(open_order_request_id=request_id).exists()
         )
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
