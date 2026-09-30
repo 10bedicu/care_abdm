@@ -49,6 +49,18 @@ SCAN_AND_SHARE = {
     "required": ["abha_number", "is_existing_patient", "token"],
 }
 
+SCAN_AND_PAY = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "abha_number": {"type": "string", "format": "uuid"},
+        "payment_order": {"type": "string", "format": "uuid"},
+        "status": {"type": "string"},
+    },
+    "additionalProperties": False,
+    "required": ["abha_number", "payment_order", "status"],
+}
+
 
 LINK_CARE_CONTEXT = {
     "$schema": "http://json-schema.org/draft-07/schema#",

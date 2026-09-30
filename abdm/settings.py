@@ -121,10 +121,18 @@ DEFAULTS = {
     "ABDM_CM_ID": "sbx",
     "ABDM_BENEFIT_NAME": "",
     "ABDM_REQUEST_TIMEOUT": 30,
+    # seconds the gateway holds a request open for an on-* reply (ABDM: 30s);
+    # later or repeated replies are rejected with ABDM-2406
+    "ABDM_CALLBACK_RESPONSE_WINDOW": 30,
     "ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM": "https://care.ohc.network/abha_number",
     "ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY": "ABHA Number",
     "ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,
     "ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT": True,
+    "ABDM_SCAN_AND_PAY_MERCHANT_ID": "",
+    "ABDM_SCAN_AND_PAY_PROVIDER": "razorpay",
+    "ABDM_SCAN_AND_PAY_POLLING_ENABLED": True,
+    "ABDM_SCAN_AND_PAY_POLLING_INTERVAL": 10,
+    "ABDM_SCAN_AND_PAY_ORDER_MAX_AGE": 3600,
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",

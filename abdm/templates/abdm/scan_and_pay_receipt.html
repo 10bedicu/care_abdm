@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: sans-serif; color: #1a1a1a; font-size: 12px; margin: 24px; }
+      .header { border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; margin-bottom: 16px; }
+      .facility-name { font-size: 20px; font-weight: bold; }
+      .muted { color: #555; }
+      .meta-table { width: 100%; margin-bottom: 16px; }
+      .meta-table td { padding: 2px 0; vertical-align: top; }
+      .items-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+      .items-table th, .items-table td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+      .items-table th { background: #f0f0f0; }
+      .amount { text-align: right; }
+      .total-row td { font-weight: bold; }
+      .status { display: inline-block; padding: 2px 8px; border: 1px solid #1a1a1a; border-radius: 4px; font-weight: bold; }
+      .footer { margin-top: 24px; font-size: 10px; color: #777; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="facility-name">{{ facility.name }}</div>
+      <div class="muted">ABDM Facility ID: {{ hf_id }}</div>
+    </div>
+
+    <h3>Payment Receipt</h3>
+
+    <table class="meta-table">
+      <tr>
+        <td><strong>Patient:</strong> {{ patient.name }}</td>
+        <td><strong>ABHA Address:</strong> {{ abha_address }}</td>
+      </tr>
+      <tr>
+        <td><strong>Order Number:</strong> {{ order.order_number }}</td>
+        <td><strong>Invoice Number:</strong> {{ invoice.number }}</td>
+      </tr>
+      <tr>
+        <td><strong>Transaction ID:</strong> {{ order.transaction_id }}</td>
+        <td><strong>Payment Date:</strong> {{ order.payment_date|date:"d M Y, h:i A" }}</td>
+      </tr>
+      <tr>
+        <td><strong>Status:</strong> <span class="status">{{ order.status }}</span></td>
+        <td><strong>Receipt ID:</strong> {{ order.external_id }}</td>
+      </tr>
+    </table>
+
+    <table class="items-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Service</th>
+          <th>Description</th>
+          <th class="amount">Amount (INR)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in charge_items %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td>{{ item.title }}</td>
+          <td>{{ item.description|default:"-" }}</td>
+          <td class="amount">{{ item.total_price|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="total-row">
+          <td colspan="3">Total</td>
+          <td class="amount">{{ invoice.total_gross|floatformat:2 }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      This is a system generated receipt issued via ABDM Scan and Pay by {{ facility.name }}.
+    </div>
+  </body>
+</html>

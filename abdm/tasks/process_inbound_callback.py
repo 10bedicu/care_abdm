@@ -2,19 +2,19 @@ import logging
 
 import requests
 from celery import shared_task
+from django.utils import timezone
 
 from abdm.models import CallbackStatus, CallbackType, InboundCallback
+from abdm.service.v3.callback_handlers import CallbackProcessingError
+from abdm.settings import plugin_settings as settings
 from care.utils.lock import ObjectLocked
 
 logger = logging.getLogger(__name__)
 
 LOCK_RETRY_COUNTDOWN = 2
 
-# Retry only what a later attempt could plausibly fix: lock contention and network
-# failures reaching ABDM. A payload ABDM will always reject, or a bug in a handler,
-# is recorded on the InboundCallback row for replay instead of being retried four
-# times against an already-degraded gateway.
-RETRY_FOR = (ObjectLocked, requests.Timeout, requests.ConnectionError)
+TRANSIENT_ERRORS = (requests.Timeout, requests.ConnectionError)
+RETRY_FOR = (ObjectLocked, *TRANSIENT_ERRORS)
 
 # redis broker priorities are inverted: 0 is consumed first (steps 0/3/6/9)
 HIGH_PRIORITY = 0
@@ -25,7 +25,8 @@ def _dispatch_table():
     # built lazily to avoid circular imports at app load time
     from abdm.api.v3.serializers import hip as hip_serializers
     from abdm.api.v3.serializers import hiu as hiu_serializers
-    from abdm.service.v3.callback_handlers import hip, hiu
+    from abdm.api.v3.serializers import scan_pay as scan_pay_serializers
+    from abdm.service.v3.callback_handlers import hip, hiu, scan_pay
 
     return {
         CallbackType.TOKEN_ON_GENERATE_TOKEN: (
@@ -84,13 +85,61 @@ def _dispatch_table():
             hiu_serializers.HiuHealthInformationTransferSerializer,
             hiu.handle_health_information_transfer,
         ),
+        CallbackType.PATIENT_SHARE_OPEN_ORDER: (
+            scan_pay_serializers.PatientShareOpenOrderSerializer,
+            scan_pay.handle_patient_share_open_order,
+        ),
+        CallbackType.PATIENT_SELECTION: (
+            scan_pay_serializers.PatientSelectionSerializer,
+            scan_pay.handle_patient_selection,
+        ),
+        CallbackType.PATIENT_SCAN_PAY_ON_NOTIFY: (
+            scan_pay_serializers.PatientScanPayOnNotifySerializer,
+            scan_pay.handle_scan_pay_on_notify,
+        ),
+        CallbackType.PATIENT_SCAN_PAY_ORDER_STATUS: (
+            scan_pay_serializers.PatientScanPayOrderStatusSerializer,
+            scan_pay.handle_scan_pay_order_status,
+        ),
     }
+
+
+# callbacks where a patient is actively waiting on their PHR app for a response
+INTERACTIVE_CALLBACK_TYPES = {
+    CallbackType.PATIENT_SHARE,
+    CallbackType.PATIENT_SHARE_OPEN_ORDER,
+    CallbackType.PATIENT_SELECTION,
+    CallbackType.PATIENT_SCAN_PAY_ON_NOTIFY,
+    CallbackType.PATIENT_SCAN_PAY_ORDER_STATUS,
+}
+
+# callbacks answered with an on-* reply correlated by REQUEST-ID; the gateway holds
+# the request only for ABDM_CALLBACK_RESPONSE_WINDOW and rejects a late or repeated
+# reply with ABDM-2406, so these must be answered at most once and in time
+TIME_BOXED_CALLBACK_TYPES = {
+    CallbackType.PATIENT_SHARE,
+    CallbackType.PATIENT_SHARE_OPEN_ORDER,
+    CallbackType.PATIENT_SELECTION,
+    CallbackType.PATIENT_SCAN_PAY_ORDER_STATUS,
+}
+
+
+def is_time_boxed(callback_type) -> bool:
+    return callback_type in TIME_BOXED_CALLBACK_TYPES
+
+
+def has_response_window_elapsed(callback: InboundCallback) -> bool:
+    if not callback.created_date:
+        return False
+
+    elapsed = (timezone.now() - callback.created_date).total_seconds()
+    return elapsed > settings.ABDM_CALLBACK_RESPONSE_WINDOW
 
 
 def enqueue_inbound_callback(callback: InboundCallback):
     priority = (
         HIGH_PRIORITY
-        if callback.callback_type == CallbackType.PATIENT_SHARE
+        if callback.callback_type in INTERACTIVE_CALLBACK_TYPES
         else LOW_PRIORITY
     )
 
@@ -116,6 +165,20 @@ def process_inbound_callback(self, callback_id: int):
         logger.info("ABDM inbound callback %s already completed; skipping", callback_id)
         return
 
+    if is_time_boxed(callback.callback_type) and has_response_window_elapsed(callback):
+        callback.mark_failed(
+            f"expired: not processed within {settings.ABDM_CALLBACK_RESPONSE_WINDOW}s; "
+            "the gateway rejects late replies (ABDM-2406)"
+        )
+        logger.warning(
+            "ABDM inbound callback %s type=%s request_id=%s expired before processing; "
+            "skipping reply",
+            callback.pk,
+            callback.callback_type,
+            callback.request_id,
+        )
+        return
+
     callback.mark_processing()
     logger.info(
         "Processing ABDM inbound callback id=%s type=%s request_id=%s attempt=%s",
@@ -137,6 +200,25 @@ def process_inbound_callback(self, callback_id: int):
             "ABDM inbound callback %s blocked on lock; retrying", callback.pk
         )
         raise self.retry(exc=exc, countdown=LOCK_RETRY_COUNTDOWN) from exc
+    except TRANSIENT_ERRORS as exc:
+        callback.mark_failed(f"{type(exc).__name__}: {exc}")
+        if is_time_boxed(callback.callback_type):
+            # the gateway may have received the reply before the connection failed;
+            # re-running the handler would send it twice
+            logger.exception(
+                "ABDM inbound callback %s failed on attempt %s; not retrying a "
+                "correlated reply",
+                callback.pk,
+                callback.attempts,
+            )
+            message = f"{type(exc).__name__} while replying to {callback.callback_type}"
+            raise CallbackProcessingError(message) from exc
+        logger.warning(
+            "ABDM inbound callback %s failed on attempt %s; retrying",
+            callback.pk,
+            callback.attempts,
+        )
+        raise
     except Exception as exc:
         callback.mark_failed(f"{type(exc).__name__}: {exc}")
         logger.exception(
