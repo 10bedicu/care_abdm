@@ -22,6 +22,7 @@ from model_bakery import baker
 from care.emr.models.charge_item import ChargeItem
 from care.emr.models.invoice import Invoice
 from care.emr.models.payment_reconciliation import PaymentReconciliation
+from care.emr.resources.account.spec import AccountStatusOptions
 from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
 from care.emr.resources.invoice.spec import InvoiceStatusOptions
 from care.emr.resources.payment_reconciliation.spec import (
@@ -54,18 +55,22 @@ class ScanPayTestBase(CareAPITestBase):
             abha_number="91123456789012",
         )
         self.account = baker.make(
-            "emr.Account", facility=self.facility, patient=self.patient
+            "emr.Account",
+            facility=self.facility,
+            patient=self.patient,
+            status=AccountStatusOptions.active.value,
         )
         self.client.force_authenticate(user=self.user)
 
     def create_charge_item(self, **kwargs):
         amount = kwargs.pop("amount", 100)
         item_status = kwargs.pop("status", ChargeItemStatusOptions.billable.value)
+        account = kwargs.pop("account", self.account)
         return baker.make(
             ChargeItem,
             facility=self.facility,
             patient=self.patient,
-            account=self.account,
+            account=account,
             status=item_status,
             title="Test Service",
             quantity=1,
@@ -191,6 +196,32 @@ class TestShareOpenOrder(ScanPayTestBase):
         self.assertEqual(
             [service["service_id"] for service in services],
             [str(paid_item.external_id)],
+        )
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
+    def test_share_open_order_excludes_inactive_account_items(self, mock_gateway):
+        inactive_account = baker.make(
+            "emr.Account",
+            facility=self.facility,
+            patient=self.patient,
+            status=AccountStatusOptions.inactive.value,
+        )
+        self.create_charge_item(account=inactive_account)
+
+        handle_patient_share_open_order(
+            self.share_open_order_payload(), {"REQUEST-ID": uuid()}
+        )
+        self.assertIn("error", mock_gateway.call_args[0][0])
+
+        active_item = self.create_charge_item()
+        handle_patient_share_open_order(
+            self.share_open_order_payload(), {"REQUEST-ID": uuid()}
+        )
+
+        services = mock_gateway.call_args[0][0]["procedures"][0]["services"]
+        self.assertEqual(
+            [service["service_id"] for service in services],
+            [str(active_item.external_id)],
         )
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
