@@ -38,14 +38,16 @@ class ScanPayPaymentLinkError(Exception):
     pass
 
 
-def get_open_charge_items(patient, facility):
-    return list(
-        ChargeItem.objects.filter(
-            patient=patient,
-            facility=facility,
-            status=ChargeItemStatusOptions.billable.value,
-        ).select_related("account")
+def get_open_charge_items(patient, facility, service_ids=None):
+    queryset = ChargeItem.objects.filter(
+        patient=patient,
+        facility=facility,
+        status=ChargeItemStatusOptions.billable.value,
+        total_price__gt=0,
     )
+    if service_ids is not None:
+        queryset = queryset.filter(external_id__in=service_ids)
+    return list(queryset.select_related("account"))
 
 
 def build_procedures(charge_items):

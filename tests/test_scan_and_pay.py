@@ -172,6 +172,28 @@ class TestShareOpenOrder(ScanPayTestBase):
         self.assertIn("error", mock_gateway.call_args[0][0])
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
+    def test_share_open_order_excludes_zero_amount_items(self, mock_gateway):
+        self.create_charge_item(amount=0)
+        unpriced_item = self.create_charge_item()
+        ChargeItem.objects.filter(id=unpriced_item.id).update(total_price=None)
+
+        handle_patient_share_open_order(
+            self.share_open_order_payload(), {"REQUEST-ID": uuid()}
+        )
+        self.assertIn("error", mock_gateway.call_args[0][0])
+
+        paid_item = self.create_charge_item()
+        handle_patient_share_open_order(
+            self.share_open_order_payload(), {"REQUEST-ID": uuid()}
+        )
+
+        services = mock_gateway.call_args[0][0]["procedures"][0]["services"]
+        self.assertEqual(
+            [service["service_id"] for service in services],
+            [str(paid_item.external_id)],
+        )
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
     def test_share_open_order_unknown_facility(self, mock_gateway):
         request_id = uuid()
 
@@ -281,6 +303,22 @@ class TestSelection(ScanPayTestBase):
 
         self.assertEqual(response.status_code, 202)
         self.assertIn("error", mock_gateway.call_args[0][0])
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    def test_selection_rejects_zero_amount_items(self, mock_gateway):
+        order = self.create_order()
+        free_item = self.create_charge_item(amount=0)
+
+        handle_patient_selection(
+            self.selection_payload(order, [self.create_charge_item(), free_item]),
+            {"REQUEST-ID": uuid()},
+        )
+
+        order.refresh_from_db()
+        free_item.refresh_from_db()
+        self.assertIn("error", mock_gateway.call_args[0][0])
+        self.assertIsNone(order.invoice_id)
+        self.assertEqual(free_item.status, ChargeItemStatusOptions.billable.value)
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
     def test_selection_unknown_order(self, mock_gateway):

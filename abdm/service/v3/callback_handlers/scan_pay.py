@@ -14,8 +14,6 @@ from abdm.service.v3.scan_pay import (
     get_open_charge_items,
 )
 from abdm.settings import plugin_settings as settings
-from care.emr.models.charge_item import ChargeItem
-from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
 from care.utils.lock import ObjectLocked
 
 logger = logging.getLogger(__name__)
@@ -151,13 +149,10 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
     if not service_ids:
         return send_error("No services selected")
 
-    charge_items = list(
-        ChargeItem.objects.filter(
-            external_id__in=service_ids,
-            patient=order.abha_number.patient,
-            facility=order.health_facility.facility,
-            status=ChargeItemStatusOptions.billable.value,
-        ).select_related("account")
+    charge_items = get_open_charge_items(
+        order.abha_number.patient,
+        order.health_facility.facility,
+        service_ids=service_ids,
     )
 
     if len(charge_items) != len(set(service_ids)):
