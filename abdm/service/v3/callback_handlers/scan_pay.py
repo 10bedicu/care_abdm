@@ -130,6 +130,9 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
     if order.invoice_id:
         return send_error("Payment is already initiated for this order")
 
+    if order.status != PaymentOrderStatus.OPEN_ORDER_SHARED:
+        return send_error("Open order has expired; please scan again")
+
     service_ids = [
         service.get("serviceId")
         for procedure in validated_data.get("procedures")

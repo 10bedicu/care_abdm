@@ -133,6 +133,10 @@ DEFAULTS = {
     "ABDM_SCAN_AND_PAY_POLLING_ENABLED": True,
     "ABDM_SCAN_AND_PAY_POLLING_INTERVAL": 10,
     "ABDM_SCAN_AND_PAY_ORDER_MAX_AGE": 3600,
+    # give up on an order the provider never answered about this long past max age
+    "ABDM_SCAN_AND_PAY_ORDER_HARD_CAP": 86400,
+    # leave an order alone this long after its provider failed to answer
+    "ABDM_SCAN_AND_PAY_UNREACHABLE_BACKOFF": 120,
     # move a fully paid scan-and-pay invoice to "balanced" without staff action
     "ABDM_SCAN_AND_PAY_AUTO_BALANCE_INVOICE": True,
     "AUTH_USER_MODEL": "users.User",

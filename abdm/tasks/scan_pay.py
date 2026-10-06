@@ -3,6 +3,7 @@ from datetime import timedelta
 
 import requests
 from celery import shared_task
+from django.core.cache import cache
 
 from abdm.models import PaymentOrder, Transaction, TransactionType
 from abdm.models.payment_order import (
@@ -98,16 +99,20 @@ def scan_pay_on_order_status(self, payload: dict):
     )
 
 
-@shared_task
+@shared_task(ignore_result=True)
 def reconcile_pending_payment_orders():
     """Poll the provider for each pending scan-and-pay order; fail stale ones.
 
     A stale order is only failed after the provider was asked about it, so a
-    payment that landed late is recorded instead of being dropped. A tick that
+    payment that landed late is recorded instead of being dropped; one the
+    provider never answers about is given up on at the hard cap. A tick that
     finds the previous run still going is skipped so a slow provider cannot
-    tie up one worker per tick.
+    tie up one worker per tick, and a tick with nothing pending does no work.
     """
     if not settings.ABDM_SCAN_AND_PAY_POLLING_ENABLED:
+        return
+    expire_abandoned_open_orders()
+    if not pending_payment_orders().exists():
         return
 
     try:
@@ -117,37 +122,97 @@ def reconcile_pending_payment_orders():
         logger.info("Previous scan-and-pay poll is still running; skipping this tick")
 
 
-def _reconcile_pending_payment_orders():
+def expire_abandoned_open_orders() -> int:
+    """Cancel orders the patient scanned but never selected services for.
+
+    Nothing was invoiced, so there is nothing to void or notify; a selection
+    arriving later is rejected and the patient asked to scan again.
+    """
     cutoff = care_now() - timedelta(seconds=settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE)
-    orders = (
+    return PaymentOrder.objects.filter(
+        status=PaymentOrderStatus.OPEN_ORDER_SHARED,
+        invoice__isnull=True,
+        created_date__lt=cutoff,
+    ).update(status=PaymentOrderStatus.CANCELED, modified_date=care_now())
+
+
+def pending_payment_orders():
+    return (
         PaymentOrder.objects.filter(
             status__in=PAYMENT_ORDER_PENDING_STATUSES,
             invoice__isnull=False,
         )
         .exclude(order_number__isnull=True)
         .exclude(order_number="")
-        .select_related("invoice__account", "health_facility__facility")
+    )
+
+
+def backoff_key(order: PaymentOrder) -> str:
+    return f"abdm:scan_pay:backoff:{order.external_id}"
+
+
+def _ask_provider(order: PaymentOrder) -> bool:
+    """Let the provider reconcile the order; False when it could not be reached."""
+    try:
+        provider = get_provider(order.provider or settings.ABDM_SCAN_AND_PAY_PROVIDER)
+        provider.reconcile_order(order)
+    except ObjectLocked:
+        raise
+    except (requests.Timeout, requests.ConnectionError) as exc:
+        logger.warning(
+            "Scan-and-pay provider unreachable for order %s: %s",
+            order.order_number,
+            exc,
+        )
+        return False
+    except Exception:
+        logger.exception(
+            "Failed to reconcile scan-and-pay order %s", order.order_number
+        )
+        return False
+    return True
+
+
+def _reconcile_pending_payment_orders():
+    now = care_now()
+    stale_before = now - timedelta(seconds=settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE)
+    give_up_before = stale_before - timedelta(
+        seconds=settings.ABDM_SCAN_AND_PAY_ORDER_HARD_CAP
+    )
+    orders = pending_payment_orders().select_related(
+        "invoice__account", "health_facility__facility"
     )
     for order in orders:
+        if cache.get(backoff_key(order)):
+            continue
         try:
-            provider = get_provider(
-                order.provider or settings.ABDM_SCAN_AND_PAY_PROVIDER
+            reached = _ask_provider(order)
+            if not order.created_date:
+                continue
+            if reached:
+                if order.created_date < stale_before:
+                    close_payment_order(order, PaymentOrderStatus.FAIL)
+                continue
+            cache.set(
+                backoff_key(order),
+                1,
+                timeout=settings.ABDM_SCAN_AND_PAY_UNREACHABLE_BACKOFF,
             )
-            provider.reconcile_order(order)
-            if order.created_date and order.created_date < cutoff:
-                close_payment_order(order, PaymentOrderStatus.FAIL)
+            if order.created_date < give_up_before:
+                logger.warning(
+                    "Scan-and-pay order %s unresolved past the hard cap; failing it",
+                    order.order_number,
+                )
+                close_payment_order(
+                    order,
+                    PaymentOrderStatus.FAIL,
+                    reason=(
+                        "Scan and pay payment unresolved: the payment provider could "
+                        f"not be reached before the deadline (order {order.order_number})"
+                    ),
+                )
         except ObjectLocked:
             logger.info(
                 "Scan-and-pay order %s is being settled elsewhere; skipping",
                 order.order_number,
-            )
-        except (requests.Timeout, requests.ConnectionError) as exc:
-            logger.warning(
-                "Scan-and-pay provider unreachable for order %s: %s",
-                order.order_number,
-                exc,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to reconcile scan-and-pay order %s", order.order_number
             )

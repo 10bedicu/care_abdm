@@ -145,6 +145,16 @@ class TestScanPayOrderList(ScanPayOrderTestBase):
         self.assertEqual(
             ids({"invoice": str(invoice.external_id)}), {str(pending.external_id)}
         )
+        self.assertEqual(
+            ids(
+                {
+                    "invoice_in": ",".join(
+                        [str(invoice.external_id), str(paid.invoice.external_id)]
+                    )
+                }
+            ),
+            {str(pending.external_id), str(paid.external_id)},
+        )
         self.assertEqual(ids({"invoice_number": "pai"}), {str(paid.external_id)})
 
     def test_paid_order_exposes_receipt(self):

@@ -121,7 +121,9 @@ def balance_scan_pay_invoice(invoice: Invoice) -> bool:
     return True
 
 
-def close_payment_order(order: PaymentOrder, status: PaymentOrderStatus) -> bool:
+def close_payment_order(
+    order: PaymentOrder, status: PaymentOrderStatus, reason: str | None = None
+) -> bool:
     """
     Move a still-pending order to a terminal state (``FAIL`` or ``CANCELED``),
     void its invoice so the selected services can be paid for again, and tell
@@ -142,7 +144,8 @@ def close_payment_order(order: PaymentOrder, status: PaymentOrderStatus) -> bool
             outcome = "cancelled" if status == PaymentOrderStatus.CANCELED else "failed"
             void_scan_pay_invoice(
                 order.invoice,
-                f"Scan and pay payment {outcome} (order {order.order_number})",
+                reason
+                or f"Scan and pay payment {outcome} (order {order.order_number})",
             )
         order.status = status
         order.save(update_fields=["status", "modified_date"])

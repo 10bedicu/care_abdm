@@ -15,8 +15,10 @@ from abdm.service.v3.callback_handlers.scan_pay import (
     handle_scan_pay_order_status,
 )
 from abdm.settings import plugin_settings as abdm_settings
+from abdm.tasks import scan_pay as scan_pay_tasks
 from abdm.tasks.scan_pay import POLL_LOCK_KEY, reconcile_pending_payment_orders
 from abdm.utils import user as abdm_user
+from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from model_bakery import baker
 
@@ -354,6 +356,35 @@ class TestSelection(ScanPayTestBase):
 
         self.assertEqual(response.status_code, 202)
         self.assertIn("error", mock_gateway.call_args[0][0])
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    def test_selection_rejects_expired_open_order(self, mock_gateway):
+        order = self.create_order()
+        charge_item = self.create_charge_item()
+        PaymentOrder.objects.filter(pk=order.pk).update(
+            created_date=care_now()
+            - timedelta(seconds=abdm_settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE + 60)
+        )
+
+        self.assertEqual(scan_pay_tasks.expire_abandoned_open_orders(), 1)
+        handle_patient_selection(
+            self.selection_payload(order, [charge_item]), {"REQUEST-ID": uuid()}
+        )
+
+        order.refresh_from_db()
+        charge_item.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.CANCELED)
+        self.assertIsNone(order.invoice_id)
+        self.assertIn("expired", mock_gateway.call_args[0][0]["error"]["message"])
+        self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
+
+    def test_recent_open_orders_are_not_expired(self):
+        order = self.create_order()
+
+        self.assertEqual(scan_pay_tasks.expire_abandoned_open_orders(), 0)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.OPEN_ORDER_SHARED)
 
     @patch("abdm.service.v3.scan_pay.create_scan_pay_payment_link")
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
@@ -1024,12 +1055,14 @@ class TestClosePaymentOrder(ScanPayTestBase):
         payment_providers.register_provider(SweepProvider)
         self.addCleanup(payment_providers.unregister_provider, "sweep_test")
 
-    def make_stale_order(self):
-        order, invoice, charge_item = self.make_invoiced_order()
+    def make_stale_order(self, extra_seconds=60):
+        order, invoice, _ = self.make_invoiced_order()
         PaymentOrder.objects.filter(pk=order.pk).update(
             provider="sweep_test",
             created_date=care_now()
-            - timedelta(seconds=abdm_settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE + 60),
+            - timedelta(
+                seconds=abdm_settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE + extra_seconds
+            ),
         )
         return order, invoice
 
@@ -1063,9 +1096,85 @@ class TestClosePaymentOrder(ScanPayTestBase):
         self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
         self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
 
+    def test_unanswered_order_is_backed_off_then_polled_again(self):
+        polled = []
+
+        def unreachable(order):
+            polled.append(order.order_number)
+            raise requests.Timeout("read timed out")
+
+        self.register_sweep_provider(unreachable)
+        order, _ = self.make_stale_order()
+
+        reconcile_pending_payment_orders()
+        reconcile_pending_payment_orders()
+
+        self.assertEqual(len(polled), 1)
+        self.assertTrue(cache.get(scan_pay_tasks.backoff_key(order)))
+
+        cache.delete(scan_pay_tasks.backoff_key(order))
+        reconcile_pending_payment_orders()
+
+        self.assertEqual(len(polled), 2)
+
+    def test_answered_order_is_not_backed_off(self):
+        polled = []
+        self.register_sweep_provider(polled.append)
+        order, _, _ = self.make_invoiced_order()
+        PaymentOrder.objects.filter(pk=order.pk).update(provider="sweep_test")
+
+        reconcile_pending_payment_orders()
+        reconcile_pending_payment_orders()
+
+        self.assertEqual(len(polled), 2)
+        self.assertIsNone(cache.get(scan_pay_tasks.backoff_key(order)))
+
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
+    def test_never_answered_order_is_failed_at_the_hard_cap(self, mock_task):
+        def unreachable(order):
+            raise requests.Timeout("read timed out")
+
+        self.register_sweep_provider(unreachable)
+        order, invoice = self.make_stale_order(
+            extra_seconds=abdm_settings.ABDM_SCAN_AND_PAY_ORDER_HARD_CAP + 60
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            reconcile_pending_payment_orders()
+
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.FAIL)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertIn("could not be reached", invoice.cancelled_reason)
+        self.assertEqual(
+            mock_task.call_args.args[0]["acknowledgement"]["status"], "FAIL"
+        )
+
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
+    def test_order_for_unregistered_provider_is_failed_at_the_hard_cap(self, _task):
+        order, _ = self.make_stale_order(
+            extra_seconds=abdm_settings.ABDM_SCAN_AND_PAY_ORDER_HARD_CAP + 60
+        )
+        PaymentOrder.objects.filter(pk=order.pk).update(provider="not_installed")
+
+        with self.assertLogs("abdm.tasks.scan_pay", level="ERROR"):
+            reconcile_pending_payment_orders()
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.FAIL)
+
+    def test_idle_tick_does_not_take_the_lock(self):
+        self.make_order(PaymentOrderStatus.SUCCESS)
+
+        with patch("abdm.tasks.scan_pay.Lock") as mock_lock:
+            reconcile_pending_payment_orders()
+
+        mock_lock.assert_not_called()
+
     def test_sweep_skips_order_being_settled_elsewhere(self):
         self.register_sweep_provider(lambda order: None)
-        order, invoice = self.make_stale_order()
+        order, _ = self.make_stale_order()
 
         with payment_providers.PaymentOrderLock(order):
             reconcile_pending_payment_orders()

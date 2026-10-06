@@ -43,10 +43,15 @@ class CharInFilter(filters.BaseInFilter, filters.CharFilter):
     pass
 
 
+class UUIDInFilter(filters.BaseInFilter, filters.UUIDFilter):
+    pass
+
+
 class PaymentOrderFilters(filters.FilterSet):
     status = CharInFilter(field_name="status", lookup_expr="in")
     pending = filters.BooleanFilter(method="filter_pending")
     invoice = filters.UUIDFilter(field_name="invoice__external_id")
+    invoice_in = UUIDInFilter(field_name="invoice__external_id", lookup_expr="in")
     order_number = filters.CharFilter(lookup_expr="iexact")
     invoice_number = filters.CharFilter(
         field_name="invoice__number", lookup_expr="icontains"
