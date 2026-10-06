@@ -11,7 +11,6 @@ from abdm.service.v3.scan_pay import (
     create_scan_pay_invoice_with_payment_link,
     get_open_charge_items,
 )
-from abdm.settings import plugin_settings as settings
 from care.utils.lock import ObjectLocked
 
 logger = logging.getLogger(__name__)
@@ -205,7 +204,7 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
                 "payment_url": payment["payment_url"],
                 "order_number": order.order_number,
                 "amount": float(invoice.total_gross),
-                "merchant_id": settings.ABDM_SCAN_AND_PAY_MERCHANT_ID,
+                "merchant_id": order.health_facility.hf_id,
                 "description": invoice.title,
             },
             "request_id": request_id,

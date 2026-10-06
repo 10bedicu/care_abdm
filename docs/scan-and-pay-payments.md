@@ -136,7 +136,7 @@ Selection is a single config switch; the rest of the flow is uniform.
   - `ABDM_SCAN_AND_PAY_PROVIDER` = `"razorpay"` (default) | `"sbi_epay"`.
   - Razorpay: `ABDM_RAZORPAY_KEY_ID/SECRET`.
   - SBI ePay: `ABDM_SBI_EPAY_BASE_URL / API_KEY_ID / API_SECRET_KEY / MERCHANT_CODE / MERCHANT_KEY / SOURCE_URL`.
-  - `ABDM_SCAN_AND_PAY_MERCHANT_ID` (ABDM-facing merchant id in the payment bundle).
+  - The payment bundle's `merchantId` is the facility's HIP id (`HealthFacility.hf_id`).
 - **Dispatch**: `create_scan_pay_payment_link()` branches on the provider and returns the
   **same normalized contract** `{order_number, payment_link_id, payment_url}`, so the callback
   handler is provider-independent.
