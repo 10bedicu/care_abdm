@@ -133,6 +133,8 @@ DEFAULTS = {
     "ABDM_SCAN_AND_PAY_POLLING_ENABLED": True,
     "ABDM_SCAN_AND_PAY_POLLING_INTERVAL": 10,
     "ABDM_SCAN_AND_PAY_ORDER_MAX_AGE": 3600,
+    # move a fully paid scan-and-pay invoice to "balanced" without staff action
+    "ABDM_SCAN_AND_PAY_AUTO_BALANCE_INVOICE": True,
     "AUTH_USER_MODEL": "users.User",
     "CURRENT_DOMAIN": "https://care.ohc.network",
     "BACKEND_DOMAIN": "https://careapi.ohc.network",

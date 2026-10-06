@@ -10,7 +10,7 @@ from abdm.models.payment_order import (
     PaymentOrderStatus,
 )
 from abdm.utils.user import get_or_create_abdm_user
-from care.emr.locks.billing import AccountLock
+from care.emr.locks.billing import AccountLock, InvoiceLock
 from care.emr.models.charge_item import ChargeItem
 from care.emr.models.invoice import Invoice
 from care.emr.models.payment_reconciliation import PaymentReconciliation
@@ -28,7 +28,7 @@ from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationStatusOptions,
     PaymentReconciliationTypeOptions,
 )
-from care.utils.lock import Lock
+from care.utils.lock import Lock, ObjectLocked
 from care.utils.time_util import care_now
 
 logger = logging.getLogger(__name__)
@@ -86,6 +86,41 @@ def void_scan_pay_invoice(invoice: Invoice, reason: str) -> bool:
     return True
 
 
+def balance_scan_pay_invoice(invoice: Invoice) -> bool:
+    """
+    Move a fully paid, issued invoice to ``balanced`` and mark its charge items
+    paid, the same way the core invoice API does when staff balance it.
+
+    Never fails the surrounding settlement: if the invoice is locked elsewhere
+    the step is skipped and staff can balance it manually.
+    """
+    try:
+        with InvoiceLock(invoice), transaction.atomic():
+            invoice = Invoice.objects.select_related("account").get(pk=invoice.pk)
+            if invoice.status != InvoiceStatusOptions.issued.value:
+                return False
+            now = care_now()
+            ChargeItem.objects.filter(
+                account=invoice.account,
+                status=ChargeItemStatusOptions.billed.value,
+                id__in=invoice.charge_items,
+            ).update(
+                status=ChargeItemStatusOptions.paid.value,
+                paid_invoice=invoice,
+                paid_on=now,
+            )
+            invoice.status = InvoiceStatusOptions.balanced.value
+            invoice.updated_by = get_or_create_abdm_user()
+            invoice.save(update_fields=["status", "updated_by", "modified_date"])
+    except ObjectLocked:
+        logger.warning(
+            "Invoice %s is locked; leaving it issued after scan and pay payment",
+            invoice.number or invoice.external_id,
+        )
+        return False
+    return True
+
+
 def close_payment_order(order: PaymentOrder, status: PaymentOrderStatus) -> bool:
     """
     Move a still-pending order to a terminal state (``FAIL`` or ``CANCELED``),
@@ -115,7 +150,9 @@ def close_payment_order(order: PaymentOrder, status: PaymentOrderStatus) -> bool
     return True
 
 
-def create_payment_reconciliation(order: PaymentOrder, reference, amount=None) -> bool:
+def create_payment_reconciliation(
+    order: PaymentOrder, reference, amount=None, *, created_by=None, note=None
+) -> bool:
     """
     Record a successful online payment against the order's invoice, once.
 
@@ -125,7 +162,8 @@ def create_payment_reconciliation(order: PaymentOrder, reference, amount=None) -
     for), never the invoice's current total; a deviation, or an invoice that
     was voided before the payment landed, is noted for review. The post-save
     signal on ``PaymentReconciliation`` marks the order paid and notifies the
-    PHR. Returns whether a reconciliation was recorded by this call.
+    PHR. ``created_by``/``note`` identify a staff member confirming the payment
+    by hand. Returns whether a reconciliation was recorded by this call.
     """
     with PaymentOrderLock(order), transaction.atomic():
         order = _fresh(order)
@@ -147,6 +185,8 @@ def create_payment_reconciliation(order: PaymentOrder, reference, amount=None) -
         notes = [
             f"Scan and pay via {order.provider or 'gateway'} (order {order.order_number})."
         ]
+        if note:
+            notes.append(note)
         if recorded != expected:
             notes.append(
                 f"Needs review: amount mismatch, expected {expected}, got {recorded}."
@@ -183,7 +223,7 @@ def create_payment_reconciliation(order: PaymentOrder, reference, amount=None) -
             tendered_amount=recorded,
             returned_amount=Decimal(0),
             amount=recorded,
-            created_by=get_or_create_abdm_user(),
+            created_by=created_by or get_or_create_abdm_user(),
         )
         account_id = invoice.account_id
         transaction.on_commit(lambda: rebalance_account_task.delay(account_id))

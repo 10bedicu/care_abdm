@@ -28,13 +28,16 @@ class PaymentProvider(ABC):
         against it.
         """
 
-    def reconcile_order(self, order) -> None:  # noqa: B027
+    def reconcile_order(self, order) -> bool:
         """
         Poll the provider for the order's status and reconcile it if paid.
 
+        Returns whether the provider actually answered for this order, so a
+        caller can tell "still pending" apart from "could not check".
         Optional; defaults to a no-op for providers that only reconcile via
         webhooks.
         """
+        return False
 
 
 def register_provider(provider_cls: type[PaymentProvider]) -> type[PaymentProvider]:

@@ -9,7 +9,9 @@ from abdm.models.payment_order import (
     PaymentOrder,
     PaymentOrderStatus,
 )
+from abdm.service.v3.payment_providers import balance_scan_pay_invoice
 from abdm.service.v3.scan_pay import notify_scan_pay_order
+from abdm.settings import plugin_settings as settings
 from care.emr.models.payment_reconciliation import PaymentReconciliation
 from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationStatusOptions,
@@ -54,4 +56,9 @@ def notify_scan_pay_payment(sender, instance, created, **kwargs):
     order.save(
         update_fields=["status", "transaction_id", "payment_date", "modified_date"]
     )
+    if (
+        order.status == PaymentOrderStatus.SUCCESS
+        and settings.ABDM_SCAN_AND_PAY_AUTO_BALANCE_INVOICE
+    ):
+        balance_scan_pay_invoice(order.invoice)
     notify_scan_pay_order(order)

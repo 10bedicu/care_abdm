@@ -1047,7 +1047,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         order.refresh_from_db()
         invoice.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.SUCCESS)
-        self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.balanced.value)
 
     def test_stale_order_survives_unreachable_provider(self):
         def unreachable(order):
