@@ -43,10 +43,11 @@ class PatientMixin:
         patient_div_parts = [f"<p><b>Name:</b> {patient_spec.name}</p>"]
         if patient_spec.gender:
             patient_div_parts.append(f"<p><b>Gender:</b> {patient_spec.gender}</p>")
+        abha_number = getattr(patient, "abha_number", None)
         birth_date = (
-            getattr(patient.abha_number, "parsed_date_of_birth", None)
-            if patient.abha_number
-            else None
+            getattr(abha_number, "parsed_date_of_birth", None)
+            if abha_number
+            else patient.date_of_birth
         )
         if birth_date:
             patient_div_parts.append(f"<p><b>Date of Birth:</b> {birth_date}</p>")
@@ -94,6 +95,6 @@ class PatientMixin:
                 ),
             ],
             gender=patient_spec.gender,
-            birthDate=patient.abha_number.parsed_date_of_birth,
+            birthDate=birth_date,
             address=address or None,
         )

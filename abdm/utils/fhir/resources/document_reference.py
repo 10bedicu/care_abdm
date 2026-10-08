@@ -48,7 +48,11 @@ class DocumentReferenceMixin:
             status="current",
             type=CodeableConcept(text=file.internal_name.split(".")[0]),
             content=[DocumentReferenceContent(attachment=self._attachment(file))],
-            author=[self._reference(self._practitioner(file.created_by))],
+            author=(
+                [self._reference(self._practitioner(file.created_by))]
+                if file.created_by
+                else None
+            ),
         )
 
     def _attachment(self, file: FileUploadModel):
