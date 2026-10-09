@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 
 import requests
 from django.core.cache import cache
@@ -11,6 +12,7 @@ ABDM_TOKEN_URL = settings.ABDM_AUTH_URL or (
 )
 ABDM_TOKEN_CACHE_KEY = "abdm_token"
 MAX_RETRY_COUNT = 1
+TOKEN_FETCH_ATTEMPTS = 3
 
 logger = logging.getLogger(__name__)
 
@@ -27,55 +29,70 @@ class Request:
         logger.debug("User token provided, adding X-Token header")
         return {"X-Token": "Bearer " + user_token}
 
-    def auth_header(self):
+    def _fetch_token(self):
         from abdm.service.helper import cm_id, timestamp, uuid
 
-        token = cache.get(ABDM_TOKEN_CACHE_KEY)
-        if not token:
-            logger.info("Missing session token, fetching new one")
-            data = json.dumps(
-                {
-                    "clientId": settings.ABDM_CLIENT_ID,
-                    "clientSecret": settings.ABDM_CLIENT_SECRET,
-                    "grantType": "client_credentials",
-                }
-            )
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "REQUEST-ID": uuid(),
-                "TIMESTAMP": timestamp(),
-                "X-CM-ID": cm_id(),
+        data = json.dumps(
+            {
+                "clientId": settings.ABDM_CLIENT_ID,
+                "clientSecret": settings.ABDM_CLIENT_SECRET,
+                "grantType": "client_credentials",
             }
+        )
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "REQUEST-ID": uuid(),
+            "TIMESTAMP": timestamp(),
+            "X-CM-ID": cm_id(),
+        }
 
-            logger.debug(f"Fetching token from: {ABDM_TOKEN_URL}")
+        logger.debug(f"Fetching token from: {ABDM_TOKEN_URL}")
+        try:
             response = requests.post(
                 ABDM_TOKEN_URL, data=data, headers=headers, timeout=settings.ABDM_REQUEST_TIMEOUT
             )
+        except requests.RequestException as e:
+            logger.error(f"Error while fetching token: {e}")
+            return None
 
-            logger.debug(f"Token fetch response status: {response.status_code}")
+        logger.debug(f"Token fetch response status: {response.status_code}")
 
-            if response.status_code < 300:
-                if response.headers["Content-Type"] != "application/json":
-                    logger.error(
-                        f"Invalid content type: {response.headers['Content-Type']}"
-                    )
-                    return None
-                data = response.json()
-                token = data["accessToken"]
-                expires_in = data["expiresIn"]
+        if response.status_code >= 300:
+            logger.error(f"Error while fetching token: {response.text}")
+            return None
 
-                cache.set(ABDM_TOKEN_CACHE_KEY, token, expires_in)
-                logger.info(
-                    f"Successfully fetched and cached token, expires in {expires_in} seconds"
-                )
-            else:
-                logger.error(f"Error while fetching token: {response.text}")
-                return None
-        else:
+        if response.headers.get("Content-Type") != "application/json":
+            logger.error(f"Invalid content type: {response.headers.get('Content-Type')}")
+            return None
+
+        data = response.json()
+        token = data["accessToken"]
+        expires_in = data["expiresIn"]
+
+        cache.set(ABDM_TOKEN_CACHE_KEY, token, expires_in)
+        logger.info(
+            f"Successfully fetched and cached token, expires in {expires_in} seconds"
+        )
+        return token
+
+    def auth_header(self):
+        from abdm.service.helper import ABDMAPIException
+
+        token = cache.get(ABDM_TOKEN_CACHE_KEY)
+        if token:
             logger.debug("Using cached authentication token")
+            return {"Authorization": f"Bearer {token}"}
 
-        return {"Authorization": f"Bearer {token}"}
+        logger.info("Missing session token, fetching new one")
+        for attempt in range(1, TOKEN_FETCH_ATTEMPTS + 1):
+            token = self._fetch_token()
+            if token:
+                return {"Authorization": f"Bearer {token}"}
+            if attempt < TOKEN_FETCH_ATTEMPTS:
+                time.sleep(attempt)
+
+        raise ABDMAPIException(detail="Unable to obtain ABDM session token")
 
     def headers(self, additional_headers=None, auth=None):
         return {

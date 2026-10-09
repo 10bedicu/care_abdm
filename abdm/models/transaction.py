@@ -6,6 +6,7 @@ from abdm.models.json_schema.transaction import (
     CREATE_OR_LINK_ABHA_NUMBER,
     EXCHANGE_DATA,
     LINK_CARE_CONTEXT,
+    SCAN_AND_PAY,
     SCAN_AND_SHARE,
 )
 from care.users.models import User
@@ -19,6 +20,7 @@ class TransactionType(models.IntegerChoices):
     LINK_CARE_CONTEXT = 4
     EXCHANGE_DATA = 5
     ACCESS_DATA = 6  # tracks internal data access within care
+    SCAN_AND_PAY = 7
 
 class TransactionStatus(models.IntegerChoices):
     INITIATED = 1
@@ -55,6 +57,8 @@ class Transaction(BaseModel):
             validate(instance=self.meta_data, schema=LINK_CARE_CONTEXT)
         elif self.type == TransactionType.EXCHANGE_DATA:
             validate(instance=self.meta_data, schema=EXCHANGE_DATA)
+        elif self.type == TransactionType.SCAN_AND_PAY:
+            validate(instance=self.meta_data, schema=SCAN_AND_PAY)
 
     def save(self, *args, **kwargs):
         self._validate_meta_data()
