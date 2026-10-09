@@ -29,6 +29,13 @@ BC25519 = curve.Curve(
     b"\x01\x03\x06\x01\x04\x01\x97U\x05\x01",
 )
 
+fixed_prefix_bytes = base64.b64decode(
+    "MIIBMTCB6gYHKoZIzj0CATCB3gIBATArBgcqhkjOPQEBAiB///////////////////////////////////"
+    "//////7TBEBCAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqYSRShRAQge0Je0Je0Je0Je0Je0Je0Je0J"
+    "e0Je0Je0JgtenHcQyGQEQQQqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0kWiCuGaG4oIa04B7dLH"
+    "dI0UySPU1+bXxhsinpxaJ+ztPZAiAQAAAAAAAAAAAAAAAAAAAAFN753qL3nNZYEmMaXPXT7QIBCANCAAQ="
+)
+
 
 @dataclass(frozen=True)
 class KeyMaterial:
@@ -77,11 +84,10 @@ class KeyMaterial:
     @classmethod
     def encode_x509_public_key_to_base64(cls, key: Point):
         # Adds Java Bouncy Castle X509 format prefix
-        fixed_prefix_b64 = "MIIBMTCB6gYHKoZIzj0CATCB3gIBATArBgcqhkjOPQEBAiB/////////////////////////////////////////7TBEBCAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqYSRShRAQge0Je0Je0Je0Je0Je0Je0Je0Je0Je0Je0JgtenHcQyGQEQQQqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0kWiCuGaG4oIa04B7dLHdI0UySPU1+bXxhsinpxaJ+ztPZAiAQAAAAAAAAAAAAAAAAAAAAFN753qL3nNZYEmMaXPXT7QIBCANCAAQ="
         x_bytes = key.x.to_bytes((key.x.bit_length() + 7) // 8, byteorder="big")
         y_bytes = key.y.to_bytes((key.y.bit_length() + 7) // 8, byteorder="big")
         return base64.b64encode(
-            base64.b64decode(fixed_prefix_b64) + x_bytes + y_bytes
+            fixed_prefix_bytes + x_bytes + y_bytes
         ).decode("utf-8")
 
     @classmethod
@@ -155,10 +161,12 @@ class CryptoController:
             decryption_request.sender_public_key,
         )
         aes_encryption_key = cls.sha256_hkdf(salt, shared_secret, 32)
-        encrypted_string = base64.b64decode(decryption_request.encrypted_data)[:-16]
+        encrypted_bytes = base64.b64decode(decryption_request.encrypted_data)
+        ciphertext = encrypted_bytes[:-16]
+        tag = encrypted_bytes[-16:]
 
         cipher = AES.new(aes_encryption_key, AES.MODE_GCM, iv)
-        decrypted_string = cipher.decrypt(encrypted_string)
+        decrypted_string = cipher.decrypt_and_verify(ciphertext, tag)
 
         return decrypted_string.decode("utf-8")
 
