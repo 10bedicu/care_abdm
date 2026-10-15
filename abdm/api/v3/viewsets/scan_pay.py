@@ -20,13 +20,13 @@ from abdm.api.v3.serializers.scan_pay import (
 from abdm.authentication import ABDMAuthentication
 from abdm.models import CallbackType, PaymentOrder
 from abdm.models.payment_order import PAYMENT_ORDER_PAID_STATUSES
+from abdm.service.v3.receipt import build_receipt_context
 from abdm.tasks.scan_pay import (
     scan_pay_on_order_status,
     scan_pay_on_selection,
     scan_pay_on_share_open_order,
 )
 from abdm.utils.callback import store_and_enqueue_callback
-from care.emr.models.charge_item import ChargeItem
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,11 @@ class ScanPayViewSet(GenericViewSet):
                     status__in=PAYMENT_ORDER_PAID_STATUSES,
                     invoice__isnull=False,
                 )
-                .select_related("abha_number", "health_facility__facility", "invoice")
+                .select_related(
+                    "abha_number__patient",
+                    "health_facility__facility",
+                    "invoice__created_by",
+                )
                 .first()
             )
         except (DjangoValidationError, ValueError):
@@ -188,18 +192,9 @@ class ScanPayViewSet(GenericViewSet):
                 {"detail": "Receipt not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
-        charge_items = ChargeItem.objects.filter(id__in=order.invoice.charge_items)
         html = render_to_string(
             "abdm/scan_and_pay_receipt.html",
-            {
-                "order": order,
-                "invoice": order.invoice,
-                "facility": order.health_facility.facility,
-                "hf_id": order.health_facility.hf_id,
-                "patient": order.abha_number.patient,
-                "abha_address": order.requesting_abha_address,
-                "charge_items": charge_items,
-            },
+            build_receipt_context(order),
         )
 
         pdf = HTML(string=html).write_pdf()

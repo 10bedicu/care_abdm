@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -14,16 +14,19 @@ from abdm.service.v3.callback_handlers.scan_pay import (
     handle_patient_share_open_order,
     handle_scan_pay_order_status,
 )
+from abdm.service.v3.receipt import build_receipt_context
 from abdm.settings import plugin_settings as abdm_settings
 from abdm.tasks import scan_pay as scan_pay_tasks
 from abdm.tasks.scan_pay import POLL_LOCK_KEY, reconcile_pending_payment_orders
 from abdm.utils import user as abdm_user
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
+from django.template.loader import render_to_string
 from model_bakery import baker
 
 from care.emr.models.charge_item import ChargeItem
 from care.emr.models.invoice import Invoice
+from care.emr.models.patient import PatientIdentifierConfig
 from care.emr.models.payment_reconciliation import PaymentReconciliation
 from care.emr.resources.account.spec import AccountStatusOptions
 from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
@@ -829,6 +832,126 @@ class TestReceipt(ScanPayTestBase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
+
+    def test_receipt_matches_invoice_print(self):
+        self.patient.name = "Sam Das"
+        self.patient.gender = "male"
+        self.patient.date_of_birth = date(1997, 1, 15)
+        self.patient.address = "Mangarath (H), Puthenpeedika"
+        identifier = baker.make(
+            PatientIdentifierConfig,
+            facility=None,
+            status="active",
+            config={
+                "use": "official",
+                "description": "",
+                "system": "https://example.org/uhid",
+                "required": False,
+                "unique": True,
+                "regex": ".*",
+                "display": "UHID",
+                "auto_maintained": False,
+            },
+        )
+        self.patient.instance_identifiers = [
+            {"config": str(identifier.external_id), "value": "20260000397"}
+        ]
+        self.patient.save()
+        self.user.first_name = "abdm_user_internal"
+        self.user.last_name = ""
+        self.user.prefix = None
+        self.user.suffix = None
+        self.user.save(update_fields=["first_name", "last_name", "prefix", "suffix"])
+
+        charge_item = self.create_charge_item(amount=20)
+        invoice = baker.make(
+            Invoice,
+            facility=self.facility,
+            patient=self.patient,
+            account=self.account,
+            status=InvoiceStatusOptions.balanced.value,
+            total_net=Decimal(20),
+            total_gross=Decimal(20),
+            number="INV-489-26",
+            issue_date=care_now(),
+            charge_items=[charge_item.id],
+            charge_items_copy=[
+                {
+                    "title": "IP Admission\nIP Charges",
+                    "quantity": "1",
+                    "unit_price_components": [
+                        {"monetary_component_type": "base", "amount": "20"}
+                    ],
+                    "total_price_components": [
+                        {"monetary_component_type": "base", "amount": "20"},
+                        {"monetary_component_type": "discount", "amount": "0"},
+                    ],
+                    "total_price": "20",
+                }
+            ],
+            total_price_components=[
+                {"monetary_component_type": "base", "amount": "20"}
+            ],
+            created_by=self.user,
+        )
+        PaymentReconciliation.objects.create(
+            facility=self.facility,
+            target_invoice=invoice,
+            account=self.account,
+            reconciliation_type="payment",
+            status="active",
+            kind="online",
+            issuer_type="patient",
+            outcome="complete",
+            method="ccca",
+            payment_datetime=care_now(),
+            reference_number="4651842147310",
+            tendered_amount=Decimal(20),
+            returned_amount=Decimal(0),
+            amount=Decimal(20),
+        )
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            invoice=invoice,
+            order_number="INV-489-26",
+            status=PaymentOrderStatus.SUCCESS,
+        )
+
+        context = build_receipt_context(order)
+        self.assertEqual(context["invoice_number"], "INV-489-26")
+        self.assertEqual(context["patient_name"], "Sam Das")
+        self.assertIn("Male", context["patient_meta"])
+        self.assertTrue(context["patient_meta"].endswith("y"))
+        self.assertEqual(
+            context["identifiers"],
+            [{"label": "UHID", "value": "20260000397"}],
+        )
+        self.assertEqual(context["rows"][0]["title"], "IP Admission\nIP Charges")
+        self.assertEqual(context["rows"][0]["unit_price"], "20.00")
+        self.assertEqual(context["rows"][0]["quantity"], "1.00")
+        self.assertEqual(context["rows"][0]["discount"], "0.00")
+        self.assertEqual(context["rows"][0]["total"], "20.00")
+        self.assertEqual(context["summary_lines"][0]["label"], "Base Amount:")
+        self.assertEqual(context["summary_lines"][0]["value"], "₹20.00")
+        self.assertEqual(context["total"], "₹20.00")
+        self.assertEqual(context["payments"][0]["method"], "Credit Card")
+        self.assertEqual(context["payments"][0]["reference"], "4651842147310")
+        self.assertEqual(context["total_received"], "₹20.00")
+        self.assertEqual(context["created_by"], "abdm_user_internal")
+
+        html = render_to_string("abdm/scan_and_pay_receipt.html", context)
+        self.assertIn("Bill To", html)
+        self.assertIn("Total Received", html)
+        self.assertIn("INV-489-26", html)
+
+        response = self.client.get(
+            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF"))
 
 
 class TestPaymentProviderRegistry(ScanPayTestBase):

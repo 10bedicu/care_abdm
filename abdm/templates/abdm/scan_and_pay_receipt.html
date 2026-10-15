@@ -3,75 +3,491 @@
   <head>
     <meta charset="utf-8" />
     <style>
-      body { font-family: sans-serif; color: #1a1a1a; font-size: 12px; margin: 24px; }
-      .header { border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; margin-bottom: 16px; }
-      .facility-name { font-size: 20px; font-weight: bold; }
-      .muted { color: #555; }
-      .meta-table { width: 100%; margin-bottom: 16px; }
-      .meta-table td { padding: 2px 0; vertical-align: top; }
-      .items-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-      .items-table th, .items-table td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
-      .items-table th { background: #f0f0f0; }
-      .amount { text-align: right; }
-      .total-row td { font-weight: bold; }
-      .status { display: inline-block; padding: 2px 8px; border: 1px solid #1a1a1a; border-radius: 4px; font-weight: bold; }
-      .footer { margin-top: 24px; font-size: 10px; color: #777; }
+      @font-face {
+        font-family: Figtree;
+        font-style: normal;
+        font-weight: 400;
+        src: url("{{ font_400 }}") format("woff");
+      }
+      @font-face {
+        font-family: Figtree;
+        font-style: normal;
+        font-weight: 500;
+        src: url("{{ font_500 }}") format("woff");
+      }
+      @font-face {
+        font-family: Figtree;
+        font-style: normal;
+        font-weight: 600;
+        src: url("{{ font_600 }}") format("woff");
+      }
+      @font-face {
+        font-family: Figtree;
+        font-style: normal;
+        font-weight: 700;
+        src: url("{{ font_700 }}") format("woff");
+      }
+      @page { size: A4; margin: 12mm; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: #453c52;
+        font-family: Figtree, "DejaVu Sans", sans-serif;
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 20px;
+      }
+      .header {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 12px;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      .header td { vertical-align: top; border: none; padding: 0 0 8px; }
+      .facility-name {
+        color: #453c52;
+        font-size: 24px;
+        font-weight: 600;
+        line-height: 32px;
+      }
+      .facility-address {
+        margin: 0;
+        color: #6a7282;
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 16px;
+        white-space: pre-wrap;
+      }
+      .facility-phone {
+        margin: 0;
+        color: #6a7282;
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 16px;
+      }
+      .logo-cell { width: 1%; text-align: right; vertical-align: top; white-space: nowrap; }
+      .logo { height: 40px; width: auto; }
+      .title-row { width: 100%; border-collapse: collapse; margin: 0 0 16px; }
+      .title-row td { border: none; padding: 0; vertical-align: middle; }
+      .invoice-label {
+        color: #453c52;
+        font-size: 16px;
+        font-weight: 400;
+        line-height: 24px;
+        text-transform: uppercase;
+      }
+      .invoice-number {
+        margin-left: 8px;
+        color: #030712;
+        font-size: 16px;
+        font-weight: 600;
+        line-height: 24px;
+      }
+      .issue-date {
+        text-align: right;
+        color: #030712;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 20px;
+        white-space: nowrap;
+      }
+      .issue-label { color: #364153; margin-right: 4px; font-weight: 500; }
+      .bill-row { width: 100%; border-collapse: collapse; margin: 0 0 16px; }
+      .bill-row td { border: none; padding: 0; vertical-align: top; }
+      .bill-label { color: #364153; font-size: 14px; font-weight: 500; line-height: 20px; }
+      .patient-name {
+        margin: 0;
+        color: #453c52;
+        font-size: 16px;
+        font-weight: 600;
+        line-height: 24px;
+      }
+      .patient-meta { margin-left: 8px; color: #4a5565; font-weight: 400; }
+      .identifier {
+        margin-top: 0;
+        color: #364153;
+        font-size: 16px;
+        font-weight: 400;
+        line-height: 24px;
+      }
+      .identifier-value { margin-left: 8px; font-weight: 600; }
+      .address {
+        margin-top: 4px;
+        color: #364153;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 20px;
+      }
+      .address-label { margin-right: 4px; }
+      .missing { color: #6a7282; font-weight: 400; }
+      .qr { width: 100px; text-align: right; }
+      .sheet-top {
+        border: 1px solid #d1d5dc;
+        border-radius: 4px 4px 0 0;
+        overflow: hidden;
+        background: #fff;
+      }
+      .sheet-bottom {
+        border: 1px solid #d1d5dc;
+        border-radius: 0 0 6px 6px;
+        overflow: hidden;
+        background: #fff;
+      }
+      table.items {
+        width: 100%;
+        border-collapse: collapse;
+        border-spacing: 0;
+        background: #fff;
+      }
+      table.items th, table.items td {
+        border-right: 1px solid #e5e7eb;
+        border-bottom: 1px solid #e5e7eb;
+        padding: 8px;
+        color: #030712;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 20px;
+        vertical-align: middle;
+        white-space: nowrap;
+      }
+      table.items th {
+        height: 40px;
+        padding: 0 8px;
+        text-align: center;
+        font-weight: 500;
+      }
+      table.items th.left, table.items td.left { text-align: left; }
+      table.items th.right, table.items td.right { text-align: right; }
+      table.items th.center, table.items td.center { text-align: center; }
+      table.items th:last-child, table.items td:last-child { border-right: none; }
+      table.items td:last-child {
+        color: #453c52;
+        font-weight: 400;
+        text-align: right;
+      }
+      table.items tbody tr:last-child td { border-bottom: none; }
+      .title { white-space: pre-wrap; }
+      .detail {
+        margin-top: 2px;
+        color: #6a7282;
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 16px;
+        text-align: right;
+      }
+      table.items td.empty {
+        color: #6a7282;
+        font-weight: 400;
+        text-align: center;
+      }
+      .totals {
+        border-left: 1px solid #d1d5dc;
+        border-right: 1px solid #d1d5dc;
+        padding: 8px;
+        background: #fff;
+      }
+      .totals.closed {
+        border-bottom: 1px solid #d1d5dc;
+        border-radius: 0 0 6px 6px;
+      }
+      .stack { margin-bottom: 16px; }
+      .summary { width: 256px; margin-left: auto; border-collapse: collapse; }
+      .summary td {
+        border: none;
+        padding: 0 0 8px;
+        color: #030712;
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 20px;
+        vertical-align: top;
+      }
+      .summary tr:last-child td { padding-bottom: 0; }
+      .summary .value { text-align: right; white-space: nowrap; }
+      .summary .medium { font-weight: 500; }
+      .summary .muted { color: #6a7282; font-weight: 400; }
+      .summary tr.strong td { color: #030712; font-weight: 600; }
+      .rule {
+        box-sizing: content-box;
+        height: 0;
+        margin: 8px 0;
+        padding: 4px 0;
+        border-top: 2px dashed #e5e7eb;
+      }
+      .rule.last { margin-bottom: 0; }
+      .rule-end {
+        border-top: none;
+        border-bottom: 2px dashed #e5e7eb;
+        margin-bottom: 0;
+      }
+      .payment-id {
+        display: block;
+        margin-top: 0;
+        color: #6a7282;
+        font-family: "DejaVu Sans Mono", ui-monospace, monospace;
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 16px;
+      }
+      .received { margin: 16px 0; }
+      .credit-notes {
+        margin-top: 16px;
+        border: 1px solid #d1d5dc;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #fff;
+      }
+      .credit-title {
+        margin-top: 8px;
+        padding: 0 12px;
+        color: #453c52;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 20px;
+      }
+      .terms { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; }
+      .terms-title { color: #030712; font-size: 14px; font-weight: 500; line-height: 20px; }
+      .terms p { margin: 4px 0 0; font-size: 14px; line-height: 20px; }
+      .footer { margin-top: 8px; color: #6a7282; font-size: 10px; line-height: 14px; }
+      .footer table { width: 100%; border-collapse: collapse; }
+      .footer td { border: none; padding: 0; vertical-align: top; color: #6a7282; }
+      .footer .right { text-align: right; }
+      .footer strong { color: #6a7282; font-weight: 600; }
+      .watermark {
+        position: fixed;
+        top: 42%;
+        left: 0;
+        width: 100%;
+        text-align: center;
+        font-size: 64px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        opacity: 0.2;
+        transform: rotate(-30deg);
+      }
+      .watermark-red { color: #dc2626; }
+      .watermark-gray { color: #4b5563; }
     </style>
   </head>
   <body>
-    <div class="header">
-      <div class="facility-name">{{ facility.name }}</div>
-      <div class="muted">ABDM Facility ID: {{ hf_id }}</div>
-    </div>
+    {% if watermark %}
+    <div class="watermark watermark-{{ watermark.color }}">{{ watermark.text }}</div>
+    {% endif %}
 
-    <h3>Payment Receipt</h3>
-
-    <table class="meta-table">
+    <table class="header">
       <tr>
-        <td><strong>Patient:</strong> {{ patient.name }}</td>
-        <td><strong>ABHA Address:</strong> {{ abha_address }}</td>
-      </tr>
-      <tr>
-        <td><strong>Order Number:</strong> {{ order.order_number }}</td>
-        <td><strong>Invoice Number:</strong> {{ invoice.number }}</td>
-      </tr>
-      <tr>
-        <td><strong>Transaction ID:</strong> {{ order.transaction_id }}</td>
-        <td><strong>Payment Date:</strong> {{ order.payment_date|date:"d M Y, h:i A" }}</td>
-      </tr>
-      <tr>
-        <td><strong>Status:</strong> <span class="status">{{ order.status }}</span></td>
-        <td><strong>Receipt ID:</strong> {{ order.external_id }}</td>
+        <td>
+          <div class="facility-name">{{ facility_name }}</div>
+          <div class="facility-address">{{ facility_address }}</div>
+          {% if facility_phone %}<div class="facility-phone">{{ facility_phone }}</div>{% endif %}
+        </td>
+        <td class="logo-cell"><img class="logo" src="{{ logo_url }}" alt="Care Logo" /></td>
       </tr>
     </table>
 
-    <table class="items-table">
+    <table class="title-row">
+      <tr>
+        <td>
+          <span class="invoice-label">Invoice</span>
+          {% if invoice_number %}<span class="invoice-number">{{ invoice_number }}</span>{% endif %}
+        </td>
+        <td class="issue-date">
+          <span class="issue-label">Issue Date:</span>{{ issue_date }}
+        </td>
+      </tr>
+    </table>
+
+    <table class="bill-row">
+      <tr>
+        <td>
+          <div class="bill-label">Bill To:</div>
+          <p class="patient-name">
+            {{ patient_name }}{% if patient_meta %}<span class="patient-meta">({{ patient_meta }})</span>{% endif %}
+          </p>
+          {% for identifier in identifiers %}
+          <div class="identifier">
+            <span>{{ identifier.label }}:</span><span class="identifier-value">{{ identifier.value }}</span>
+          </div>
+          {% endfor %}
+          <div class="address">
+            <span class="address-label">Address:</span>{% if address %}{{ address }}{% else %}<span class="missing">No address provided</span>{% endif %}
+          </div>
+        </td>
+        <td class="qr"><img src="{{ qr_url }}" width="100" height="100" alt="" /></td>
+      </tr>
+    </table>
+
+    <div class="sheet-top">
+    <table class="items">
       <thead>
         <tr>
-          <th>#</th>
-          <th>Service</th>
-          <th>Description</th>
-          <th class="amount">Amount (INR)</th>
+          <th class="col-n">#</th>
+          <th class="left">Item</th>
+          <th>Unit Price (₹)</th>
+          <th>Qty</th>
+          <th>Discount</th>
+          {% for tax in tax_columns %}
+          <th>{{ tax }}</th>
+          {% endfor %}
+          <th>Total (₹)</th>
         </tr>
       </thead>
       <tbody>
-        {% for item in charge_items %}
+        {% for row in rows %}
         <tr>
-          <td>{{ forloop.counter }}</td>
-          <td>{{ item.title }}</td>
-          <td>{{ item.description|default:"-" }}</td>
-          <td class="amount">{{ item.total_price|floatformat:2 }}</td>
+          <td class="center">{{ row.index }}</td>
+          <td class="title left">{{ row.title }}</td>
+          <td class="right">{{ row.unit_price }}</td>
+          <td class="center">{{ row.quantity }}</td>
+          <td class="right">
+            {{ row.discount }}
+            {% for detail in row.discount_details %}
+            <div class="detail">{{ detail }}</div>
+            {% endfor %}
+          </td>
+          {% for tax in row.taxes %}
+          <td class="right">
+            {{ tax.amount }}
+            {% if tax.detail %}<div class="detail">{{ tax.detail }}</div>{% endif %}
+          </td>
+          {% endfor %}
+          <td class="right">{{ row.total }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td class="empty" colspan="{{ colspan }}">No charge items found</td>
         </tr>
         {% endfor %}
-        <tr class="total-row">
-          <td colspan="3">Total</td>
-          <td class="amount">{{ invoice.total_gross|floatformat:2 }}</td>
-        </tr>
       </tbody>
     </table>
+    </div>
+
+    <div class="totals{% if not payments %} closed{% endif %}">
+      <div class="stack">
+        <table class="summary">
+          {% for line in summary_lines %}
+          <tr>
+            <td{% if line.muted %} class="muted"{% endif %}>{{ line.label }}</td>
+            <td class="value{% if not line.muted %} medium{% endif %}">{{ line.value }}</td>
+          </tr>
+          {% endfor %}
+          <tr>
+            <td class="muted">Net Amount</td>
+            <td class="value">{{ net_amount }}</td>
+          </tr>
+        </table>
+        <div class="rule"></div>
+        <table class="summary">
+          <tr class="strong">
+            <td>Total</td>
+            <td class="value">{{ total }}</td>
+          </tr>
+        </table>
+        <div class="rule last"></div>
+      </div>
+    </div>
+
+    {% if payments %}
+    <div class="sheet-bottom">
+    <table class="items">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th class="left">Date and Time</th>
+          <th class="left">Payment Method</th>
+          <th class="left">Reference</th>
+          <th class="right">Amount (₹)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for payment in payments %}
+        <tr>
+          <td class="center">{{ forloop.counter }}</td>
+          <td class="left">
+            {{ payment.paid_at }}
+            <span class="payment-id">{{ payment.id }}</span>
+          </td>
+          <td class="left">{{ payment.method }}</td>
+          <td class="left">{{ payment.reference }}</td>
+          <td class="right">{{ payment.amount }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <div class="received">
+      <div class="rule"></div>
+      <table class="summary">
+        <tr class="strong">
+          <td>Total Received</td>
+          <td class="value">{{ total_received }}</td>
+        </tr>
+      </table>
+      <div class="rule rule-end"></div>
+    </div>
+    {% endif %}
+
+    {% if credit_notes %}
+    <div class="credit-notes">
+      <div class="credit-title">Credit Notes Issued Against This Invoice</div>
+      <table class="items">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th class="left">Date and Time</th>
+            <th class="left">Payment Method</th>
+            <th class="left">Reference</th>
+            <th class="right">Amount (₹)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for note in credit_notes %}
+          <tr>
+            <td class="center">{{ forloop.counter }}</td>
+            <td class="left">
+              {{ note.paid_at }}
+              <span class="payment-id">{{ note.id }}</span>
+            </td>
+            <td class="left">{{ note.method }}</td>
+            <td class="left">{{ note.reference }}</td>
+            <td class="right">{{ note.amount }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="received">
+      <div class="rule"></div>
+      <table class="summary">
+        <tr class="strong">
+          <td>Total Credit Notes</td>
+          <td class="value">{{ total_credit_notes }}</td>
+        </tr>
+      </table>
+      <div class="rule rule-end"></div>
+    </div>
+    {% endif %}
+
+    {% if payment_terms %}
+    <div class="terms">
+      <div class="terms-title">Payment Terms</div>
+      <p>{{ payment_terms }}</p>
+    </div>
+    {% endif %}
 
     <div class="footer">
-      This is a system generated receipt issued via ABDM Scan and Pay by {{ facility.name }}.
+      <table>
+        <tr>
+          <td><strong>Created By: </strong>{{ created_by }}</td>
+          <td class="right">
+            {% if location %}
+            <strong>Location: </strong>{{ location }}
+            {% else %}
+            <strong>Generated on: </strong>{{ generated_on }}
+            {% endif %}
+          </td>
+        </tr>
+      </table>
     </div>
   </body>
 </html>
