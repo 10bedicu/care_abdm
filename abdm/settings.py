@@ -129,7 +129,7 @@ DEFAULTS = {
     "ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME": 1800,
     "ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT": True,
     "ABDM_SCAN_AND_PAY_PROVIDER": "razorpay",
-    "ABDM_SCAN_AND_PAY_POLLING_ENABLED": True,
+    "ABDM_SCAN_AND_PAY_POLLING_ENABLED": False,
     "ABDM_SCAN_AND_PAY_POLLING_INTERVAL": 10,
     "ABDM_SCAN_AND_PAY_ORDER_MAX_AGE": 3600,
     # give up on an order the provider never answered about this long past max age
