@@ -3,6 +3,7 @@ from collections import defaultdict
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from abdm.models.payment_order import (
     PAYMENT_ORDER_PAID_STATUSES,
@@ -170,6 +171,15 @@ def scan_pay_receipt_link(order: PaymentOrder):
     )
 
 
+def acknowledgement_payment_date(value) -> str | None:
+    """Format a payment moment. The billing API can leave a JSON string on the order."""
+    if isinstance(value, str):
+        value = parse_datetime(value)
+    if not value:
+        return None
+    return value.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
 def build_scan_pay_acknowledgement(order: PaymentOrder):
     ack_status = order.status
     if ack_status in [
@@ -185,9 +195,7 @@ def build_scan_pay_acknowledgement(order: PaymentOrder):
         "transaction_id": order.transaction_id,
         "order_number": order.order_number,
         "open_order_request_id": str(order.open_order_request_id),
-        "payment_date": order.payment_date.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        if order.payment_date
-        else None,
+        "payment_date": acknowledgement_payment_date(order.payment_date),
         "payment_receipt_link": scan_pay_receipt_link(order) if is_paid else None,
     }
 

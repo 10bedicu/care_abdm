@@ -56,3 +56,16 @@ class PaymentOrder(BaseModel):
     @property
     def requesting_abha_address(self) -> str:
         return self.abha_address or self.abha_number.health_id
+
+
+def latest_open_payment_link(invoice_id: int) -> PaymentOrder | None:
+    """The newest scan-and-pay order for this invoice that can still be paid."""
+    return (
+        PaymentOrder.objects.filter(
+            invoice_id=invoice_id,
+            status__in=PAYMENT_ORDER_PENDING_STATUSES,
+        )
+        .order_by("-created_date")
+        .only("id", "created_date")
+        .first()
+    )

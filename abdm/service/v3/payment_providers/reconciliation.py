@@ -9,6 +9,7 @@ from abdm.models.payment_order import (
     PaymentOrder,
     PaymentOrderStatus,
 )
+from abdm.open_payment_link import allow_open_payment_link_mutation
 from abdm.utils.user import get_or_create_abdm_user
 from care.emr.locks.billing import AccountLock, InvoiceLock
 from care.emr.models.charge_item import ChargeItem
@@ -73,9 +74,15 @@ def cancel_scan_pay_invoice(invoice: Invoice, reason: str) -> bool:
         invoice.status = InvoiceStatusOptions.cancelled.value
         invoice.cancelled_reason = reason
         invoice.updated_by = updated_by
-        invoice.save(
-            update_fields=["status", "cancelled_reason", "updated_by", "modified_date"]
-        )
+        with allow_open_payment_link_mutation():
+            invoice.save(
+                update_fields=[
+                    "status",
+                    "cancelled_reason",
+                    "updated_by",
+                    "modified_date",
+                ]
+            )
         ChargeItem.objects.filter(
             account=invoice.account,
             id__in=invoice.charge_items,
@@ -113,7 +120,8 @@ def balance_scan_pay_invoice(invoice: Invoice) -> bool:
             )
             invoice.status = InvoiceStatusOptions.balanced.value
             invoice.updated_by = get_or_create_abdm_user()
-            invoice.save(update_fields=["status", "updated_by", "modified_date"])
+            with allow_open_payment_link_mutation():
+                invoice.save(update_fields=["status", "updated_by", "modified_date"])
     except ObjectLocked:
         logger.warning(
             "Invoice %s is locked; leaving it issued after scan and pay payment",
@@ -260,24 +268,25 @@ def create_payment_reconciliation(
                 invoice.number or invoice.external_id,
             )
 
-        PaymentReconciliation.objects.create(
-            facility=order.health_facility.facility,
-            target_invoice=invoice,
-            account=invoice.account,
-            reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
-            status=PaymentReconciliationStatusOptions.active.value,
-            kind=PaymentReconciliationKindOptions.online.value,
-            issuer_type=PaymentReconciliationIssuerTypeOptions.patient.value,
-            outcome=PaymentReconciliationOutcomeOptions.complete.value,
-            method=PaymentReconciliationPaymentMethodOptions.ccca.value,
-            payment_datetime=care_now(),
-            reference_number=reference,
-            note=" ".join(notes),
-            tendered_amount=recorded,
-            returned_amount=Decimal(0),
-            amount=recorded,
-            created_by=created_by or get_or_create_abdm_user(),
-        )
+        with allow_open_payment_link_mutation():
+            PaymentReconciliation.objects.create(
+                facility=order.health_facility.facility,
+                target_invoice=invoice,
+                account=invoice.account,
+                reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
+                status=PaymentReconciliationStatusOptions.active.value,
+                kind=PaymentReconciliationKindOptions.online.value,
+                issuer_type=PaymentReconciliationIssuerTypeOptions.patient.value,
+                outcome=PaymentReconciliationOutcomeOptions.complete.value,
+                method=PaymentReconciliationPaymentMethodOptions.ccca.value,
+                payment_datetime=care_now(),
+                reference_number=reference,
+                note=" ".join(notes),
+                tendered_amount=recorded,
+                returned_amount=Decimal(0),
+                amount=recorded,
+                created_by=created_by or get_or_create_abdm_user(),
+            )
         account_id = invoice.account_id
         transaction.on_commit(lambda: rebalance_account_task.delay(account_id))
     return True

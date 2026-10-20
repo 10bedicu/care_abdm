@@ -7,6 +7,7 @@ import requests
 from abdm.models import AbhaNumber, HealthFacility, InboundCallback, PaymentOrder
 from abdm.models.inbound_callback import CallbackStatus
 from abdm.models.payment_order import PaymentOrderStatus
+from abdm.open_payment_link import allow_open_payment_link_mutation
 from abdm.service.helper import uuid
 from abdm.service.v3 import payment_providers
 from abdm.service.v3 import scan_pay as scan_pay_service
@@ -501,7 +502,10 @@ class TestPaymentNotify(ScanPayTestBase):
             status=PaymentOrderStatus.PAYMENT_INITIATED,
         )
 
-        with self.captureOnCommitCallbacks(execute=True):
+        with (
+            self.captureOnCommitCallbacks(execute=True),
+            allow_open_payment_link_mutation(),
+        ):
             baker.make(
                 PaymentReconciliation,
                 facility=self.facility,
@@ -545,7 +549,10 @@ class TestPaymentNotify(ScanPayTestBase):
             status=PaymentOrderStatus.PAYMENT_INITIATED,
         )
 
-        with self.captureOnCommitCallbacks() as callbacks:
+        with (
+            self.captureOnCommitCallbacks() as callbacks,
+            allow_open_payment_link_mutation(),
+        ):
             baker.make(
                 PaymentReconciliation,
                 facility=self.facility,
@@ -583,7 +590,10 @@ class TestPaymentNotify(ScanPayTestBase):
             status=PaymentOrderStatus.PAYMENT_INITIATED,
         )
 
-        with self.captureOnCommitCallbacks(execute=True):
+        with (
+            self.captureOnCommitCallbacks(execute=True),
+            allow_open_payment_link_mutation(),
+        ):
             baker.make(
                 PaymentReconciliation,
                 facility=self.facility,
@@ -1175,18 +1185,19 @@ class TestClosePaymentOrder(ScanPayTestBase):
     @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_closing_keeps_invoice_that_received_a_payment(self, mock_task):
         order, invoice, charge_item = self.make_invoiced_order()
-        baker.make(
-            PaymentReconciliation,
-            facility=self.facility,
-            account=self.account,
-            target_invoice=invoice,
-            reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
-            status=PaymentReconciliationStatusOptions.active.value,
-            amount=Decimal(40),
-            tendered_amount=Decimal(40),
-            returned_amount=Decimal(0),
-            reference_number="pay_partial",
-        )
+        with allow_open_payment_link_mutation():
+            baker.make(
+                PaymentReconciliation,
+                facility=self.facility,
+                account=self.account,
+                target_invoice=invoice,
+                reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
+                status=PaymentReconciliationStatusOptions.active.value,
+                amount=Decimal(40),
+                tendered_amount=Decimal(40),
+                returned_amount=Decimal(0),
+                reference_number="pay_partial",
+            )
         order.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.PENDING)
 
