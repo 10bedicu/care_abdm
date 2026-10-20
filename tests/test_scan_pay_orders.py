@@ -14,6 +14,7 @@ from care.emr.models.invoice import Invoice
 from care.emr.models.payment_reconciliation import PaymentReconciliation
 from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
 from care.emr.resources.invoice.spec import InvoiceStatusOptions
+from care.security.permissions.account import AccountPermissions
 from tests.test_scan_and_pay import ScanPayTestBase
 
 ORDERS_URL = "/api/abdm/v3/scan-pay/orders/"
@@ -275,7 +276,7 @@ class TestCheckStatus(ScanPayOrderTestBase):
 
         self.assertEqual(response.status_code, 423)
 
-    def test_requires_write_permission(self):
+    def test_requires_read_permission(self):
         order, _, _ = self.make_order()
         self.client.force_authenticate(user=self.create_user())
 
@@ -311,7 +312,7 @@ class TestCancel(ScanPayOrderTestBase):
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
 
-    def test_requires_write_permission(self):
+    def test_requires_update_permission(self):
         order, _, _ = self.make_order()
         self.client.force_authenticate(user=self.create_user())
 
@@ -374,13 +375,64 @@ class TestMarkPaid(ScanPayOrderTestBase):
 
         self.assertEqual(response.status_code, 409)
 
-    def test_requires_write_permission(self):
+    def test_requires_update_permission(self):
         order, _, _ = self.make_order()
         self.client.force_authenticate(user=self.create_user())
 
         response = self.post(order, "mark-paid/", {"reference_number": "ref"})
 
         self.assertEqual(response.status_code, 403)
+
+
+class TestScanPayOrderPermissionSplit(ScanPayOrderTestBase):
+    def user_with(self, *permissions):
+        user = self.create_user()
+        role = self.create_role_with_permissions(list(permissions))
+        organization = self.create_facility_organization(self.facility)
+        self.attach_role_facility_organization_user(organization, user, role)
+        return user
+
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
+    def test_account_read_can_check_status_but_not_mark_paid_or_cancel(self, _notify):
+        reader = self.user_with(AccountPermissions.can_read_account.name)
+        self.client.force_authenticate(user=reader)
+        check_order, _, _ = self.make_order(number="CHECK")
+        paid_order, _, _ = self.make_order(number="PAID")
+        cancel_order, invoice, _ = self.make_order(number="CANCEL")
+
+        check = self.post(check_order, "check-status/")
+        mark_paid = self.post(paid_order, "mark-paid/", {"reference_number": "ref"})
+        cancel = self.post(cancel_order, "cancel/")
+
+        self.assertEqual(check.status_code, 200, check.data)
+        self.assertEqual(self.reconcile_calls, ["CHECK"])
+        self.assertEqual(mark_paid.status_code, 403)
+        self.assertEqual(cancel.status_code, 403)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
+        self.assertFalse(
+            PaymentReconciliation.objects.filter(
+                target_invoice=paid_order.invoice
+            ).exists()
+        )
+
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
+    def test_account_update_can_mark_paid_and_cancel(self, _notify):
+        updater = self.user_with(
+            AccountPermissions.can_read_account.name,
+            AccountPermissions.can_update_account.name,
+        )
+        self.client.force_authenticate(user=updater)
+        paid_order, _, _ = self.make_order(number="PAID")
+        cancel_order, invoice, _ = self.make_order(number="CANCEL")
+
+        mark_paid = self.post(paid_order, "mark-paid/", {"reference_number": "ref"})
+        cancel = self.post(cancel_order, "cancel/")
+
+        self.assertEqual(mark_paid.status_code, 200, mark_paid.data)
+        self.assertEqual(cancel.status_code, 200, cancel.data)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, InvoiceStatusOptions.cancelled.value)
 
 
 class TestAutoBalance(ScanPayOrderTestBase):

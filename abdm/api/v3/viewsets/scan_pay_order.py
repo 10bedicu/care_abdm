@@ -36,8 +36,8 @@ from care.utils.shortcuts import get_object_or_404
 
 logger = logging.getLogger(__name__)
 
-READ_PERMISSION = "can_read_payment_reconciliation_in_facility"
-WRITE_PERMISSION = "can_write_payment_reconciliation_in_facility"
+READ_PERMISSION = "can_read_account_in_facility"
+UPDATE_PERMISSION = "can_update_account_in_facility"
 
 
 class CharInFilter(filters.BaseInFilter, filters.CharFilter):
@@ -119,7 +119,10 @@ class ScanPayOrderViewSet(GenericViewSet, ListModelMixin, RetrieveModelMixin):
     def get_object(self):
         order = super().get_object()
         if self.action not in ("list", "retrieve"):
-            self._authorize(order.health_facility.facility, WRITE_PERMISSION)
+            permission = (
+                READ_PERMISSION if self.action == "check_status" else UPDATE_PERMISSION
+            )
+            self._authorize(order.health_facility.facility, permission)
         return order
 
     def _respond(self, order: PaymentOrder, **extra):
