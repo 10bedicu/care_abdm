@@ -21,6 +21,8 @@ requirements = [
     "fhir.resources>=7.1.0,<8.0.0",
     "fastecdsa==2.3.2",
     "pycryptodome",
+    "razorpay",
+    "segno",
 ]
 
 test_requirements = []
@@ -48,7 +50,12 @@ setup(
     name="abdm",
     packages=find_packages(include=["abdm", "abdm.*"]),
     package_data={
-        "abdm": ["data/*.json"],
+        "abdm": [
+            "data/*.json",
+            "templates/abdm/*.html",
+            "templates/abdm/*.svg",
+            "templates/abdm/fonts/*.woff",
+        ],
     },
     test_suite="tests",
     tests_require=test_requirements,

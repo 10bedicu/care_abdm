@@ -12,6 +12,8 @@ def get_or_create_abdm_user():
     user, _ = User.objects.get_or_create(
         username=settings.ABDM_USERNAME,
         defaults={
+            "first_name": "ABDM",
+            "last_name": "User",
             "email": "abdm@ohc.network",
             "phone_number": "917777777777",
             "verified": True,

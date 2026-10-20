@@ -1,0 +1,321 @@
+import logging
+from decimal import Decimal
+
+from django.db import transaction
+
+from abdm.models.payment_order import (
+    PAYMENT_ORDER_PAID_STATUSES,
+    PAYMENT_ORDER_PENDING_STATUSES,
+    PaymentOrder,
+    PaymentOrderStatus,
+)
+from abdm.open_payment_link import allow_open_payment_link_mutation
+from abdm.utils.user import get_or_create_abdm_user
+from care.emr.locks.billing import AccountLock, InvoiceLock
+from care.emr.models.charge_item import ChargeItem
+from care.emr.models.invoice import Invoice
+from care.emr.models.payment_reconciliation import PaymentReconciliation
+from care.emr.resources.account.sync_items import rebalance_account_task
+from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
+from care.emr.resources.invoice.spec import (
+    INVOICE_CANCELLED_STATUS,
+    InvoiceStatusOptions,
+)
+from care.emr.resources.payment_reconciliation.spec import (
+    PaymentReconciliationIssuerTypeOptions,
+    PaymentReconciliationKindOptions,
+    PaymentReconciliationOutcomeOptions,
+    PaymentReconciliationPaymentMethodOptions,
+    PaymentReconciliationStatusOptions,
+    PaymentReconciliationTypeOptions,
+)
+from care.utils.lock import Lock, ObjectLocked
+from care.utils.time_util import care_now
+
+logger = logging.getLogger(__name__)
+
+
+class PaymentOrderLock(Lock):
+    """Serialises settlement/closure of one order across webhook and polling workers."""
+
+    def __init__(self, order: PaymentOrder):
+        super().__init__(f"abdm:payment_order:{order.id}")
+
+
+def _fresh(order: PaymentOrder) -> PaymentOrder:
+    return PaymentOrder.objects.select_related(
+        "invoice__account", "health_facility__facility"
+    ).get(pk=order.pk)
+
+
+def cancel_scan_pay_invoice(invoice: Invoice, reason: str) -> bool:
+    """
+    Cancel an unpaid scan-and-pay invoice and release its charge items back to
+    billable, the same way the core cancel-invoice API does.
+
+    ``reason`` says why: the gateway reported a failure, the link expired, the
+    order was cancelled, or the provider never answered. Invoices that already
+    received a payment are left for staff to handle.
+    """
+    if invoice.status in INVOICE_CANCELLED_STATUS:
+        return False
+    if PaymentReconciliation.objects.filter(
+        target_invoice=invoice,
+        status=PaymentReconciliationStatusOptions.active.value,
+    ).exists():
+        logger.warning(
+            "Scan and pay invoice %s has payments recorded; not cancelling it",
+            invoice.number or invoice.external_id,
+        )
+        return False
+
+    updated_by = get_or_create_abdm_user()
+    with transaction.atomic(), AccountLock(invoice.account):
+        invoice.status = InvoiceStatusOptions.cancelled.value
+        invoice.cancelled_reason = reason
+        invoice.updated_by = updated_by
+        with allow_open_payment_link_mutation():
+            invoice.save(
+                update_fields=[
+                    "status",
+                    "cancelled_reason",
+                    "updated_by",
+                    "modified_date",
+                ]
+            )
+        ChargeItem.objects.filter(
+            account=invoice.account,
+            id__in=invoice.charge_items,
+        ).update(
+            status=ChargeItemStatusOptions.billable.value,
+            paid_invoice=None,
+            paid_on=None,
+        )
+        transaction.on_commit(lambda: rebalance_account_task.delay(invoice.account_id))
+    return True
+
+
+def balance_scan_pay_invoice(invoice: Invoice) -> bool:
+    """
+    Move a fully paid, issued invoice to ``balanced`` and mark its charge items
+    paid, the same way the core invoice API does when staff balance it.
+
+    Never fails the surrounding settlement: if the invoice is locked elsewhere
+    the step is skipped and staff can balance it manually.
+    """
+    try:
+        with InvoiceLock(invoice), transaction.atomic():
+            invoice = Invoice.objects.select_related("account").get(pk=invoice.pk)
+            if invoice.status != InvoiceStatusOptions.issued.value:
+                return False
+            now = care_now()
+            ChargeItem.objects.filter(
+                account=invoice.account,
+                status=ChargeItemStatusOptions.billed.value,
+                id__in=invoice.charge_items,
+            ).update(
+                status=ChargeItemStatusOptions.paid.value,
+                paid_invoice=invoice,
+                paid_on=now,
+            )
+            invoice.status = InvoiceStatusOptions.balanced.value
+            invoice.updated_by = get_or_create_abdm_user()
+            with allow_open_payment_link_mutation():
+                invoice.save(update_fields=["status", "updated_by", "modified_date"])
+    except ObjectLocked:
+        logger.warning(
+            "Invoice %s is locked; leaving it issued after scan and pay payment",
+            invoice.number or invoice.external_id,
+        )
+        return False
+    return True
+
+
+_INVOICE_CANCEL_REASONS = {
+    PaymentOrderStatus.FAIL: "Scan and pay payment failed",
+    PaymentOrderStatus.EXPIRED: "Scan and pay payment link expired",
+    PaymentOrderStatus.CANCELED: "Scan and pay payment was cancelled",
+}
+
+
+def _gateway_reference(order: PaymentOrder, reference: str | None) -> str:
+    """A gateway transaction reference, ignoring the payment link id itself."""
+    reference = (reference or "").strip()
+    if not reference or reference == (order.payment_link_id or ""):
+        return ""
+    return reference
+
+
+def remember_transaction_reference(order: PaymentOrder, reference: str | None) -> bool:
+    """Store an ATRN or payment id on the order when the gateway sent one.
+
+    Used for outcomes that do not create a reconciliation, and for a still-open
+    order that already has a reference. An empty value leaves whatever is
+    already stored.
+    """
+    with PaymentOrderLock(order), transaction.atomic():
+        order = _fresh(order)
+        reference = _gateway_reference(order, reference)
+        if not reference or order.transaction_id == reference:
+            return False
+        order.transaction_id = reference
+        order.save(update_fields=["transaction_id", "modified_date"])
+    return True
+
+
+def close_payment_order(
+    order: PaymentOrder,
+    status: PaymentOrderStatus,
+    reason: str | None = None,
+    reference: str | None = None,
+) -> bool:
+    """
+    Move a still-pending order to a terminal state (``FAIL``, ``EXPIRED`` or
+    ``CANCELED``), cancel its invoice so the selected services can be paid for
+    again, and tell the PHR about the outcome.
+
+    The invoice is cancelled and ``cancelled_reason`` records which outcome it
+    was. ``reference``, when the gateway sent one, is stored as the order's
+    transaction id (the ATRN) even if the order was already closed. Providers
+    call this when the gateway reports the payment link expired, cancelled or
+    failed, so the order stops being polled. Orders that already reached a
+    terminal state are left untouched; returns whether the status changed.
+    """
+    # imported here: service.v3.scan_pay imports this package at module level
+    from abdm.service.v3.scan_pay import notify_scan_pay_order
+
+    with PaymentOrderLock(order), transaction.atomic():
+        order = _fresh(order)
+        reference = _gateway_reference(order, reference)
+        if order.status not in PAYMENT_ORDER_PENDING_STATUSES:
+            if reference and not order.transaction_id:
+                order.transaction_id = reference
+                order.save(update_fields=["transaction_id", "modified_date"])
+            return False
+        if order.invoice_id:
+            cancel_scan_pay_invoice(
+                order.invoice,
+                reason
+                or (
+                    f"{_INVOICE_CANCEL_REASONS.get(status, 'Scan and pay payment closed')} "
+                    f"(order {order.order_number})"
+                ),
+            )
+        update_fields = ["status", "modified_date"]
+        if reference:
+            order.transaction_id = reference
+            update_fields.append("transaction_id")
+        order.status = status
+        order.save(update_fields=update_fields)
+        notify_scan_pay_order(order)
+    return True
+
+
+def create_payment_reconciliation(
+    order: PaymentOrder,
+    reference,
+    amount=None,
+    *,
+    created_by=None,
+    note=None,
+    method=None,
+) -> bool:
+    """
+    Record a successful online payment against the order's invoice, once.
+
+    Runs under the order lock with a fresh copy of the order so concurrent
+    webhook/polling confirmations cannot credit the invoice twice. The amount
+    recorded is what the provider confirmed (else what the link was created
+    for), never the invoice's current total; a deviation, or an invoice that
+    was cancelled before the payment landed, is noted for review. The post-save
+    signal on ``PaymentReconciliation`` marks the order paid and notifies the
+    PHR. ``created_by``/``note`` identify a staff member confirming the payment
+    by hand. ``method`` is the stored payment method; when omitted the payment
+    is recorded as a credit card. Returns whether a reconciliation was recorded
+    by this call.
+    """
+    with PaymentOrderLock(order), transaction.atomic():
+        order = _fresh(order)
+        if not order.invoice_id or order.status in PAYMENT_ORDER_PAID_STATUSES:
+            return False
+        invoice = order.invoice
+        if (
+            reference
+            and PaymentReconciliation.objects.filter(
+                target_invoice=invoice,
+                reference_number=reference,
+                status=PaymentReconciliationStatusOptions.active.value,
+            ).exists()
+        ):
+            return False
+
+        expected = order.amount if order.amount is not None else invoice.total_gross
+        recorded = Decimal(str(amount)) if amount is not None else expected
+        notes = [
+            f"Scan and pay via {order.provider or 'gateway'} (order {order.order_number})."
+        ]
+        if note:
+            notes.append(note)
+        if recorded != expected:
+            notes.append(
+                f"Needs review: amount mismatch, expected {expected}, got {recorded}."
+            )
+            logger.warning(
+                "Scan and pay order %s confirmed %s but link was for %s",
+                order.order_number,
+                recorded,
+                expected,
+            )
+        if invoice.status in INVOICE_CANCELLED_STATUS:
+            notes.append(
+                "Needs review: invoice was cancelled before the payment was confirmed."
+            )
+            logger.warning(
+                "Scan and pay order %s paid after its invoice %s was cancelled",
+                order.order_number,
+                invoice.number or invoice.external_id,
+            )
+
+        with allow_open_payment_link_mutation():
+            PaymentReconciliation.objects.create(
+                facility=order.health_facility.facility,
+                target_invoice=invoice,
+                account=invoice.account,
+                reconciliation_type=PaymentReconciliationTypeOptions.payment.value,
+                status=PaymentReconciliationStatusOptions.active.value,
+                kind=PaymentReconciliationKindOptions.online.value,
+                issuer_type=PaymentReconciliationIssuerTypeOptions.patient.value,
+                outcome=PaymentReconciliationOutcomeOptions.complete.value,
+                method=method or PaymentReconciliationPaymentMethodOptions.ccca.value,
+                payment_datetime=care_now(),
+                reference_number=reference,
+                note=" ".join(notes),
+                tendered_amount=recorded,
+                returned_amount=Decimal(0),
+                amount=recorded,
+                created_by=created_by or get_or_create_abdm_user(),
+            )
+        account_id = invoice.account_id
+        transaction.on_commit(lambda: rebalance_account_task.delay(account_id))
+    return True
+
+
+def reconcile_payment_order(
+    order_number: str, reference, amount=None
+) -> PaymentOrder | None:
+    """
+    Look up an order by its provider order number and reconcile it.
+
+    Intended for provider webhooks that only carry the order number. Returns the
+    matched order (if any) whether or not anything new was recorded.
+    """
+    order = (
+        PaymentOrder.objects.filter(order_number=order_number)
+        .select_related("invoice__account", "health_facility__facility")
+        .first()
+    )
+    if not order or not order.invoice_id:
+        return order
+
+    create_payment_reconciliation(order, reference, amount)
+    return order
