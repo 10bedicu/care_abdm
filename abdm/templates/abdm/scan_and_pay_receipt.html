@@ -254,24 +254,31 @@
       .footer strong { color: #6a7282; font-weight: 600; }
       .watermark {
         position: fixed;
-        top: 42%;
+        top: 40%;
         left: 0;
         width: 100%;
-        text-align: center;
-        font-size: 64px;
-        font-weight: 700;
-        letter-spacing: 0.15em;
-        text-transform: uppercase;
-        opacity: 0.2;
+        height: 32mm;
+        opacity: 0.22;
+        overflow: visible;
         transform: rotate(-30deg);
+        transform-origin: center center;
       }
-      .watermark-red { color: #dc2626; }
-      .watermark-gray { color: #4b5563; }
     </style>
   </head>
   <body>
     {% if watermark %}
-    <div class="watermark watermark-{{ watermark.color }}">{{ watermark.text }}</div>
+    <svg class="watermark" viewBox="0 0 1000 160" xmlns="http://www.w3.org/2000/svg">
+      <text
+        x="500"
+        y="108"
+        text-anchor="middle"
+        fill="{% if watermark.color == 'gray' %}#4b5563{% else %}#dc2626{% endif %}"
+        font-family="Figtree, sans-serif"
+        font-size="72"
+        font-weight="700"
+        letter-spacing="4"
+      >{{ watermark.text|upper }}</text>
+    </svg>
     {% endif %}
 
     <table class="header">
@@ -465,6 +472,13 @@
         </tr>
       </table>
       <div class="rule rule-end"></div>
+    </div>
+    {% endif %}
+
+    {% if cancelled_reason %}
+    <div class="terms">
+      <div class="terms-title">Cancellation reason</div>
+      <p>{{ cancelled_reason }}</p>
     </div>
     {% endif %}
 

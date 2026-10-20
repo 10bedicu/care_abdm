@@ -102,7 +102,9 @@ def build_receipt_context(order) -> dict:
         "facility_name": facility.name,
         "facility_address": facility.address,
         "facility_phone": facility.phone_number,
-        "invoice_number": invoice.number or "",
+        "invoice_number": (invoice.number or "").strip()
+        or (invoice.title or "").strip()
+        or str(invoice.external_id)[:8],
         "issue_date": _format_issue_date(invoice.issue_date),
         "patient_name": patient.name,
         "patient_meta": _patient_meta(patient),
@@ -128,6 +130,7 @@ def build_receipt_context(order) -> dict:
             symbol=True,
         ),
         "payment_terms": invoice.payment_terms,
+        "cancelled_reason": invoice.cancelled_reason,
         "created_by": _format_user_name(invoice.created_by),
         "generated_on": _format_generated_on(timezone.now()),
         "location": payments[0]["location"] if payments else None,

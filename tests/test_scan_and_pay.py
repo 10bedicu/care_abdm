@@ -1,4 +1,5 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -20,6 +21,7 @@ from abdm.tasks import scan_pay as scan_pay_tasks
 from abdm.tasks.scan_pay import POLL_LOCK_KEY, reconcile_pending_payment_orders
 from abdm.utils import user as abdm_user
 from django.core.cache import cache
+from django.utils import timezone
 from django.core.exceptions import ImproperlyConfigured
 from django.template.loader import render_to_string
 from model_bakery import baker
@@ -110,6 +112,17 @@ class ScanPayTestBase(CareAPITestBase):
                 format="json",
                 headers={"REQUEST-ID": request_id or uuid()},
             )
+
+
+class TestScanPayInvoiceTitle(ScanPayTestBase):
+    def test_title_includes_abha_address_and_local_time(self):
+        issued_at = datetime(2026, 10, 20, 3, 58, tzinfo=ZoneInfo("UTC"))
+        with timezone.override("Asia/Kolkata"):
+            title = scan_pay_service._invoice_title("testpatient@sbx", issued_at)
+        self.assertEqual(
+            title,
+            "Scan and Pay - testpatient@sbx - 20 Oct 2026, 9:28 AM",
+        )
 
 
 class TestShareOpenOrder(ScanPayTestBase):
@@ -830,6 +843,45 @@ class TestReceipt(ScanPayTestBase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
+
+    def test_receipt_for_cancelled_failed_order(self):
+        invoice = baker.make(
+            Invoice,
+            facility=self.facility,
+            patient=self.patient,
+            account=self.account,
+            status=InvoiceStatusOptions.issued.value,
+            total_gross=Decimal(100),
+            number="INV-FAIL",
+            charge_items=[],
+        )
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            invoice=invoice,
+            order_number="INV-FAIL",
+            status=PaymentOrderStatus.FAIL,
+        )
+
+        response = self.client.get(
+            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+        )
+        self.assertEqual(response.status_code, 404)
+
+        invoice.status = InvoiceStatusOptions.cancelled.value
+        invoice.cancelled_reason = "Scan and pay payment failed (order INV-FAIL)"
+        invoice.save(update_fields=["status", "cancelled_reason"])
+
+        response = self.client.get(
+            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertEqual(
+            build_receipt_context(order)["cancelled_reason"],
+            invoice.cancelled_reason,
+        )
 
     def test_receipt_matches_invoice_print(self):
         self.patient.name = "Sam Das"

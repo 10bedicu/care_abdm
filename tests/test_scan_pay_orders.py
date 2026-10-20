@@ -172,6 +172,19 @@ class TestScanPayOrderList(ScanPayOrderTestBase):
             str(order.external_id), response.data["results"][0]["receipt_url"]
         )
 
+    def test_cancelled_invoice_exposes_reason_and_receipt(self):
+        order, invoice, _ = self.make_order(PaymentOrderStatus.FAIL)
+        reason = "Scan and pay payment failed (order ORD-1)"
+        invoice.status = InvoiceStatusOptions.cancelled.value
+        invoice.cancelled_reason = reason
+        invoice.save(update_fields=["status", "cancelled_reason"])
+
+        response = self.client.get(ORDERS_URL, {"facility": self.facility.external_id})
+
+        row = response.data["results"][0]
+        self.assertEqual(row["invoice"]["cancelled_reason"], reason)
+        self.assertIn(str(order.external_id), row["receipt_url"])
+
     def test_requires_read_permission(self):
         self.make_order()
         self.client.force_authenticate(user=self.create_user())

@@ -1,11 +1,10 @@
 from rest_framework import serializers
 
 from abdm.models.payment_order import (
-    PAYMENT_ORDER_PAID_STATUSES,
     PAYMENT_ORDER_PENDING_STATUSES,
     PaymentOrder,
 )
-from abdm.service.v3.scan_pay import scan_pay_receipt_link
+from abdm.service.v3.scan_pay import order_has_receipt, scan_pay_receipt_link
 
 
 class PaymentOrderSerializer(serializers.ModelSerializer):
@@ -48,6 +47,7 @@ class PaymentOrderSerializer(serializers.ModelSerializer):
             "title": invoice.title,
             "status": invoice.status,
             "total_gross": str(invoice.total_gross),
+            "cancelled_reason": invoice.cancelled_reason,
         }
 
     def get_patient(self, obj):
@@ -57,7 +57,7 @@ class PaymentOrderSerializer(serializers.ModelSerializer):
         return {"id": str(patient.external_id), "name": patient.name}
 
     def get_receipt_url(self, obj):
-        if obj.status in PAYMENT_ORDER_PAID_STATUSES and obj.invoice_id:
+        if order_has_receipt(obj):
             return scan_pay_receipt_link(obj)
         return None
 

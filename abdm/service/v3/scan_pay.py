@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 
 from django.db import transaction
+from django.utils import timezone
 
 from abdm.models.payment_order import (
     PAYMENT_ORDER_PAID_STATUSES,
@@ -21,7 +22,10 @@ from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
 from care.emr.resources.invoice.default_expression_evaluator import (
     evaluate_invoice_identifier_default_expression,
 )
-from care.emr.resources.invoice.spec import InvoiceStatusOptions
+from care.emr.resources.invoice.spec import (
+    INVOICE_CANCELLED_STATUS,
+    InvoiceStatusOptions,
+)
 from care.emr.resources.invoice.sync_items import sync_invoice_items
 from care.utils.time_util import care_now
 
@@ -33,6 +37,30 @@ SERVICE_RESOURCE_CATEGORY_MAP = {
     "medication_dispense": "Pharmacy",
 }
 DEFAULT_CATEGORY = "Miscellaneous/Other"
+_MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+
+
+def _invoice_title(abha_address, issued_at) -> str:
+    local = timezone.localtime(issued_at)
+    hour = local.strftime("%I").lstrip("0") or "12"
+    stamp = (
+        f"{local.day:02d} {_MONTHS[local.month - 1]} {local.year}, "
+        f"{hour}:{local.strftime('%M')} {local.strftime('%p')}"
+    )
+    return f"Scan and Pay - {abha_address} - {stamp}"
 
 
 class ScanPayPaymentLinkError(Exception):
@@ -73,13 +101,14 @@ def build_procedures(charge_items):
 
 
 def _create_invoice(charge_items, account, facility, patient, abha_address, created_by):
+    issued_at = care_now()
     invoice = Invoice(
         facility=facility,
         patient=patient,
         account=account,
-        title=f"Scan and Pay - {abha_address}",
+        title=_invoice_title(abha_address, issued_at),
         status=InvoiceStatusOptions.issued.value,
-        issue_date=care_now(),
+        issue_date=issued_at,
         charge_items=[item.id for item in charge_items],
         created_by=created_by,
     )
@@ -123,6 +152,16 @@ def create_scan_pay_payment_link(invoice):
     result.setdefault("provider", provider.name)
     result.setdefault("amount", invoice.total_gross)
     return result
+
+
+def order_has_receipt(order: PaymentOrder) -> bool:
+    """A paid order, or one whose invoice was cancelled, can be printed."""
+    if not order.invoice_id:
+        return False
+    if order.status in PAYMENT_ORDER_PAID_STATUSES:
+        return True
+    invoice = order.invoice
+    return bool(invoice and invoice.status in INVOICE_CANCELLED_STATUS)
 
 
 def scan_pay_receipt_link(order: PaymentOrder):

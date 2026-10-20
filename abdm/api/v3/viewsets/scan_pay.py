@@ -19,8 +19,8 @@ from abdm.api.v3.serializers.scan_pay import (
 )
 from abdm.authentication import ABDMAuthentication
 from abdm.models import CallbackType, PaymentOrder
-from abdm.models.payment_order import PAYMENT_ORDER_PAID_STATUSES
 from abdm.service.v3.receipt import build_receipt_context
+from abdm.service.v3.scan_pay import order_has_receipt
 from abdm.tasks.scan_pay import (
     scan_pay_on_order_status,
     scan_pay_on_selection,
@@ -174,7 +174,6 @@ class ScanPayViewSet(GenericViewSet):
             order = (
                 PaymentOrder.objects.filter(
                     external_id=order_external_id,
-                    status__in=PAYMENT_ORDER_PAID_STATUSES,
                     invoice__isnull=False,
                 )
                 .select_related(
@@ -184,6 +183,8 @@ class ScanPayViewSet(GenericViewSet):
                 )
                 .first()
             )
+            if order and not order_has_receipt(order):
+                order = None
         except (DjangoValidationError, ValueError):
             order = None
 
