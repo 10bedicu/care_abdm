@@ -212,7 +212,13 @@ def close_payment_order(
 
 
 def create_payment_reconciliation(
-    order: PaymentOrder, reference, amount=None, *, created_by=None, note=None
+    order: PaymentOrder,
+    reference,
+    amount=None,
+    *,
+    created_by=None,
+    note=None,
+    method=None,
 ) -> bool:
     """
     Record a successful online payment against the order's invoice, once.
@@ -224,7 +230,9 @@ def create_payment_reconciliation(
     was cancelled before the payment landed, is noted for review. The post-save
     signal on ``PaymentReconciliation`` marks the order paid and notifies the
     PHR. ``created_by``/``note`` identify a staff member confirming the payment
-    by hand. Returns whether a reconciliation was recorded by this call.
+    by hand. ``method`` is the stored payment method; when omitted the payment
+    is recorded as a credit card. Returns whether a reconciliation was recorded
+    by this call.
     """
     with PaymentOrderLock(order), transaction.atomic():
         order = _fresh(order)
@@ -278,7 +286,7 @@ def create_payment_reconciliation(
                 kind=PaymentReconciliationKindOptions.online.value,
                 issuer_type=PaymentReconciliationIssuerTypeOptions.patient.value,
                 outcome=PaymentReconciliationOutcomeOptions.complete.value,
-                method=PaymentReconciliationPaymentMethodOptions.ccca.value,
+                method=method or PaymentReconciliationPaymentMethodOptions.ccca.value,
                 payment_datetime=care_now(),
                 reference_number=reference,
                 note=" ".join(notes),
