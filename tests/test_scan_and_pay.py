@@ -31,7 +31,10 @@ from care.emr.models.charge_item import ChargeItem
 from care.emr.models.invoice import Invoice
 from care.emr.models.patient import PatientIdentifierConfig
 from care.emr.models.payment_reconciliation import PaymentReconciliation
-from care.emr.resources.account.spec import AccountStatusOptions
+from care.emr.resources.account.spec import (
+    AccountBillingStatusOptions,
+    AccountStatusOptions,
+)
 from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
 from care.emr.resources.invoice.spec import InvoiceStatusOptions
 from care.emr.resources.payment_reconciliation.spec import (
@@ -68,6 +71,7 @@ class ScanPayTestBase(CareAPITestBase):
             facility=self.facility,
             patient=self.patient,
             status=AccountStatusOptions.active.value,
+            billing_status=AccountBillingStatusOptions.open.value,
         )
         self.client.force_authenticate(user=self.user)
 
@@ -233,6 +237,35 @@ class TestShareOpenOrder(ScanPayTestBase):
         self.assertEqual(
             [service["service_id"] for service in services],
             [str(active_item.external_id)],
+        )
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
+    def test_share_open_order_excludes_accounts_that_are_not_open_for_billing(
+        self, mock_gateway
+    ):
+        billing_account = baker.make(
+            "emr.Account",
+            facility=self.facility,
+            patient=self.patient,
+            status=AccountStatusOptions.active.value,
+            billing_status=AccountBillingStatusOptions.billing.value,
+        )
+        self.create_charge_item(account=billing_account)
+
+        handle_patient_share_open_order(
+            self.share_open_order_payload(), {"REQUEST-ID": uuid()}
+        )
+        self.assertIn("error", mock_gateway.call_args[0][0])
+
+        open_item = self.create_charge_item()
+        handle_patient_share_open_order(
+            self.share_open_order_payload(), {"REQUEST-ID": uuid()}
+        )
+
+        services = mock_gateway.call_args[0][0]["procedures"][0]["services"]
+        self.assertEqual(
+            [service["service_id"] for service in services],
+            [str(open_item.external_id)],
         )
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")

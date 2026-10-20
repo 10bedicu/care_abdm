@@ -17,7 +17,10 @@ from abdm.utils.user import get_or_create_abdm_user
 from care.emr.locks.billing import AccountLock, InvoiceCreateLock
 from care.emr.models.charge_item import ChargeItem
 from care.emr.models.invoice import Invoice
-from care.emr.resources.account.spec import AccountStatusOptions
+from care.emr.resources.account.spec import (
+    AccountBillingStatusOptions,
+    AccountStatusOptions,
+)
 from care.emr.resources.account.sync_items import rebalance_account_task
 from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
 from care.emr.resources.invoice.default_expression_evaluator import (
@@ -75,6 +78,7 @@ def get_open_charge_items(patient, facility, service_ids=None):
         status=ChargeItemStatusOptions.billable.value,
         total_price__gt=0,
         account__status=AccountStatusOptions.active.value,
+        account__billing_status=AccountBillingStatusOptions.open.value,
     )
     if service_ids is not None:
         queryset = queryset.filter(external_id__in=service_ids)
