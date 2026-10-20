@@ -1161,7 +1161,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         order.refresh_from_db()
         invoice.refresh_from_db()
         charge_item.refresh_from_db()
-        self.assertEqual(order.status, PaymentOrderStatus.FAIL)
+        self.assertEqual(order.status, PaymentOrderStatus.EXPIRED)
         self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
         self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
 

@@ -101,9 +101,9 @@ def scan_pay_on_order_status(self, payload: dict):
 
 @shared_task(ignore_result=True)
 def reconcile_pending_payment_orders():
-    """Poll the provider for each pending scan-and-pay order; fail stale ones.
+    """Poll the provider for each pending scan-and-pay order; expire stale ones.
 
-    A stale order is only failed after the provider was asked about it, so a
+    A stale order is only expired after the provider was asked about it, so a
     payment that landed late is recorded instead of being dropped; one the
     provider never answers about is given up on at the hard cap. A tick that
     finds the previous run still going is skipped so a slow provider cannot
@@ -191,7 +191,7 @@ def _reconcile_pending_payment_orders():
                 continue
             if reached:
                 if order.created_date < stale_before:
-                    close_payment_order(order, PaymentOrderStatus.FAIL)
+                    close_payment_order(order, PaymentOrderStatus.EXPIRED)
                 continue
             cache.set(
                 backoff_key(order),

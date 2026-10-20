@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 ORDER_FAILURE_MESSAGES = {
     PaymentOrderStatus.FAIL: "Payment failed. Please try again.",
+    PaymentOrderStatus.EXPIRED: "Payment link has expired. Please try again.",
     PaymentOrderStatus.CANCELED: "Payment was cancelled.",
 }
 

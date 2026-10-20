@@ -125,9 +125,9 @@ def close_payment_order(
     order: PaymentOrder, status: PaymentOrderStatus, reason: str | None = None
 ) -> bool:
     """
-    Move a still-pending order to a terminal state (``FAIL`` or ``CANCELED``),
-    void its invoice so the selected services can be paid for again, and tell
-    the PHR about the outcome.
+    Move a still-pending order to a terminal state (``FAIL``, ``EXPIRED`` or
+    ``CANCELED``), void its invoice so the selected services can be paid for
+    again, and tell the PHR about the outcome.
 
     Providers call this when the gateway reports the payment link expired,
     cancelled or failed, so the order stops being polled. Orders that already
@@ -141,7 +141,10 @@ def close_payment_order(
         if order.status not in PAYMENT_ORDER_PENDING_STATUSES:
             return False
         if order.invoice_id:
-            outcome = "cancelled" if status == PaymentOrderStatus.CANCELED else "failed"
+            outcome = {
+                PaymentOrderStatus.CANCELED: "cancelled",
+                PaymentOrderStatus.EXPIRED: "expired",
+            }.get(status, "failed")
             void_scan_pay_invoice(
                 order.invoice,
                 reason

@@ -10,6 +10,7 @@ class PaymentOrderStatus(models.TextChoices):
     CANCELED = "CANCELED"
     PENDING = "PENDING"
     FAIL = "FAIL"
+    EXPIRED = "EXPIRED"
     REFUND_INITIATED = "REFUND_INITIATED"
     REFUND_SUCCESS = "REFUND_SUCCESS"
 
