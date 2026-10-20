@@ -47,12 +47,14 @@ def _fresh(order: PaymentOrder) -> PaymentOrder:
     ).get(pk=order.pk)
 
 
-def void_scan_pay_invoice(invoice: Invoice, reason: str) -> bool:
+def cancel_scan_pay_invoice(invoice: Invoice, reason: str) -> bool:
     """
-    Mark an unpaid scan-and-pay invoice entered-in-error and release its charge
-    items back to billable, the same way the core cancel-invoice API does.
+    Cancel an unpaid scan-and-pay invoice and release its charge items back to
+    billable, the same way the core cancel-invoice API does.
 
-    Invoices that already received a payment are left for staff to handle.
+    ``reason`` says why: the gateway reported a failure, the link expired, the
+    order was cancelled, or the provider never answered. Invoices that already
+    received a payment are left for staff to handle.
     """
     if invoice.status in INVOICE_CANCELLED_STATUS:
         return False
@@ -61,14 +63,14 @@ def void_scan_pay_invoice(invoice: Invoice, reason: str) -> bool:
         status=PaymentReconciliationStatusOptions.active.value,
     ).exists():
         logger.warning(
-            "Scan and pay invoice %s has payments recorded; not voiding it",
+            "Scan and pay invoice %s has payments recorded; not cancelling it",
             invoice.number or invoice.external_id,
         )
         return False
 
     updated_by = get_or_create_abdm_user()
     with transaction.atomic(), AccountLock(invoice.account):
-        invoice.status = InvoiceStatusOptions.entered_in_error.value
+        invoice.status = InvoiceStatusOptions.cancelled.value
         invoice.cancelled_reason = reason
         invoice.updated_by = updated_by
         invoice.save(
@@ -121,37 +123,82 @@ def balance_scan_pay_invoice(invoice: Invoice) -> bool:
     return True
 
 
+_INVOICE_CANCEL_REASONS = {
+    PaymentOrderStatus.FAIL: "Scan and pay payment failed",
+    PaymentOrderStatus.EXPIRED: "Scan and pay payment link expired",
+    PaymentOrderStatus.CANCELED: "Scan and pay payment was cancelled",
+}
+
+
+def _gateway_reference(order: PaymentOrder, reference: str | None) -> str:
+    """A gateway transaction reference, ignoring the payment link id itself."""
+    reference = (reference or "").strip()
+    if not reference or reference == (order.payment_link_id or ""):
+        return ""
+    return reference
+
+
+def remember_transaction_reference(order: PaymentOrder, reference: str | None) -> bool:
+    """Store an ATRN or payment id on the order when the gateway sent one.
+
+    Used for outcomes that do not create a reconciliation, and for a still-open
+    order that already has a reference. An empty value leaves whatever is
+    already stored.
+    """
+    with PaymentOrderLock(order), transaction.atomic():
+        order = _fresh(order)
+        reference = _gateway_reference(order, reference)
+        if not reference or order.transaction_id == reference:
+            return False
+        order.transaction_id = reference
+        order.save(update_fields=["transaction_id", "modified_date"])
+    return True
+
+
 def close_payment_order(
-    order: PaymentOrder, status: PaymentOrderStatus, reason: str | None = None
+    order: PaymentOrder,
+    status: PaymentOrderStatus,
+    reason: str | None = None,
+    reference: str | None = None,
 ) -> bool:
     """
     Move a still-pending order to a terminal state (``FAIL``, ``EXPIRED`` or
-    ``CANCELED``), void its invoice so the selected services can be paid for
+    ``CANCELED``), cancel its invoice so the selected services can be paid for
     again, and tell the PHR about the outcome.
 
-    Providers call this when the gateway reports the payment link expired,
-    cancelled or failed, so the order stops being polled. Orders that already
-    reached a terminal state are left untouched; returns whether it changed.
+    The invoice is cancelled and ``cancelled_reason`` records which outcome it
+    was. ``reference``, when the gateway sent one, is stored as the order's
+    transaction id (the ATRN) even if the order was already closed. Providers
+    call this when the gateway reports the payment link expired, cancelled or
+    failed, so the order stops being polled. Orders that already reached a
+    terminal state are left untouched; returns whether the status changed.
     """
     # imported here: service.v3.scan_pay imports this package at module level
     from abdm.service.v3.scan_pay import notify_scan_pay_order
 
     with PaymentOrderLock(order), transaction.atomic():
         order = _fresh(order)
+        reference = _gateway_reference(order, reference)
         if order.status not in PAYMENT_ORDER_PENDING_STATUSES:
+            if reference and not order.transaction_id:
+                order.transaction_id = reference
+                order.save(update_fields=["transaction_id", "modified_date"])
             return False
         if order.invoice_id:
-            outcome = {
-                PaymentOrderStatus.CANCELED: "cancelled",
-                PaymentOrderStatus.EXPIRED: "expired",
-            }.get(status, "failed")
-            void_scan_pay_invoice(
+            cancel_scan_pay_invoice(
                 order.invoice,
                 reason
-                or f"Scan and pay payment {outcome} (order {order.order_number})",
+                or (
+                    f"{_INVOICE_CANCEL_REASONS.get(status, 'Scan and pay payment closed')} "
+                    f"(order {order.order_number})"
+                ),
             )
+        update_fields = ["status", "modified_date"]
+        if reference:
+            order.transaction_id = reference
+            update_fields.append("transaction_id")
         order.status = status
-        order.save(update_fields=["status", "modified_date"])
+        order.save(update_fields=update_fields)
         notify_scan_pay_order(order)
     return True
 
@@ -166,7 +213,7 @@ def create_payment_reconciliation(
     webhook/polling confirmations cannot credit the invoice twice. The amount
     recorded is what the provider confirmed (else what the link was created
     for), never the invoice's current total; a deviation, or an invoice that
-    was voided before the payment landed, is noted for review. The post-save
+    was cancelled before the payment landed, is noted for review. The post-save
     signal on ``PaymentReconciliation`` marks the order paid and notifies the
     PHR. ``created_by``/``note`` identify a staff member confirming the payment
     by hand. Returns whether a reconciliation was recorded by this call.
@@ -205,10 +252,10 @@ def create_payment_reconciliation(
             )
         if invoice.status in INVOICE_CANCELLED_STATUS:
             notes.append(
-                "Needs review: invoice was voided before the payment was confirmed."
+                "Needs review: invoice was cancelled before the payment was confirmed."
             )
             logger.warning(
-                "Scan and pay order %s paid after its invoice %s was voided",
+                "Scan and pay order %s paid after its invoice %s was cancelled",
                 order.order_number,
                 invoice.number or invoice.external_id,
             )

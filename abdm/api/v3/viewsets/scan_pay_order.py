@@ -178,7 +178,7 @@ class ScanPayOrderViewSet(GenericViewSet, ListModelMixin, RetrieveModelMixin):
 
     @extend_schema(
         description=(
-            "Cancel a pending order: voids its invoice so the services can be "
+            "Cancel a pending order: cancels its invoice so the services can be "
             "billed again and tells the PHR the payment was cancelled."
         ),
         request=None,

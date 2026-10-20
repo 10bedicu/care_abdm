@@ -688,13 +688,11 @@ class TestCreatePaymentReconciliation(ScanPayTestBase):
         self.assertIn("amount mismatch", reconciliation.note)
 
     @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
-    def test_late_payment_after_void_is_recorded_and_flagged(self, mock_task):
+    def test_late_payment_after_cancel_is_recorded_and_flagged(self, mock_task):
         order = self.make_order()
         payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
         order.refresh_from_db()
-        self.assertEqual(
-            order.invoice.status, InvoiceStatusOptions.entered_in_error.value
-        )
+        self.assertEqual(order.invoice.status, InvoiceStatusOptions.cancelled.value)
 
         with self.captureOnCommitCallbacks(execute=True):
             payment_providers.reconcile_payment_order("INV-REC", "late-ref")
@@ -702,7 +700,7 @@ class TestCreatePaymentReconciliation(ScanPayTestBase):
         order.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.SUCCESS)
         reconciliation = PaymentReconciliation.objects.get(target_invoice=order.invoice)
-        self.assertIn("voided", reconciliation.note)
+        self.assertIn("cancelled", reconciliation.note)
         mock_task.assert_called_once()
 
 
@@ -1099,7 +1097,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         self.assertFalse(changed)
         self.assertEqual(order.status, PaymentOrderStatus.SUCCESS)
 
-    def test_closing_voids_invoice_and_releases_charge_items(self):
+    def test_closing_cancels_invoice_and_releases_charge_items(self):
         order, invoice, charge_item = self.make_invoiced_order()
 
         payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
@@ -1108,7 +1106,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         invoice.refresh_from_db()
         charge_item.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.FAIL)
-        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.cancelled.value)
         self.assertIn("failed", invoice.cancelled_reason)
         self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
         self.assertIsNone(charge_item.paid_invoice_id)
@@ -1119,7 +1117,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         payment_providers.close_payment_order(order, PaymentOrderStatus.CANCELED)
 
         invoice.refresh_from_db()
-        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.cancelled.value)
         self.assertIn("cancelled", invoice.cancelled_reason)
 
     @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
@@ -1149,7 +1147,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
         self.assertEqual(charge_item.status, ChargeItemStatusOptions.billed.value)
 
-    def test_stale_order_sweep_voids_invoice(self):
+    def test_stale_order_sweep_cancels_invoice(self):
         order, invoice, charge_item = self.make_invoiced_order()
         stale = care_now() - timedelta(
             seconds=abdm_settings.ABDM_SCAN_AND_PAY_ORDER_MAX_AGE + 60
@@ -1162,7 +1160,8 @@ class TestClosePaymentOrder(ScanPayTestBase):
         invoice.refresh_from_db()
         charge_item.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.EXPIRED)
-        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.cancelled.value)
+        self.assertIn("expired", invoice.cancelled_reason)
         self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
 
     def register_sweep_provider(self, reconcile):
@@ -1268,7 +1267,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         order.refresh_from_db()
         invoice.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.FAIL)
-        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.cancelled.value)
         self.assertIn("could not be reached", invoice.cancelled_reason)
         self.assertEqual(
             mock_task.call_args.args[0]["acknowledgement"]["status"], "FAIL"

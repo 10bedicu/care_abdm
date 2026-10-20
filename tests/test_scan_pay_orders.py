@@ -274,7 +274,7 @@ class TestCheckStatus(ScanPayOrderTestBase):
 
 class TestCancel(ScanPayOrderTestBase):
     @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
-    def test_cancels_pending_order_and_voids_invoice(self, mock_notify):
+    def test_cancels_pending_order_and_cancels_invoice(self, mock_notify):
         order, invoice, charge_item = self.make_order()
 
         response = self.post(order, "cancel/")
@@ -283,7 +283,8 @@ class TestCancel(ScanPayOrderTestBase):
         self.assertEqual(response.data["order"]["status"], "CANCELED")
         invoice.refresh_from_db()
         charge_item.refresh_from_db()
-        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.cancelled.value)
+        self.assertIn("cancelled", invoice.cancelled_reason)
         self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
         payload = mock_notify.call_args.args[0]
         self.assertEqual(payload["acknowledgement"]["status"], "CANCELED")
@@ -415,7 +416,7 @@ class TestAutoBalance(ScanPayOrderTestBase):
         self.assertEqual(invoice.status, InvoiceStatusOptions.issued.value)
 
     @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
-    def test_voided_invoice_is_left_alone(self, _notify):
+    def test_cancelled_invoice_is_left_alone(self, _notify):
         order, invoice, charge_item = self.make_order()
         payment_providers.close_payment_order(order, PaymentOrderStatus.FAIL)
 
@@ -426,5 +427,5 @@ class TestAutoBalance(ScanPayOrderTestBase):
         invoice.refresh_from_db()
         charge_item.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.SUCCESS)
-        self.assertEqual(invoice.status, InvoiceStatusOptions.entered_in_error.value)
+        self.assertEqual(invoice.status, InvoiceStatusOptions.cancelled.value)
         self.assertEqual(charge_item.status, ChargeItemStatusOptions.billable.value)
