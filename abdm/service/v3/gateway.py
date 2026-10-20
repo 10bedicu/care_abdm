@@ -1245,6 +1245,12 @@ class GatewayService:
             ),
         }
 
+        if data.get("error"):
+            payload["error"] = {
+                "message": data.get("error").get("message"),
+                "code": data.get("error").get("code"),
+            }
+
         path = "/scan-gateway/v3/patient/scan-pay/notify"
         response = GatewayService.request.post(
             path,

@@ -10,16 +10,11 @@ from abdm.service.v3.scan_pay import (
     build_scan_pay_acknowledgement,
     create_scan_pay_invoice_with_payment_link,
     get_open_charge_items,
+    scan_pay_status_error,
 )
 from care.utils.lock import ObjectLocked
 
 logger = logging.getLogger(__name__)
-
-ORDER_FAILURE_MESSAGES = {
-    PaymentOrderStatus.FAIL: "Payment failed. Please try again.",
-    PaymentOrderStatus.EXPIRED: "Payment link has expired. Please try again.",
-    PaymentOrderStatus.CANCELED: "Payment was cancelled.",
-}
 
 
 def handle_patient_share_open_order(validated_data: dict, headers: dict):
@@ -248,11 +243,6 @@ def handle_scan_pay_order_status(validated_data: dict, headers: dict):
         {
             "acknowledgement": build_scan_pay_acknowledgement(order),
             "request_id": request_id,
-            "error": {
-                "message": ORDER_FAILURE_MESSAGES[order.status],
-                "code": "ABDM-9999",
-            }
-            if order.status in ORDER_FAILURE_MESSAGES
-            else None,
+            "error": scan_pay_status_error(order),
         }
     )

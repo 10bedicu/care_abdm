@@ -796,6 +796,23 @@ class TestOrderStatus(ScanPayTestBase):
         self.assertIn("failed", payload["error"]["message"].lower())
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__scan_pay_on_order_status")
+    def test_order_status_for_expired_order_reports_fail(self, mock_gateway):
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            order_number="INV-EXPIRED",
+            status=PaymentOrderStatus.EXPIRED,
+        )
+
+        handle_scan_pay_order_status(self.query_status(order), {"REQUEST-ID": uuid()})
+
+        payload = mock_gateway.call_args[0][0]
+        self.assertEqual(payload["acknowledgement"]["status"], "FAIL")
+        self.assertEqual(payload["error"]["code"], "ABDM-9999")
+        self.assertIn("expired", payload["error"]["message"].lower())
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__scan_pay_on_order_status")
     def test_order_status_for_pending_order_has_no_error(self, mock_gateway):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
@@ -1126,8 +1143,25 @@ class TestClosePaymentOrder(ScanPayTestBase):
         self.assertEqual(payload["acknowledgement"]["status"], "FAIL")
         self.assertEqual(payload["acknowledgement"]["order_number"], "INV-CLOSE")
         self.assertIsNone(payload["acknowledgement"]["payment_receipt_link"])
+        self.assertIn("failed", payload["error"]["message"].lower())
         self.assertEqual(payload["hip_id"], self.health_facility.hf_id)
         self.assertEqual(kwargs["transaction_meta"]["status"], "FAIL")
+
+    @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
+    def test_expiring_reports_abdm_fail_with_reason(self, mock_task):
+        order, invoice, _ = self.make_invoiced_order()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            payment_providers.close_payment_order(order, PaymentOrderStatus.EXPIRED)
+
+        order.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.EXPIRED)
+        payload, kwargs = mock_task.call_args.args[0], mock_task.call_args.kwargs
+        self.assertEqual(payload["acknowledgement"]["status"], "FAIL")
+        self.assertIn("expired", payload["error"]["message"].lower())
+        self.assertEqual(payload["error"]["message"], invoice.cancelled_reason)
+        self.assertEqual(kwargs["transaction_meta"]["status"], "EXPIRED")
 
     @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_cancelling_notifies_phr(self, mock_task):
@@ -1334,6 +1368,10 @@ class TestClosePaymentOrder(ScanPayTestBase):
         self.assertIn("could not be reached", invoice.cancelled_reason)
         self.assertEqual(
             mock_task.call_args.args[0]["acknowledgement"]["status"], "FAIL"
+        )
+        self.assertIn(
+            "could not be reached",
+            mock_task.call_args.args[0]["error"]["message"],
         )
 
     @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")

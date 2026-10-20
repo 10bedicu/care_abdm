@@ -262,6 +262,7 @@ class PatientOnSelectionResponse(TypedDict):
 class PatientScanPayNotifyBody(TypedDict):
     acknowledgement: ScanPayAcknowledgement
     hip_id: str
+    error: ScanPayError | None = None
 
 
 class PatientScanPayNotifyResponse(TypedDict):
