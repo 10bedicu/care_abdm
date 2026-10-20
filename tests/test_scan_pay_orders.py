@@ -156,6 +156,12 @@ class TestScanPayOrderList(ScanPayOrderTestBase):
             {str(pending.external_id), str(paid.external_id)},
         )
         self.assertEqual(ids({"invoice_number": "pai"}), {str(paid.external_id)})
+        PaymentOrder.objects.filter(pk=pending.pk).update(
+            order_number="ORD-PEND", transaction_id="ATRN111"
+        )
+        self.assertEqual(ids({"search": "ord-pend"}), {str(pending.external_id)})
+        self.assertEqual(ids({"search": "atrn111"}), {str(pending.external_id)})
+        self.assertEqual(ids({"search": "pai"}), {str(paid.external_id)})
 
     def test_paid_order_exposes_receipt(self):
         order, _, _ = self.make_order(PaymentOrderStatus.SUCCESS)

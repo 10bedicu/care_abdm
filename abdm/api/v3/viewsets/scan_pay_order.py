@@ -1,6 +1,7 @@
 import logging
 
 import requests
+from django.db.models import Q
 from django.core.exceptions import ImproperlyConfigured
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema
@@ -56,6 +57,7 @@ class PaymentOrderFilters(filters.FilterSet):
     invoice_number = filters.CharFilter(
         field_name="invoice__number", lookup_expr="icontains"
     )
+    search = filters.CharFilter(method="filter_search")
     patient = filters.UUIDFilter(field_name="abha_number__patient__external_id")
     created_date = filters.DateTimeFromToRangeFilter(field_name="created_date")
 
@@ -63,6 +65,16 @@ class PaymentOrderFilters(filters.FilterSet):
         if value:
             return queryset.filter(status__in=PAYMENT_ORDER_PENDING_STATUSES)
         return queryset.exclude(status__in=PAYMENT_ORDER_PENDING_STATUSES)
+
+    def filter_search(self, queryset, name, value):
+        term = (value or "").strip()
+        if not term:
+            return queryset
+        return queryset.filter(
+            Q(order_number__icontains=term)
+            | Q(transaction_id__icontains=term)
+            | Q(invoice__number__icontains=term)
+        )
 
 
 class MarkPaidRequest(BaseModel):
