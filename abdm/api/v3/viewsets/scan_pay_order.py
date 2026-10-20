@@ -113,7 +113,12 @@ class ScanPayOrderViewSet(GenericViewSet, ListModelMixin, RetrieveModelMixin):
                 raise ValidationError("facility is required")
             facility = get_object_or_404(Facility, external_id=facility_id)
             self._authorize(facility, READ_PERMISSION)
-            return queryset.filter(health_facility__facility=facility)
+            queryset = queryset.filter(health_facility__facility=facility)
+            if self.action == "list":
+                queryset = queryset.exclude(
+                    status=PaymentOrderStatus.OPEN_ORDER_SHARED
+                )
+            return queryset
         return queryset
 
     def get_object(self):

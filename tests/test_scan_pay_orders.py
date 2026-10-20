@@ -123,6 +123,20 @@ class TestScanPayOrderList(ScanPayOrderTestBase):
         self.assertEqual(row["abha_address"], self.abha_number.health_id)
         self.assertIsNone(row["receipt_url"])
 
+    def test_hides_awaiting_selection_orders(self):
+        visible, _, _ = self.make_order(
+            PaymentOrderStatus.PAYMENT_INITIATED, number="VISIBLE"
+        )
+        self.make_order(
+            PaymentOrderStatus.OPEN_ORDER_SHARED, number="AWAIT", with_invoice=False
+        )
+
+        response = self.client.get(ORDERS_URL, {"facility": self.facility.external_id})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], str(visible.external_id))
+
     def test_filters(self):
         pending, invoice, _ = self.make_order(number="PEND")
         paid, _, _ = self.make_order(PaymentOrderStatus.SUCCESS, number="PAID")
