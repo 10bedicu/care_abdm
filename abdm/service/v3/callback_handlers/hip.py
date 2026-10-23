@@ -316,6 +316,31 @@ def handle_health_information_request(validated_data: dict, headers: dict):
         )
 
 
+def _ensure_abha_patient_identifiers(patient, abha_number):
+    if not abha_number.abha_number and not abha_number.health_id:
+        return
+
+    abdm_user = get_or_create_abdm_user()
+    if abha_number.abha_number:
+        ensure_abdm_patient_identifier(
+            patient,
+            system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+            display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+            value=abha_number.abha_number,
+            created_by=abdm_user,
+        )
+    if abha_number.health_id:
+        ensure_abdm_patient_identifier(
+            patient,
+            system=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_SYSTEM,
+            display=settings.ABDM_ABHA_ADDRESS_IDENTIFIER_SYSTEM_DISPLAY,
+            value=abha_number.health_id,
+            created_by=abdm_user,
+        )
+    patient.build_instance_identifiers()
+    patient.save()
+
+
 def handle_patient_share(validated_data: dict, headers: dict):
     hip_id = validated_data.get("metaData").get("hipId")
     health_facility = HealthFacility.objects.filter(hf_id=hip_id).first()
@@ -435,23 +460,15 @@ def handle_patient_share(validated_data: dict, headers: dict):
                     abha_number.patient = patient
                     abha_number.save(update_fields=["patient"])
 
-                    if abha_number.abha_number:
-                        abdm_user = get_or_create_abdm_user()
-                        ensure_abdm_patient_identifier(
-                            patient,
-                            system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                            display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                            value=abha_number.abha_number,
-                            created_by=abdm_user,
-                        )
-
-                    patient.build_instance_identifiers()
-                    patient.save()
+                _ensure_abha_patient_identifiers(abha_number.patient, abha_number)
 
             transaction.on_commit(lock.release)
         except Exception:
             lock.release()
             raise
+    else:
+        with transaction.atomic():
+            _ensure_abha_patient_identifiers(abha_number.patient, abha_number)
 
     patient = abha_number.patient
 
