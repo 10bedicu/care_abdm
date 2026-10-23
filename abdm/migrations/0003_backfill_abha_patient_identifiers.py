@@ -163,7 +163,7 @@ def backfill_abha_patient_identifiers(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("abdm", "0001_initial_squashed"),
+        ("abdm", "0002_inboundcallback"),
         ("emr", "0078_merge_20260409_1618"),
     ]
 

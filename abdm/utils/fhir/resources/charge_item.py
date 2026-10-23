@@ -44,8 +44,11 @@ class ChargeItemMixin:
 
         charge_item_div_parts = [f"<p><b>Title:</b> {charge_item_spec.title}</p>"]
         if charge_item_spec.code:
-            code_display = charge_item_spec.code.display or charge_item_spec.code.code
-            charge_item_div_parts.append(f"<p><b>Code:</b> {code_display}</p>")
+            code_display = charge_item_spec.code.get(
+                "display"
+            ) or charge_item_spec.code.get("code", "")
+            if code_display:
+                charge_item_div_parts.append(f"<p><b>Code:</b> {code_display}</p>")
         charge_item_div_parts.append(f"<p><b>Status:</b> {charge_item_spec.status}</p>")
         if charge_item_spec.quantity is not None:
             charge_item_div_parts.append(

@@ -10,8 +10,16 @@ from fhir.resources.R4B.narrative import Narrative
 from fhir.resources.R4B.practitioner import Practitioner
 
 from abdm.utils.fhir.base import cache_profiles
+from care.emr.resources.patient.spec import GenderChoices
 from care.emr.resources.user.spec import UserRetrieveSpec
 from care.users.models import User as UserModel
+
+GENDER_MAP = {
+    GenderChoices.male: "male",
+    GenderChoices.female: "female",
+    GenderChoices.non_binary: "other",
+    GenderChoices.transgender: "other",
+}
 
 
 class PractitionerMixin:
@@ -79,6 +87,8 @@ class PractitionerMixin:
                     else []
                 ),
             ],
-            gender=user_spec.gender,
+            gender=GENDER_MAP.get(user_spec.gender, "unknown")
+            if user_spec.gender
+            else None,
             birthDate=user.date_of_birth,
         )

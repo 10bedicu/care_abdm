@@ -1,6 +1,5 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
-from abdm.models.base import AccessMode, HealthInformationType, Purpose, Status
 from rest_framework.serializers import (
     CharField,
     ChoiceField,
@@ -11,6 +10,8 @@ from rest_framework.serializers import (
     UUIDField,
     ValidationError,
 )
+
+from abdm.models.base import AccessMode, HealthInformationType, Purpose, Status
 
 
 class IdentityAuthenticationSerializer(Serializer):
@@ -30,7 +31,6 @@ class IdentityAuthenticationSerializer(Serializer):
 
 
 class HiuConsentRequestOnInitSerializer(Serializer):
-
     class ConsentRequestSerializer(Serializer):
         id = UUIDField(required=True)
 
@@ -137,10 +137,10 @@ class HiuConsentOnFetchSerializer(Serializer):
                             {
                                 "fromTime": datetime.strptime(
                                     data.get("from"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                                ),
+                                ).replace(tzinfo=UTC),
                                 "toTime": datetime.strptime(
                                     data.get("to"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                                ),
+                                ).replace(tzinfo=UTC),
                             }
                         )
 

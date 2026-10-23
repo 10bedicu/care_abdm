@@ -1,4 +1,3 @@
-import json
 import logging
 
 from django.db.models import Q
@@ -24,18 +23,9 @@ from abdm.api.v3.serializers.hiu import (
 )
 from abdm.api.viewsets.consent import ConsentViewSet
 from abdm.authentication import ABDMAuthentication
-from abdm.models import (
-    AbhaNumber,
-    ConsentArtefact,
-    ConsentRequest,
-    Transaction,
-    TransactionType,
-)
-from abdm.models.base import Status
+from abdm.models import AbhaNumber, CallbackType, ConsentArtefact, ConsentRequest
 from abdm.service.v3.gateway import GatewayService
-from abdm.utils.cipher import Cipher
-from care.emr.models.file_upload import FileUpload
-from care.emr.resources.file_upload.spec import FileCategoryChoices, FileTypeChoices
+from abdm.utils.callback import store_and_enqueue_callback
 
 logger = logging.getLogger(__name__)
 
@@ -215,197 +205,43 @@ class HIUCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="hiu/consent/request/on-init")
     def hiu__consent__request__on_init(self, request):
-        validated_data = self.validate_request(request)
-        request_id = validated_data.get("response").get("requestId")
+        self.validate_request(request)
 
-        consent = ConsentRequest.objects.filter(external_id=request_id).first()
-
-        if not consent:
-            logger.warning(f"Consent Request: {request_id} not found in the database")
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        if "consentRequest" in validated_data and validated_data.get("consentRequest"):
-            consent_id = validated_data.get("consentRequest").get("id")
-
-            consent.consent_id = consent_id
-            consent.save()
-
-        if "error" in validated_data and validated_data.get("error"):
-            logger.warning(
-                f"Consent Request: {request_id}, Error in Consent Request while On Init: {validated_data.get('error').get('message')}"
-            )
-
-        return Response(
-            status=status.HTTP_202_ACCEPTED,
+        return store_and_enqueue_callback(
+            request, CallbackType.CONSENT_REQUEST_ON_INIT
         )
 
     @action(detail=False, methods=["POST"], url_path="hiu/consent/request/on-status")
     def hiu__consent__request__on_status(self, request):
-        validated_data = self.validate_request(request)
+        self.validate_request(request)
 
-        consent_request = validated_data.get("consentRequest")
-        consent_status = consent_request.get("status")
-        consent_artefacts = consent_request.get("consentArtefacts")
-
-        consent = ConsentRequest.objects.filter(
-            consent_id=consent_request.get("id")
-        ).first()
-
-        if not consent:
-            logger.warning(
-                f"Consent Request: {consent_request.get('id')} not found in the database"
-            )
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        if consent_status != Status.DENIED:
-            for artefact in consent_artefacts:
-                consent_artefact = ConsentArtefact.objects.filter(
-                    external_id=artefact.get("id")
-                ).first()
-
-                if not consent_artefact:
-                    consent_artefact = ConsentArtefact.objects.create(
-                        external_id=artefact.get("id"),
-                        consent_request=consent,
-                        **consent.consent_details_dict(),
-                    )
-
-                consent_artefact.status = consent_status
-                consent_artefact.save()
-
-        consent.status = consent_status
-        consent.save()
-
-        return Response(status=status.HTTP_200_OK)
+        return store_and_enqueue_callback(
+            request, CallbackType.CONSENT_REQUEST_ON_STATUS
+        )
 
     @action(detail=False, methods=["POST"], url_path="hiu/consent/request/notify")
     def hiu__consent__request__notify(self, request):
-        validated_data = self.validate_request(request)
+        self.validate_request(request)
 
-        notification = validated_data.get("notification")
-        consent_status = notification.get("status")
-        consent_artefacts = notification.get("consentArtefacts", [])
-
-        consent = ConsentRequest.objects.filter(
-            consent_id=notification.get("consentRequestId")
-        ).first()
-
-        if not consent:
-            logger.warning(
-                f"Consent Request: {notification.get('consentRequestId')} not found in the database"
-            )
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        if consent_status != Status.DENIED:
-            for artefact in consent_artefacts:
-                consent_artefact = ConsentArtefact.objects.filter(
-                    external_id=artefact.get("id")
-                ).first()
-
-                if not consent_artefact:
-                    consent_artefact = ConsentArtefact.objects.create(
-                        external_id=artefact.get("id"),
-                        consent_request=consent,
-                        **consent.consent_details_dict(),
-                    )
-
-                consent_artefact.status = consent_status
-                consent_artefact.save()
-
-        consent.status = consent_status
-        consent.save()
-
-        if consent_status == Status.GRANTED:
-            GatewayService.consent__request__hiu__on_notify(
-                {
-                    "consent": consent,
-                    "request_id": request.headers.get("REQUEST-ID"),
-                }
-            )
-
-            for artefact in consent.consent_artefacts.all():
-                GatewayService.consent__fetch(
-                    {
-                        "artefact": artefact,
-                    }
-                )
-
-        return Response(status=status.HTTP_200_OK)
+        return store_and_enqueue_callback(
+            request, CallbackType.CONSENT_REQUEST_NOTIFY
+        )
 
     @action(detail=False, methods=["POST"], url_path="hiu/consent/on-fetch")
     def hiu__consent__on_fetch(self, request):
-        validated_data = self.validate_request(request)
+        self.validate_request(request)
 
-        consent = validated_data.get("consent")
-        consent_detail = consent.get("consentDetail")
-
-        # updating an existing consent artefact
-        (artefact, _) = ConsentArtefact.objects.update_or_create(
-            external_id=consent_detail.get("consentId"),
-            defaults={
-                "hip": consent_detail.get("hip", {}).get("id"),
-                "hiu": consent_detail.get("hiu", {}).get("id"),
-                "cm": consent_detail.get("consentManager", {}).get("id"),
-                "care_contexts": consent_detail.get("careContexts", []),
-                "hi_types": consent_detail.get("hiTypes", []),
-                "status": consent.get("status"),
-                "access_mode": consent_detail.get("permission").get("accessMode"),
-                "from_time": consent_detail.get("permission")
-                .get("dateRange")
-                .get("from"),
-                "to_time": consent_detail.get("permission").get("dateRange").get("to"),
-                "expiry": consent_detail.get("permission").get("dataEraseAt"),
-                "frequency_unit": consent_detail.get("permission")
-                .get("frequency")
-                .get("unit"),
-                "frequency_value": consent_detail.get("permission")
-                .get("frequency")
-                .get("value"),
-                "frequency_repeats": consent_detail.get("permission")
-                .get("frequency")
-                .get("repeats"),
-                "signature": consent.get("signature"),
-            },
-        )
-
-        GatewayService.data_flow__health_information__request(
-            {
-                "artefact": artefact,
-            }
-        )
-
-        return Response(status=status.HTTP_200_OK)
+        return store_and_enqueue_callback(request, CallbackType.CONSENT_ON_FETCH)
 
     @action(
         detail=False, methods=["POST"], url_path="hiu/health-information/on-request"
     )
     def hiu__health_information__on_request(self, request):
-        validated_data = self.validate_request(request)
+        self.validate_request(request)
 
-        if "hiRequest" in validated_data:
-            artefact = ConsentArtefact.objects.filter(
-                consent_id=validated_data.get("response").get("requestId")
-            ).first()
-
-            if not artefact:
-                logger.warning(
-                    f"Consent Artefact: {validated_data.get('response').get('requestId')} not found in the database"
-                )
-
-                return Response(status=status.HTTP_404_NOT_FOUND)
-
-            artefact.consent_id = validated_data.get("hiRequest").get("transactionId")
-            artefact.save()
-
-        if "error" in validated_data:
-            logger.warning(
-                f"Consent Artefact: {validated_data.get('response').get('requestId')}, Error in Health Information Request: {validated_data.get('error')}"
-            )
-
-        return Response(status=status.HTTP_202_ACCEPTED)
+        return store_and_enqueue_callback(
+            request, CallbackType.HEALTH_INFORMATION_ON_REQUEST
+        )
 
     @action(
         detail=False,
@@ -413,75 +249,8 @@ class HIUCallbackViewSet(GenericViewSet):
         url_path="hiu/health-information/transfer",
     )
     def hiu__health_information__transfer(self, request):
-        validated_data = self.validate_request(request)
+        self.validate_request(request)
 
-        key_material = validated_data.get("keyMaterial")
-
-        artefact = ConsentArtefact.objects.filter(
-            consent_id=validated_data.get("transactionId")
-        ).first()
-
-        if not artefact:
-            logger.warning(
-                f"Consent Artefact: {validated_data.get('transactionId')} not found in the database"
-            )
-
-            return Response(status=status.HTTP_404_NOT_FOUND)
-
-        cipher = Cipher(
-            external_public_key=key_material.get("dhPublicKey").get("keyValue"),
-            external_nonce=key_material.get("nonce"),
-            internal_private_key=artefact.key_material_private_key,
-            internal_public_key=artefact.key_material_public_key,
-            internal_nonce=artefact.key_material_nonce,
+        return store_and_enqueue_callback(
+            request, CallbackType.HEALTH_INFORMATION_TRANSFER
         )
-
-        entries = []
-        for entry in validated_data.get("entries"):
-            if "content" in entry:
-                entries.append(
-                    {
-                        "content": cipher.decrypt(entry.get("content")),
-                        "care_context_reference": entry.get("careContextReference"),
-                    }
-                )
-
-            if "link" in entry:
-                # TODO: handle link entry (link to raw data)
-                pass
-
-        file = FileUpload(
-            internal_name=f"{validated_data.get('pageNumber')} / {validated_data.get('pageCount')} -- {artefact.external_id}.json",
-            file_type=FileTypeChoices.patient.value,
-            file_category=FileCategoryChoices.unspecified.value,
-            associating_id=artefact.consent_request.external_id,
-            created_by=request.user,
-        )
-        file.files_manager.put_object(
-            file, json.dumps(entries), ContentType="application/json"
-        )
-        file.upload_completed = True
-        file.save(skip_internal_name=True)
-
-        Transaction.objects.create(
-            reference_id=validated_data.get("transactionId"),
-            type=TransactionType.EXCHANGE_DATA,
-            meta_data={
-                "consent_artefact": str(artefact.external_id),
-                "is_incoming": True,
-            },
-        )
-
-        GatewayService.data_flow__health_information__notify(
-            {
-                "consent": artefact,
-                "consent_id": str(artefact.artefact_id),
-                "transaction_id": str(artefact.transaction_id),
-                "notifier__type": "HIU",
-                "notifier__id": artefact.hiu,
-                "status": "TRANSFERRED",
-                "hip_id": artefact.hip,
-            }
-        )
-
-        return Response(status=status.HTTP_202_ACCEPTED)

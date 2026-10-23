@@ -56,11 +56,11 @@ class FhirBase:
         key = f"{resource.resource_type}/{resource.id}"
         return f"urn:uuid:{self._resource_id_url_map.get(key, uuid())}"
 
-    def _reference(self, resource: Resource = None):
+    def _reference(self, resource: Resource = None, reference_type: str | None = None):
         if resource is None:
             return None
 
-        return Reference(reference=self._reference_url(resource))
+        return Reference(reference=self._reference_url(resource), type=reference_type)
 
     def _coding(self, coding: CodingSpec | None):
         if coding is None:

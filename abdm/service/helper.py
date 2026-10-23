@@ -1,3 +1,4 @@
+import re
 from base64 import b64decode, b64encode
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -16,12 +17,14 @@ from abdm.settings import plugin_settings as settings
 from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
+from care.emr.models.invoice import Invoice
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.observation import Observation
 from care.emr.models.patient import Patient
 from care.emr.models.questionnaire import QuestionnaireResponse
 from care.emr.resources.encounter.constants import ClassChoices
 from care.emr.resources.file_upload.spec import FileTypeChoices
+from care.emr.resources.invoice.spec import InvoiceStatusOptions
 
 
 class ABDMAPIException(APIException):
@@ -190,6 +193,13 @@ def generate_care_contexts_for_existing_data(
         for report in diagnostic_reports:
             encounter_care_contexts.append(create_diagnostic_report_care_context(report))
 
+        invoices = Invoice.objects.filter(
+            account__primary_encounter_id=encounter.id,
+            patient_id=patient.id,
+        ).exclude(status=InvoiceStatusOptions.draft.value)
+        for invoice in invoices:
+            encounter_care_contexts.append(create_invoice_care_context(invoice))
+
         hf_id = facility.healthfacility.hf_id
         if hf_id in care_contexts:
             care_contexts[hf_id].extend(encounter_care_contexts)
@@ -249,13 +259,28 @@ def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911
 
         return create_diagnostic_report_care_context(diagnostic_report)
 
+    if model == "invoice":
+        invoice = Invoice.objects.filter(external_id=param).first()
+
+        if not invoice:
+            return None
+
+        return create_invoice_care_context(invoice)
+
     return None
+
+
+def clean_care_context_display(display: str) -> str:
+    # ABDM allows only alphanumeric characters, spaces, hyphens, colons, and dots in displays
+    return re.sub(r"[^a-zA-Z0-9\-: .]", "", display.strip())
 
 
 def create_diagnostic_report_care_context(diagnostic_report: DiagnosticReport):
     return {
         "reference": f"v2::diagnostic_report::{diagnostic_report.external_id}",
-        "display": (f"Diagnostic Report {diagnostic_report.service_request.title}"),
+        "display": clean_care_context_display(
+            f"Diagnostic Report {diagnostic_report.service_request.title}"
+        ),
         "hi_type": HealthInformationType.DIAGNOSTIC_REPORT,
     }
 
@@ -263,7 +288,9 @@ def create_diagnostic_report_care_context(diagnostic_report: DiagnosticReport):
 def create_medication_request_care_context(medication_request: MedicationRequest):
     return {
         "reference": f"v2::prescription::{medication_request.created_date.date()}",
-        "display": f"Medication Prescribed on {medication_request.created_date.date()}",
+        "display": clean_care_context_display(
+            f"Medication Prescribed on {medication_request.created_date.date()}"
+        ),
         "hi_type": HealthInformationType.PRESCRIPTION,
     }
 
@@ -277,7 +304,9 @@ def create_encounter_care_context(encounter: Encounter):
 
     return {
         "reference": f"v2::encounter::{encounter.external_id}",
-        "display": f"Encounter on {encounter.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
+        "display": clean_care_context_display(
+            f"Encounter on {encounter.created_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
         "hi_type": HealthInformationType.DISCHARGE_SUMMARY
         if is_admission
         else HealthInformationType.OP_CONSULTATION,
@@ -287,7 +316,9 @@ def create_encounter_care_context(encounter: Encounter):
 def create_file_upload_care_context(file_upload: FileUpload):
     return {
         "reference": f"v2::file_upload::{file_upload.external_id}",
-        "display": f"File Uploaded on {file_upload.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
+        "display": clean_care_context_display(
+            f"File Uploaded on {file_upload.created_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
         "hi_type": HealthInformationType.RECORD_ARTIFACT,
     }
 
@@ -297,6 +328,20 @@ def create_questionnaire_response_care_context(
 ):
     return {
         "reference": f"v2::questionnaire_response::{questionnaire_response.external_id}",
-        "display": f"Observations Added on {questionnaire_response.created_date.strftime("%Y-%m-%d %H:%M:%S")}",
+        "display": clean_care_context_display(
+            f"Observations Added on {questionnaire_response.created_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
         "hi_type": HealthInformationType.WELLNESS_RECORD,
+    }
+
+
+def create_invoice_care_context(invoice: Invoice):
+    display_label = invoice.title or f"Invoice {invoice.number or invoice.external_id}"
+
+    return {
+        "reference": f"v2::invoice::{invoice.external_id}",
+        "display": clean_care_context_display(
+            f"{display_label} on {invoice.modified_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
+        "hi_type": HealthInformationType.INVOICE,
     }

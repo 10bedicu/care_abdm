@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from rest_framework.serializers import (
     CharField,
@@ -126,10 +126,10 @@ class ConsentRequestHipNotifySerializer(Serializer):
                             {
                                 "fromTime": datetime.strptime(
                                     data.get("from"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                                ),
+                                ).replace(tzinfo=UTC),
                                 "toTime": datetime.strptime(
                                     data.get("to"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                                ),
+                                ).replace(tzinfo=UTC),
                             }
                         )
 
@@ -178,10 +178,10 @@ class HipHealthInformationRequestSerializer(Serializer):
                     {
                         "fromTime": datetime.strptime(
                             data.get("from"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                        ),
+                        ).replace(tzinfo=UTC),
                         "toTime": datetime.strptime(
                             data.get("to"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                        ),
+                        ).replace(tzinfo=UTC),
                     }
                 )
 

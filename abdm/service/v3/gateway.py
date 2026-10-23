@@ -57,6 +57,7 @@ from abdm.utils.fhir import Fhir
 from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
+from care.emr.models.invoice import Invoice
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.questionnaire import QuestionnaireResponse
 
@@ -377,7 +378,7 @@ class GatewayService:
                     "communicationMedium": "MOBILE",
                     "communicationHint": "OTP",
                     "communicationExpiry": (
-                        datetime.now() + timedelta(minutes=5)
+                        datetime.now(UTC) + timedelta(minutes=5)
                     ).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
                 },
             },
@@ -650,6 +651,18 @@ class GatewayService:
 
                 fhir_data = Fhir().create_diagnostic_report_record(diagnostic_report)
 
+            elif (
+                model == "invoice" and HealthInformationType.INVOICE in consent.hi_types
+            ):
+                invoice = Invoice.objects.filter(
+                    external_id=param,
+                ).first()
+
+                if not invoice:
+                    continue
+
+                fhir_data = Fhir().create_invoice_record(invoice)
+
             else:
                 continue
 
@@ -679,7 +692,7 @@ class GatewayService:
                 "cryptoAlg": data.get("key_material__crypto_algorithm"),
                 "curve": data.get("key_material__curve"),
                 "dhPublicKey": {
-                    "expiry": (datetime.now() + timedelta(days=2)).strftime(
+                    "expiry": (datetime.now(UTC) + timedelta(days=2)).strftime(
                         "%Y-%m-%dT%H:%M:%S.000Z"
                     ),
                     "parameters": "Curve25519/32byte random key",
@@ -999,8 +1012,12 @@ class GatewayService:
             "hiRequest": {
                 "consent": {"id": str(artefact.artefact_id)},
                 "dateRange": {
-                    "from": artefact.from_time.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-                    "to": artefact.to_time.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                    "from": artefact.from_time.astimezone(UTC).strftime(
+                        "%Y-%m-%dT%H:%M:%S.000Z"
+                    ),
+                    "to": artefact.to_time.astimezone(UTC).strftime(
+                        "%Y-%m-%dT%H:%M:%S.000Z"
+                    ),
                 },
                 "dataPushUrl": settings.BACKEND_DOMAIN
                 + "/api/abdm/api/v3/hiu/health-information/transfer",
