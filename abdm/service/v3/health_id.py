@@ -36,6 +36,8 @@ from abdm.service.v3.types.health_id import (
     PhrWebLoginAbhaSearchResponse,
     PhrWebLoginAbhaVerifyBody,
     PhrWebLoginAbhaVerifyResponse,
+    PhrWebLoginProfileAbhaProfileBody,
+    PhrWebLoginProfileAbhaProfileResponse,
     ProfileAccountAbhaCardBody,
     ProfileAccountAbhaCardResponse,
     ProfileAccountBody,
@@ -491,6 +493,25 @@ class HealthIdService:
             headers={
                 "REQUEST-ID": uuid(),
                 "TIMESTAMP": timestamp(),
+            },
+        )
+
+        if response.status_code != 200:
+            raise ABDMAPIException(detail=HealthIdService.handle_error(response.json()))
+
+        return response.json()
+
+    @staticmethod
+    def phr__web__login__profile__abha_profile(
+        data: PhrWebLoginProfileAbhaProfileBody,
+    ) -> PhrWebLoginProfileAbhaProfileResponse:
+        path = "/phr/web/login/profile/abha-profile"
+        response = HealthIdService.request.get(
+            path,
+            headers={
+                "REQUEST-ID": uuid(),
+                "TIMESTAMP": timestamp(),
+                "X-TOKEN": f"Bearer {data.get('x_token', '')}",
             },
         )
 
