@@ -32,6 +32,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.template.loader import render_to_string
+from django.test import SimpleTestCase
 from django.utils import timezone
 from model_bakery import baker
 
@@ -164,6 +165,11 @@ class TestAcknowledgementPaymentDate(ScanPayTestBase):
             scan_pay_service.acknowledgement_payment_date(ist),
             "2026-10-20T04:55:00.000Z",
         )
+
+
+class TestPaymentOrderStatusIndex(SimpleTestCase):
+    def test_status_is_indexed(self):
+        self.assertTrue(PaymentOrder._meta.get_field("status").db_index)
 
 
 class TestShareOpenOrder(ScanPayTestBase):

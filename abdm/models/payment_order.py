@@ -40,6 +40,7 @@ class PaymentOrder(BaseModel):
         max_length=50,
         choices=PaymentOrderStatus.choices,
         default=PaymentOrderStatus.OPEN_ORDER_SHARED,
+        db_index=True,
     )
     order_number = models.CharField(
         max_length=100, null=True, blank=True, db_index=True
