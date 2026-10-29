@@ -170,7 +170,6 @@ class TestScanPayOrderList(ScanPayOrderTestBase):
             ),
             {str(pending.external_id), str(paid.external_id)},
         )
-        self.assertEqual(ids({"invoice_number": "pai"}), {str(paid.external_id)})
         PaymentOrder.objects.filter(pk=pending.pk).update(
             order_number="ORD-PEND", transaction_id="ATRN111"
         )

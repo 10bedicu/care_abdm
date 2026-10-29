@@ -64,15 +64,20 @@ class ScanPayCallbackViewSet(GenericViewSet):
 
         return serializer.validated_data
 
+    def require_request_id(self, request):
+        request_id = request.headers.get("REQUEST-ID")
+        if request_id:
+            return request_id, None
+        return None, Response(
+            {"detail": "REQUEST-ID header is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     @action(detail=False, methods=["POST"], url_path="patient/share/open-order")
     def patient__share__open_order(self, request):
-        request_id = request.headers.get("REQUEST-ID")
-
-        if not request_id:
-            return Response(
-                {"detail": "REQUEST-ID header is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        request_id, error = self.require_request_id(request)
+        if error:
+            return error
 
         try:
             self.validate_request(request)
@@ -94,13 +99,9 @@ class ScanPayCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="patient/selection")
     def patient__selection(self, request):
-        request_id = request.headers.get("REQUEST-ID")
-
-        if not request_id:
-            return Response(
-                {"detail": "REQUEST-ID header is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        request_id, error = self.require_request_id(request)
+        if error:
+            return error
 
         try:
             self.validate_request(request)
@@ -131,13 +132,9 @@ class ScanPayCallbackViewSet(GenericViewSet):
 
     @action(detail=False, methods=["POST"], url_path="patient/scan-pay/order-status")
     def patient__scan_pay__order_status(self, request):
-        request_id = request.headers.get("REQUEST-ID")
-
-        if not request_id:
-            return Response(
-                {"detail": "REQUEST-ID header is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        request_id, error = self.require_request_id(request)
+        if error:
+            return error
 
         try:
             self.validate_request(request)
