@@ -157,6 +157,15 @@ class TestScanPayInvoiceTitle(ScanPayTestBase):
         )
 
 
+class TestAcknowledgementPaymentDate(ScanPayTestBase):
+    def test_formats_an_ist_moment_as_utc(self):
+        ist = datetime(2026, 10, 20, 10, 25, tzinfo=ZoneInfo("Asia/Kolkata"))
+        self.assertEqual(
+            scan_pay_service.acknowledgement_payment_date(ist),
+            "2026-10-20T04:55:00.000Z",
+        )
+
+
 class TestShareOpenOrder(ScanPayTestBase):
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_share_open_order")
     def test_share_open_order_success(self, mock_gateway):

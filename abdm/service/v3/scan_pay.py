@@ -1,12 +1,12 @@
 import logging
 from collections import defaultdict
+from datetime import UTC
 from urllib.parse import urlencode
 
 import jwt
 from django.conf import settings as django_settings
 from django.db import transaction
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 from jwt.exceptions import InvalidTokenError
 
 from abdm.models.payment_order import (
@@ -242,12 +242,10 @@ def scan_pay_receipt_link(order: PaymentOrder):
 
 
 def acknowledgement_payment_date(value) -> str | None:
-    """Format a payment moment. The billing API can leave a JSON string on the order."""
-    if isinstance(value, str):
-        value = parse_datetime(value)
+    """Format a payment moment as UTC."""
     if not value:
         return None
-    return value.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 # Statuses ABDM accepts on an acknowledgement. EXPIRED is local: the gateway
