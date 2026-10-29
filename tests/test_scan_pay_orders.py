@@ -15,7 +15,7 @@ from care.emr.models.payment_reconciliation import PaymentReconciliation
 from care.emr.resources.charge_item.spec import ChargeItemStatusOptions
 from care.emr.resources.invoice.spec import InvoiceStatusOptions
 from care.security.permissions.account import AccountPermissions
-from tests.test_scan_and_pay import ScanPayTestBase
+from tests.test_scan_and_pay import ScanPayTestBase, receipt_claims
 
 ORDERS_URL = "/api/abdm/v3/scan-pay/orders/"
 PROVIDER = "orders_test"
@@ -183,9 +183,12 @@ class TestScanPayOrderList(ScanPayOrderTestBase):
 
         response = self.client.get(ORDERS_URL, {"facility": self.facility.external_id})
 
-        self.assertIn(
-            str(order.external_id), response.data["results"][0]["receipt_url"]
-        )
+        receipt_url = response.data["results"][0]["receipt_url"]
+        self.assertIn(str(order.external_id), receipt_url)
+        claims = receipt_claims(receipt_url)
+        self.assertEqual(claims["sub"], str(order.external_id))
+        self.assertEqual(claims["type"], "scan_pay_receipt")
+        self.assertNotIn("exp", claims)
 
     def test_cancelled_invoice_exposes_reason_and_receipt(self):
         order, invoice, _ = self.make_order(PaymentOrderStatus.FAIL)
@@ -198,7 +201,9 @@ class TestScanPayOrderList(ScanPayOrderTestBase):
 
         row = response.data["results"][0]
         self.assertEqual(row["invoice"]["cancelled_reason"], reason)
-        self.assertIn(str(order.external_id), row["receipt_url"])
+        claims = receipt_claims(row["receipt_url"])
+        self.assertEqual(claims["sub"], str(order.external_id))
+        self.assertEqual(claims["type"], "scan_pay_receipt")
 
     def test_requires_read_permission(self):
         self.make_order()

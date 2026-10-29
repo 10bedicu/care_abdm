@@ -1,9 +1,13 @@
 import logging
 from collections import defaultdict
+from urllib.parse import urlencode
 
+import jwt
+from django.conf import settings as django_settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from jwt.exceptions import InvalidTokenError
 
 from abdm.models.payment_order import (
     PAYMENT_ORDER_PAID_STATUSES,
@@ -169,9 +173,47 @@ def order_has_receipt(order: PaymentOrder) -> bool:
     return bool(invoice and invoice.status in INVOICE_CANCELLED_STATUS)
 
 
+RECEIPT_TOKEN_TYPE = "scan_pay_receipt"
+
+
+def scan_pay_receipt_token(order: PaymentOrder) -> str:
+    """A signed capability for this order's receipt. It is not stored."""
+    return jwt.encode(
+        {"sub": str(order.external_id), "type": RECEIPT_TOKEN_TYPE},
+        django_settings.SECRET_KEY,
+        algorithm="HS256",
+    )
+
+
+def scan_pay_receipt_order_id(token: str) -> str | None:
+    """Return the order id from a receipt token, or None when it does not verify."""
+    try:
+        payload = jwt.decode(
+            token,
+            django_settings.SECRET_KEY,
+            algorithms=["HS256"],
+            options={"require": ["sub", "type"]},
+        )
+    except InvalidTokenError:
+        return None
+    if payload.get("type") != RECEIPT_TOKEN_TYPE:
+        return None
+    order_id = payload.get("sub")
+    if not isinstance(order_id, str) or not order_id:
+        return None
+    return order_id
+
+
+def scan_pay_receipt_token_matches(order_id: str, token: str) -> bool:
+    """True when the token is a receipt capability for this order id."""
+    return scan_pay_receipt_order_id(token) == str(order_id)
+
+
 def scan_pay_receipt_link(order: PaymentOrder):
+    query = urlencode({"token": scan_pay_receipt_token(order)})
     return (
-        f"{settings.BACKEND_DOMAIN}/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+        f"{settings.BACKEND_DOMAIN}/api/abdm/v3/scan-pay/receipt/"
+        f"{order.external_id}/?{query}"
     )
 
 

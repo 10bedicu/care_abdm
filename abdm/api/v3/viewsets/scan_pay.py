@@ -1,15 +1,13 @@
 import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.http import HttpResponse
-from django.template.loader import render_to_string
+from django.http import HttpResponseRedirect
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
-from weasyprint import HTML
 
 from abdm.api.v3.serializers.scan_pay import (
     PatientScanPayOnNotifySerializer,
@@ -17,9 +15,9 @@ from abdm.api.v3.serializers.scan_pay import (
     PatientSelectionSerializer,
     PatientShareOpenOrderSerializer,
 )
-from abdm.authentication import ABDMAuthentication
+from abdm.authentication import ABDMAuthentication, ScanPayReceiptAuthentication
 from abdm.models import CallbackType, PaymentOrder
-from abdm.service.v3.receipt import build_receipt_context
+from abdm.service.v3.receipt import receipt_signed_url
 from abdm.service.v3.scan_pay import order_has_receipt
 from abdm.tasks.scan_pay import (
     scan_pay_on_order_status,
@@ -27,6 +25,7 @@ from abdm.tasks.scan_pay import (
     scan_pay_on_share_open_order,
 )
 from abdm.utils.callback import store_and_enqueue_callback
+from care.utils.lock import ObjectLocked
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +163,17 @@ class ScanPayViewSet(GenericViewSet):
     permission_classes = (AllowAny,)
     authentication_classes = []
 
+    def get_authenticators(self):
+        # initialize_request builds authenticators before ViewSet.action is set.
+        if getattr(self, "action_map", {}).get("get") == "receipt":
+            return [ScanPayReceiptAuthentication()]
+        return super().get_authenticators()
+
+    def get_permissions(self):
+        if getattr(self, "action_map", {}).get("get") == "receipt":
+            return [IsAuthenticated()]
+        return super().get_permissions()
+
     @action(
         detail=False,
         methods=["GET"],
@@ -193,14 +203,23 @@ class ScanPayViewSet(GenericViewSet):
                 {"detail": "Receipt not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
-        html = render_to_string(
-            "abdm/scan_and_pay_receipt.html",
-            build_receipt_context(order),
-        )
-
-        pdf = HTML(string=html).write_pdf()
-        response = HttpResponse(pdf, content_type="application/pdf")
-        response["Content-Disposition"] = (
-            f'inline; filename="receipt-{order.order_number}.pdf"'
-        )
-        return response
+        try:
+            url = receipt_signed_url(order)
+        except ObjectLocked:
+            logger.info(
+                "Scan-and-pay receipt is locked for order %s", order.external_id
+            )
+            return Response(
+                {"detail": "Receipt is being prepared"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to prepare scan-and-pay receipt for order %s",
+                order.external_id,
+            )
+            return Response(
+                {"detail": "Receipt is being prepared"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return HttpResponseRedirect(url)

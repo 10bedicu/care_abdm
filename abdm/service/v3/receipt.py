@@ -1,5 +1,7 @@
 import base64
+import hashlib
 import io
+import json
 import logging
 import re
 from datetime import date, datetime
@@ -8,14 +10,20 @@ from pathlib import Path
 
 import segno
 from dateutil.relativedelta import relativedelta
+from django.template.loader import render_to_string
 from django.utils import timezone
+from weasyprint import HTML
 
+from abdm.service.v3.payment_providers.reconciliation import PaymentOrderLock
+from abdm.utils.user import get_or_create_abdm_user
 from care.emr.models.charge_item import ChargeItem
+from care.emr.models.file_upload import FileUpload
 from care.emr.models.patient import (
     PatientIdentifierConfig,
     PatientIdentifierConfigCache,
 )
 from care.emr.models.payment_reconciliation import PaymentReconciliation
+from care.emr.resources.file_upload.spec import FileCategoryChoices
 from care.emr.resources.invoice.spec import InvoiceStatusOptions
 from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationOutcomeOptions,
@@ -23,6 +31,10 @@ from care.emr.resources.payment_reconciliation.spec import (
 )
 
 logger = logging.getLogger(__name__)
+
+RECEIPT_FILE_TYPE = "scan_pay_receipt"
+RECEIPT_URL_TTL = 5 * 60
+RECEIPT_FINGERPRINT_META = "receipt_fingerprint"
 
 _MONEY = Decimal("0.01")
 _ADULT_YEARS = 18
@@ -485,6 +497,112 @@ def _qr_data_uri(value) -> str:
     qr.save(out, kind="svg", xmldecl=False, svgns=True, nl=False, scale=4, border=0)
     encoded = base64.b64encode(out.getvalue()).decode()
     return f"data:image/svg+xml;base64,{encoded}"
+
+
+def receipt_fingerprint(order) -> str:
+    """Hash the invoice fields a stored receipt has to follow."""
+    invoice = order.invoice
+    payments = PaymentReconciliation.objects.filter(
+        target_invoice=invoice,
+        outcome=PaymentReconciliationOutcomeOptions.complete.value,
+        status=PaymentReconciliationStatusOptions.active.value,
+    ).select_related("location")
+    payload = {
+        "status": invoice.status,
+        "cancelled_reason": invoice.cancelled_reason or "",
+        "payment_terms": invoice.payment_terms or "",
+        "locked": invoice.locked,
+        "total_net": str(invoice.total_net),
+        "total_gross": str(invoice.total_gross),
+        "charge_items_copy": invoice.charge_items_copy,
+        "total_price_components": invoice.total_price_components,
+        "payments": [
+            {
+                "id": str(payment.external_id),
+                "amount": str(payment.amount),
+                "method": payment.method,
+                "reference": payment.reference_number or "",
+                "is_credit_note": payment.is_credit_note,
+                "paid_at": (
+                    payment.payment_datetime.isoformat()
+                    if payment.payment_datetime
+                    else ""
+                ),
+                "location": payment.location.name if payment.location_id else "",
+            }
+            for payment in payments.order_by("payment_datetime", "id")
+        ],
+    }
+    encoded = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def receipt_signed_url(order) -> str:
+    """Short-lived URL for the stored PDF, rendered again when the invoice changed."""
+    with PaymentOrderLock(order):
+        fingerprint = receipt_fingerprint(order)
+        file = _current_receipt_file(order)
+        if (
+            file is None
+            or (file.meta or {}).get(RECEIPT_FINGERPRINT_META) != fingerprint
+        ):
+            file = _store_receipt(order, file, fingerprint)
+        return file.files_manager.read_signed_url(file, duration=RECEIPT_URL_TTL)
+
+
+def _current_receipt_file(order):
+    return (
+        FileUpload.objects.filter(
+            file_type=RECEIPT_FILE_TYPE,
+            associating_id=str(order.external_id),
+            upload_completed=True,
+        )
+        .order_by("-created_date")
+        .first()
+    )
+
+
+def _receipt_filename(order) -> str:
+    number = (order.order_number or str(order.external_id)).strip()
+    return f"receipt-{number}.pdf"
+
+
+def _render_receipt_pdf(order) -> bytes:
+    html = render_to_string(
+        "abdm/scan_and_pay_receipt.html",
+        build_receipt_context(order),
+    )
+    return HTML(string=html).write_pdf()
+
+
+def _store_receipt(order, existing, fingerprint: str):
+    pdf = _render_receipt_pdf(order)
+    created = existing is None
+    file = existing
+    if created:
+        file = FileUpload(
+            name=_receipt_filename(order),
+            file_type=RECEIPT_FILE_TYPE,
+            file_category=FileCategoryChoices.unspecified.value,
+            associating_id=str(order.external_id),
+            created_by=get_or_create_abdm_user(),
+            upload_completed=False,
+            meta={"mime_type": "application/pdf"},
+        )
+        file.save()
+    try:
+        file.files_manager.put_object(file, pdf, ContentType="application/pdf")
+    except Exception:
+        if created:
+            file.delete()
+        raise
+    meta = dict(file.meta or {})
+    meta["mime_type"] = "application/pdf"
+    meta[RECEIPT_FINGERPRINT_META] = fingerprint
+    file.meta = meta
+    file.upload_completed = True
+    file.save(update_fields=["meta", "upload_completed", "modified_date"])
+    return file
 
 
 def _ordinal(day: int) -> str:

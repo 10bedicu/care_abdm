@@ -1,8 +1,10 @@
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 from decimal import Decimal
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlencode, urlparse
+from zoneinfo import ZoneInfo
 
+import jwt
 import requests
 from abdm.models import AbhaNumber, HealthFacility, InboundCallback, PaymentOrder
 from abdm.models.inbound_callback import CallbackStatus
@@ -16,18 +18,26 @@ from abdm.service.v3.callback_handlers.scan_pay import (
     handle_patient_share_open_order,
     handle_scan_pay_order_status,
 )
-from abdm.service.v3.receipt import build_receipt_context
+from abdm.service.v3.receipt import (
+    RECEIPT_FILE_TYPE,
+    RECEIPT_FINGERPRINT_META,
+    RECEIPT_URL_TTL,
+    build_receipt_context,
+)
+from abdm.service.v3.scan_pay import scan_pay_receipt_token
 from abdm.settings import plugin_settings as abdm_settings
 from abdm.tasks import scan_pay as scan_pay_tasks
 from abdm.tasks.scan_pay import POLL_LOCK_KEY, reconcile_pending_payment_orders
 from abdm.utils import user as abdm_user
+from django.conf import settings
 from django.core.cache import cache
-from django.utils import timezone
 from django.core.exceptions import ImproperlyConfigured
 from django.template.loader import render_to_string
+from django.utils import timezone
 from model_bakery import baker
 
 from care.emr.models.charge_item import ChargeItem
+from care.emr.models.file_upload import FileUpload
 from care.emr.models.invoice import Invoice
 from care.emr.models.patient import PatientIdentifierConfig
 from care.emr.models.payment_reconciliation import PaymentReconciliation
@@ -48,6 +58,24 @@ from care.utils.time_util import care_now
 SHARE_OPEN_ORDER_URL = "/api/abdm/api/v3/patient/share/open-order"
 SELECTION_URL = "/api/abdm/api/v3/patient/selection"
 ORDER_STATUS_URL = "/api/abdm/api/v3/patient/scan-pay/order-status"
+SIGNED_RECEIPT_URL = "https://files.example/receipt.pdf"
+
+
+def receipt_claims(url: str) -> dict:
+    parsed = urlparse(url)
+    token = parse_qs(parsed.query).get("token", [None])[0]
+    order_id = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    claims = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+    assert claims["sub"] == order_id
+    return claims
+
+
+def receipt_path(order, *, token=None) -> str:
+    token = token or scan_pay_receipt_token(order)
+    return (
+        f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+        f"?{urlencode({'token': token})}"
+    )
 
 
 class ScanPayTestBase(CareAPITestBase):
@@ -560,7 +588,12 @@ class TestPaymentNotify(ScanPayTestBase):
         payload = mock_task.call_args[0][0]
         self.assertEqual(payload["acknowledgement"]["status"], "SUCCESS")
         self.assertEqual(payload["hip_id"], self.health_facility.hf_id)
-        self.assertIn("receipt", payload["acknowledgement"]["payment_receipt_link"])
+        receipt_url = payload["acknowledgement"]["payment_receipt_link"]
+        self.assertIn(str(order.external_id), receipt_url)
+        claims = receipt_claims(receipt_url)
+        self.assertEqual(claims["sub"], str(order.external_id))
+        self.assertEqual(claims["type"], "scan_pay_receipt")
+        self.assertNotIn("exp", claims)
 
     @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")
     def test_notify_waits_for_commit(self, mock_task):
@@ -863,6 +896,22 @@ class TestOrderStatus(ScanPayTestBase):
 
 
 class TestReceipt(ScanPayTestBase):
+    def setUp(self):
+        super().setUp()
+        # Receipt auth is the query token; a forced staff session would skip it.
+        self.client.force_authenticate(user=None)
+        self.put_patcher = patch(
+            "care.emr.utils.file_manager.S3FilesManager.put_object"
+        )
+        self.read_patcher = patch(
+            "care.emr.utils.file_manager.S3FilesManager.read_signed_url",
+            return_value=SIGNED_RECEIPT_URL,
+        )
+        self.put_object = self.put_patcher.start()
+        self.read_signed_url = self.read_patcher.start()
+        self.addCleanup(self.put_patcher.stop)
+        self.addCleanup(self.read_patcher.stop)
+
     def test_receipt_not_available_for_unpaid_order(self):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
@@ -871,10 +920,46 @@ class TestReceipt(ScanPayTestBase):
             status=PaymentOrderStatus.PAYMENT_INITIATED,
         )
 
-        response = self.client.get(
-            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
-        )
+        response = self.client.get(receipt_path(order))
         self.assertEqual(response.status_code, 404)
+        self.put_object.assert_not_called()
+
+    def test_receipt_rejects_a_bad_token(self):
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            status=PaymentOrderStatus.SUCCESS,
+        )
+        other = jwt.encode(
+            {"sub": str(order.external_id), "type": "password_reset"},
+            settings.SECRET_KEY,
+            algorithm="HS256",
+        )
+        token = scan_pay_receipt_token(order)
+        tampered = token[:-1] + ("a" if token[-1] != "a" else "b")
+        mismatched = jwt.encode(
+            {"sub": str(uuid()), "type": "scan_pay_receipt"},
+            settings.SECRET_KEY,
+            algorithm="HS256",
+        )
+
+        self.assertEqual(
+            self.client.get(receipt_path(order, token=other)).status_code, 401
+        )
+        self.assertEqual(
+            self.client.get(receipt_path(order, token=tampered)).status_code, 401
+        )
+        self.assertEqual(
+            self.client.get(receipt_path(order, token=mismatched)).status_code, 401
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+            ).status_code,
+            401,
+        )
+        self.put_object.assert_not_called()
 
     def test_receipt_for_paid_order(self):
         charge_item = self.create_charge_item()
@@ -898,11 +983,22 @@ class TestReceipt(ScanPayTestBase):
             transaction_id="pay_test",
         )
 
-        response = self.client.get(
-            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
+        response = self.client.get(receipt_path(order))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], SIGNED_RECEIPT_URL)
+        self.assertEqual(self.put_object.call_count, 1)
+        self.assertEqual(
+            self.read_signed_url.call_args.kwargs["duration"], RECEIPT_URL_TTL
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "application/pdf")
+        stored = FileUpload.objects.get(associating_id=str(order.external_id))
+        self.assertEqual(stored.file_type, RECEIPT_FILE_TYPE)
+        self.assertTrue(stored.upload_completed)
+        self.assertEqual(stored.meta["mime_type"], "application/pdf")
+        self.assertIn(RECEIPT_FINGERPRINT_META, stored.meta)
+
+        response = self.client.get(receipt_path(order))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.put_object.call_count, 1)
 
     def test_receipt_for_cancelled_failed_order(self):
         invoice = baker.make(
@@ -924,23 +1020,31 @@ class TestReceipt(ScanPayTestBase):
             status=PaymentOrderStatus.FAIL,
         )
 
-        response = self.client.get(
-            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
-        )
+        response = self.client.get(receipt_path(order))
         self.assertEqual(response.status_code, 404)
+        self.put_object.assert_not_called()
 
         invoice.status = InvoiceStatusOptions.cancelled.value
         invoice.cancelled_reason = "Scan and pay payment failed (order INV-FAIL)"
         invoice.save(update_fields=["status", "cancelled_reason"])
 
-        response = self.client.get(
-            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "application/pdf")
+        response = self.client.get(receipt_path(order))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.put_object.call_count, 1)
         self.assertEqual(
             build_receipt_context(order)["cancelled_reason"],
             invoice.cancelled_reason,
+        )
+
+        invoice.cancelled_reason = "Replaced after the receipt was stored"
+        invoice.save(update_fields=["cancelled_reason"])
+
+        response = self.client.get(receipt_path(order))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.put_object.call_count, 2)
+        self.assertEqual(
+            FileUpload.objects.filter(associating_id=str(order.external_id)).count(),
+            1,
         )
 
     def test_receipt_matches_invoice_print(self):
@@ -1056,12 +1160,9 @@ class TestReceipt(ScanPayTestBase):
         self.assertIn("Total Received", html)
         self.assertIn("INV-489-26", html)
 
-        response = self.client.get(
-            f"/api/abdm/v3/scan-pay/receipt/{order.external_id}/"
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "application/pdf")
-        self.assertTrue(response.content.startswith(b"%PDF"))
+        response = self.client.get(receipt_path(order))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(self.put_object.call_args.args[1].startswith(b"%PDF"))
 
 
 class TestPaymentProviderRegistry(ScanPayTestBase):
