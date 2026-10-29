@@ -21,7 +21,6 @@ from abdm.service.v3.callback_handlers.scan_pay import (
 from abdm.service.v3.receipt import (
     RECEIPT_FILE_TYPE,
     RECEIPT_FINGERPRINT_META,
-    RECEIPT_URL_TTL,
     build_receipt_context,
 )
 from abdm.service.v3.scan_pay import scan_pay_receipt_token
@@ -58,7 +57,7 @@ from care.utils.time_util import care_now
 SHARE_OPEN_ORDER_URL = "/api/abdm/api/v3/patient/share/open-order"
 SELECTION_URL = "/api/abdm/api/v3/patient/selection"
 ORDER_STATUS_URL = "/api/abdm/api/v3/patient/scan-pay/order-status"
-SIGNED_RECEIPT_URL = "https://files.example/receipt.pdf"
+STORED_RECEIPT_PDF = b"%PDF-1.4 stored-receipt"
 
 
 def receipt_claims(url: str) -> dict:
@@ -903,14 +902,14 @@ class TestReceipt(ScanPayTestBase):
         self.put_patcher = patch(
             "care.emr.utils.file_manager.S3FilesManager.put_object"
         )
-        self.read_patcher = patch(
-            "care.emr.utils.file_manager.S3FilesManager.read_signed_url",
-            return_value=SIGNED_RECEIPT_URL,
+        self.contents_patcher = patch(
+            "care.emr.utils.file_manager.S3FilesManager.file_contents",
+            return_value=("application/pdf", STORED_RECEIPT_PDF),
         )
         self.put_object = self.put_patcher.start()
-        self.read_signed_url = self.read_patcher.start()
+        self.file_contents = self.contents_patcher.start()
         self.addCleanup(self.put_patcher.stop)
-        self.addCleanup(self.read_patcher.stop)
+        self.addCleanup(self.contents_patcher.stop)
 
     def test_receipt_not_available_for_unpaid_order(self):
         order = PaymentOrder.objects.create(
@@ -984,12 +983,13 @@ class TestReceipt(ScanPayTestBase):
         )
 
         response = self.client.get(receipt_path(order))
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], SIGNED_RECEIPT_URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("attachment", response["Content-Disposition"])
+        self.assertIn("receipt-INV-4.pdf", response["Content-Disposition"])
+        self.assertTrue(response.content.startswith(b"%PDF"))
         self.assertEqual(self.put_object.call_count, 1)
-        self.assertEqual(
-            self.read_signed_url.call_args.kwargs["duration"], RECEIPT_URL_TTL
-        )
+        self.file_contents.assert_not_called()
         stored = FileUpload.objects.get(associating_id=str(order.external_id))
         self.assertEqual(stored.file_type, RECEIPT_FILE_TYPE)
         self.assertTrue(stored.upload_completed)
@@ -997,8 +997,10 @@ class TestReceipt(ScanPayTestBase):
         self.assertIn(RECEIPT_FINGERPRINT_META, stored.meta)
 
         response = self.client.get(receipt_path(order))
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, STORED_RECEIPT_PDF)
         self.assertEqual(self.put_object.call_count, 1)
+        self.assertEqual(self.file_contents.call_count, 1)
 
     def test_receipt_for_cancelled_failed_order(self):
         invoice = baker.make(
@@ -1029,7 +1031,7 @@ class TestReceipt(ScanPayTestBase):
         invoice.save(update_fields=["status", "cancelled_reason"])
 
         response = self.client.get(receipt_path(order))
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(self.put_object.call_count, 1)
         self.assertEqual(
             build_receipt_context(order)["cancelled_reason"],
@@ -1040,7 +1042,7 @@ class TestReceipt(ScanPayTestBase):
         invoice.save(update_fields=["cancelled_reason"])
 
         response = self.client.get(receipt_path(order))
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(self.put_object.call_count, 2)
         self.assertEqual(
             FileUpload.objects.filter(associating_id=str(order.external_id)).count(),
@@ -1161,7 +1163,10 @@ class TestReceipt(ScanPayTestBase):
         self.assertIn("INV-489-26", html)
 
         response = self.client.get(receipt_path(order))
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("attachment", response["Content-Disposition"])
+        self.assertTrue(response.content.startswith(b"%PDF"))
         self.assertTrue(self.put_object.call_args.args[1].startswith(b"%PDF"))
 
 

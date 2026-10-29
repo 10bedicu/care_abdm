@@ -33,7 +33,6 @@ from care.emr.resources.payment_reconciliation.spec import (
 logger = logging.getLogger(__name__)
 
 RECEIPT_FILE_TYPE = "scan_pay_receipt"
-RECEIPT_URL_TTL = 5 * 60
 RECEIPT_FINGERPRINT_META = "receipt_fingerprint"
 
 _MONEY = Decimal("0.01")
@@ -537,8 +536,8 @@ def receipt_fingerprint(order) -> str:
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def receipt_signed_url(order) -> str:
-    """Short-lived URL for the stored PDF, rendered again when the invoice changed."""
+def receipt_pdf(order) -> tuple[bytes, str]:
+    """PDF bytes and filename, rendered again when the invoice changed."""
     with PaymentOrderLock(order):
         fingerprint = receipt_fingerprint(order)
         file = _current_receipt_file(order)
@@ -546,8 +545,10 @@ def receipt_signed_url(order) -> str:
             file is None
             or (file.meta or {}).get(RECEIPT_FINGERPRINT_META) != fingerprint
         ):
-            file = _store_receipt(order, file, fingerprint)
-        return file.files_manager.read_signed_url(file, duration=RECEIPT_URL_TTL)
+            file, pdf = _store_receipt(order, file, fingerprint)
+            return pdf, file.name
+        _content_type, pdf = file.files_manager.file_contents(file)
+        return pdf, file.name
 
 
 def _current_receipt_file(order):
@@ -602,7 +603,7 @@ def _store_receipt(order, existing, fingerprint: str):
     file.meta = meta
     file.upload_completed = True
     file.save(update_fields=["meta", "upload_completed", "modified_date"])
-    return file
+    return file, pdf
 
 
 def _ordinal(day: int) -> str:

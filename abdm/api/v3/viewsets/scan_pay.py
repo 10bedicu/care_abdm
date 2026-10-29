@@ -1,7 +1,7 @@
 import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
@@ -17,7 +17,7 @@ from abdm.api.v3.serializers.scan_pay import (
 )
 from abdm.authentication import ABDMAuthentication, ScanPayReceiptAuthentication
 from abdm.models import CallbackType, PaymentOrder
-from abdm.service.v3.receipt import receipt_signed_url
+from abdm.service.v3.receipt import receipt_pdf
 from abdm.service.v3.scan_pay import order_has_receipt
 from abdm.tasks.scan_pay import (
     scan_pay_on_order_status,
@@ -204,7 +204,7 @@ class ScanPayViewSet(GenericViewSet):
             )
 
         try:
-            url = receipt_signed_url(order)
+            pdf, filename = receipt_pdf(order)
         except ObjectLocked:
             logger.info(
                 "Scan-and-pay receipt is locked for order %s", order.external_id
@@ -222,4 +222,6 @@ class ScanPayViewSet(GenericViewSet):
                 {"detail": "Receipt is being prepared"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return HttpResponseRedirect(url)
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
