@@ -499,8 +499,14 @@ def _qr_data_uri(value) -> str:
 
 
 def receipt_fingerprint(order) -> str:
-    """Hash the invoice fields a stored receipt has to follow."""
+    """Hash the receipt details that should replace a stored PDF.
+
+    The printed age, the generated-on clock, and the logo and fonts are left
+    out, so opening the same bill later does not rebuild it.
+    """
     invoice = order.invoice
+    facility = order.health_facility.facility
+    patient = order.abha_number.patient
     payments = PaymentReconciliation.objects.filter(
         target_invoice=invoice,
         outcome=PaymentReconciliationOutcomeOptions.complete.value,
@@ -515,6 +521,22 @@ def receipt_fingerprint(order) -> str:
         "total_gross": str(invoice.total_gross),
         "charge_items_copy": invoice.charge_items_copy,
         "total_price_components": invoice.total_price_components,
+        "facility_name": facility.name,
+        "facility_address": facility.address or "",
+        "facility_phone": facility.phone_number or "",
+        "invoice_number": (invoice.number or "").strip()
+        or (invoice.title or "").strip()
+        or str(invoice.external_id)[:8],
+        "issue_date": invoice.issue_date.isoformat() if invoice.issue_date else "",
+        "patient_name": patient.name,
+        "patient_gender": patient.gender or "",
+        "patient_date_of_birth": (
+            patient.date_of_birth.isoformat() if patient.date_of_birth else ""
+        ),
+        "patient_year_of_birth": patient.year_of_birth or "",
+        "patient_address": _patient_address(patient),
+        "identifiers": _official_identifiers(patient),
+        "created_by": _format_user_name(invoice.created_by),
         "payments": [
             {
                 "id": str(payment.external_id),

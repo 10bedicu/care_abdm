@@ -22,6 +22,7 @@ from abdm.service.v3.receipt import (
     RECEIPT_FILE_TYPE,
     RECEIPT_FINGERPRINT_META,
     build_receipt_context,
+    receipt_fingerprint,
 )
 from abdm.service.v3.scan_pay import scan_pay_receipt_token
 from abdm.settings import plugin_settings as abdm_settings
@@ -1059,6 +1060,51 @@ class TestReceipt(ScanPayTestBase):
         self.assertEqual(response.content, STORED_RECEIPT_PDF)
         self.assertEqual(self.put_object.call_count, 1)
         self.assertEqual(self.file_contents.call_count, 1)
+
+    def test_changed_patient_name_rebuilds_the_stored_receipt(self):
+        charge_item = self.create_charge_item()
+        invoice = baker.make(
+            Invoice,
+            facility=self.facility,
+            patient=self.patient,
+            account=self.account,
+            status=InvoiceStatusOptions.balanced.value,
+            total_gross=Decimal(100),
+            number="INV-NAME",
+            charge_items=[charge_item.id],
+            created_by=self.user,
+        )
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            invoice=invoice,
+            order_number="INV-NAME",
+            status=PaymentOrderStatus.SUCCESS,
+        )
+        stored = receipt_fingerprint(order)
+        self.assertEqual(receipt_fingerprint(order), stored)
+
+        response = self.client.get(receipt_path(order))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.put_object.call_count, 1)
+
+        self.patient.name = "Changed Name"
+        self.patient.save(update_fields=["name"])
+        order.abha_number.patient.refresh_from_db()
+        self.assertNotEqual(receipt_fingerprint(order), stored)
+
+        response = self.client.get(receipt_path(order))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.put_object.call_count, 2)
+        self.assertEqual(
+            FileUpload.objects.filter(associating_id=str(order.external_id)).count(),
+            1,
+        )
+
+        response = self.client.get(receipt_path(order))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.put_object.call_count, 2)
 
     def test_receipt_for_cancelled_failed_order(self):
         invoice = baker.make(
