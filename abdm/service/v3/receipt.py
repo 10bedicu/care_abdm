@@ -558,8 +558,8 @@ def receipt_fingerprint(order) -> str:
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def receipt_pdf(order) -> tuple[bytes, str]:
-    """PDF bytes and filename, rendered again when the invoice changed."""
+def receipt_file(order):
+    """Stored receipt, rendered again when the invoice changed."""
     with PaymentOrderLock(order):
         fingerprint = receipt_fingerprint(order)
         file = _current_receipt_file(order)
@@ -567,10 +567,14 @@ def receipt_pdf(order) -> tuple[bytes, str]:
             file is None
             or (file.meta or {}).get(RECEIPT_FINGERPRINT_META) != fingerprint
         ):
-            file, pdf = _store_receipt(order, file, fingerprint)
-            return pdf, file.name
-        _content_type, pdf = file.files_manager.file_contents(file)
-        return pdf, file.name
+            file, _pdf = _store_receipt(order, file, fingerprint)
+        return file
+
+
+def receipt_signed_url(order) -> str:
+    """A short-lived download URL for the stored receipt."""
+    file = receipt_file(order)
+    return file.files_manager.read_signed_url(file, attachment=True)
 
 
 def _current_receipt_file(order):

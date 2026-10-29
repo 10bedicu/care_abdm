@@ -81,7 +81,7 @@ def _store_paid_receipt(payload: dict, transaction_meta: dict | None) -> None:
     """Store the receipt before the PHR is told a payment succeeded.
 
     The receipt link is only present on a paid acknowledgement, which is the
-    moment the app can open it. Opening that link then reads the stored file.
+    moment the app can open it. Opening that link redirects to the stored file.
     A failure here must not block the payment notification.
     """
     acknowledgement = (payload or {}).get("acknowledgement") or {}
@@ -104,10 +104,10 @@ def _store_paid_receipt(payload: dict, transaction_meta: dict | None) -> None:
     if order is None or order.status not in PAYMENT_ORDER_PAID_STATUSES:
         return
     # Imported here: the scan-and-pay service imports this task module.
-    from abdm.service.v3.receipt import receipt_pdf
+    from abdm.service.v3.receipt import receipt_file
 
     try:
-        receipt_pdf(order)
+        receipt_file(order)
     except Exception:
         logger.exception(
             "Could not store the scan-and-pay receipt for order %s",
