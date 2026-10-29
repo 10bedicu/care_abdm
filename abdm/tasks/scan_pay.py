@@ -7,6 +7,7 @@ from django.core.cache import cache
 
 from abdm.models import PaymentOrder, Transaction, TransactionType
 from abdm.models.payment_order import (
+    PAYMENT_ORDER_PAID_STATUSES,
     PAYMENT_ORDER_PENDING_STATUSES,
     PaymentOrderStatus,
 )
@@ -76,8 +77,47 @@ def scan_pay_on_selection(self, payload: dict):
     )
 
 
+def _store_paid_receipt(payload: dict, transaction_meta: dict | None) -> None:
+    """Store the receipt before the PHR is told a payment succeeded.
+
+    The receipt link is only present on a paid acknowledgement, which is the
+    moment the app can open it. Opening that link then reads the stored file.
+    A failure here must not block the payment notification.
+    """
+    acknowledgement = (payload or {}).get("acknowledgement") or {}
+    if not acknowledgement.get("payment_receipt_link"):
+        return
+    order_external_id = (transaction_meta or {}).get("payment_order")
+    if not order_external_id:
+        return
+    order = (
+        PaymentOrder.objects.filter(
+            external_id=order_external_id, invoice__isnull=False
+        )
+        .select_related(
+            "abha_number__patient",
+            "health_facility__facility",
+            "invoice__created_by",
+        )
+        .first()
+    )
+    if order is None or order.status not in PAYMENT_ORDER_PAID_STATUSES:
+        return
+    # Imported here: the scan-and-pay service imports this task module.
+    from abdm.service.v3.receipt import receipt_pdf
+
+    try:
+        receipt_pdf(order)
+    except Exception:
+        logger.exception(
+            "Could not store the scan-and-pay receipt for order %s",
+            order.external_id,
+        )
+
+
 @shared_task(bind=True, max_retries=MAX_RETRIES)
 def scan_pay_notify(self, payload: dict, transaction_meta: dict | None = None):
+    _store_paid_receipt(payload, transaction_meta)
     _call_gateway(self, GatewayService.patient__scan_pay_notify, payload, "notify")
 
     if transaction_meta:

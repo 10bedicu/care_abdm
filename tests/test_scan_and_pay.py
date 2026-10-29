@@ -1227,6 +1227,79 @@ class TestReceipt(ScanPayTestBase):
         self.assertTrue(response.content.startswith(b"%PDF"))
         self.assertTrue(self.put_object.call_args.args[1].startswith(b"%PDF"))
 
+    def test_paid_notify_stores_the_receipt_before_telling_abdm(self):
+        charge_item = self.create_charge_item()
+        invoice = baker.make(
+            Invoice,
+            facility=self.facility,
+            patient=self.patient,
+            account=self.account,
+            status=InvoiceStatusOptions.balanced.value,
+            total_gross=Decimal(100),
+            number="INV-NOTIFY",
+            charge_items=[charge_item.id],
+        )
+        order = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            invoice=invoice,
+            order_number="INV-NOTIFY",
+            status=PaymentOrderStatus.SUCCESS,
+            transaction_id="pay_notify",
+        )
+        payload = {
+            "acknowledgement": scan_pay_service.build_scan_pay_acknowledgement(order),
+            "hip_id": self.health_facility.hf_id,
+        }
+        meta = {
+            "abha_number": str(self.abha_number.external_id),
+            "payment_order": str(order.external_id),
+            "status": order.status,
+        }
+        order_of_calls = []
+        self.put_object.side_effect = lambda *_args, **_kwargs: order_of_calls.append(
+            "store"
+        )
+
+        def gateway(_payload):
+            order_of_calls.append("notify")
+
+        with patch(
+            "abdm.service.v3.gateway.GatewayService.patient__scan_pay_notify",
+            side_effect=gateway,
+        ):
+            scan_pay_tasks.scan_pay_notify(payload, transaction_meta=meta)
+
+        self.assertEqual(order_of_calls, ["store", "notify"])
+        self.assertTrue(
+            FileUpload.objects.filter(
+                associating_id=str(order.external_id),
+                file_type=RECEIPT_FILE_TYPE,
+                upload_completed=True,
+            ).exists()
+        )
+
+        order_of_calls.clear()
+        failed = PaymentOrder.objects.create(
+            open_order_request_id=uuid(),
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            invoice=invoice,
+            order_number="INV-FAIL-NOTIFY",
+            status=PaymentOrderStatus.FAIL,
+        )
+        failed_payload = {
+            "acknowledgement": scan_pay_service.build_scan_pay_acknowledgement(failed),
+            "hip_id": self.health_facility.hf_id,
+        }
+        with patch(
+            "abdm.service.v3.gateway.GatewayService.patient__scan_pay_notify",
+            side_effect=gateway,
+        ):
+            scan_pay_tasks.scan_pay_notify(failed_payload)
+        self.assertEqual(order_of_calls, ["notify"])
+
 
 class TestPaymentProviderRegistry(ScanPayTestBase):
     def make_invoice(self):
