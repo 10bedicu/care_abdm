@@ -54,7 +54,7 @@ class Request:
             )
         except requests.RequestException as e:
             logger.error(f"Error while fetching token: {e}")
-            return None
+            raise
 
         logger.debug(f"Token fetch response status: {response.status_code}")
 
@@ -85,13 +85,22 @@ class Request:
             return {"Authorization": f"Bearer {token}"}
 
         logger.info("Missing session token, fetching new one")
+        network_error = None
         for attempt in range(1, TOKEN_FETCH_ATTEMPTS + 1):
-            token = self._fetch_token()
+            try:
+                token = self._fetch_token()
+            except requests.RequestException as exc:
+                network_error = exc
+                token = None
+            else:
+                network_error = None
             if token:
                 return {"Authorization": f"Bearer {token}"}
             if attempt < TOKEN_FETCH_ATTEMPTS:
                 time.sleep(attempt)
 
+        if network_error is not None:
+            raise network_error
         raise ABDMAPIException(detail="Unable to obtain ABDM session token")
 
     def headers(self, additional_headers=None, auth=None):
