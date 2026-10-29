@@ -540,6 +540,49 @@ class TestSelection(ScanPayTestBase):
         self.assertEqual(charge_item.paid_invoice_id, order.invoice_id)
         self.assertEqual(Invoice.objects.filter(account=self.account).count(), 1)
 
+    @patch("abdm.service.v3.scan_pay.create_scan_pay_payment_link")
+    def test_second_invoice_refuses_an_already_billed_item(self, mock_payment_link):
+        mock_payment_link.return_value = {
+            "order_number": "INV-1",
+            "payment_link_id": "plink_1",
+            "payment_url": "https://rzp.io/1",
+        }
+        charge_item = self.create_charge_item()
+        first = self.create_order()
+        second = self.create_order()
+        items = [charge_item]
+
+        invoice, _payment = scan_pay_service.create_scan_pay_invoice_with_payment_link(
+            items,
+            self.account,
+            self.facility,
+            self.patient,
+            self.abha_number.health_id,
+            first,
+        )
+
+        with self.assertRaises(scan_pay_service.ScanPayItemsUnavailable):
+            scan_pay_service.create_scan_pay_invoice_with_payment_link(
+                items,
+                self.account,
+                self.facility,
+                self.patient,
+                self.abha_number.health_id,
+                second,
+            )
+
+        charge_item.refresh_from_db()
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(Invoice.objects.filter(account=self.account).count(), 1)
+        self.assertEqual(charge_item.status, ChargeItemStatusOptions.billed.value)
+        self.assertEqual(charge_item.paid_invoice_id, invoice.id)
+        self.assertEqual(first.status, PaymentOrderStatus.PAYMENT_INITIATED)
+        self.assertEqual(first.invoice_id, invoice.id)
+        self.assertEqual(second.status, PaymentOrderStatus.OPEN_ORDER_SHARED)
+        self.assertIsNone(second.invoice_id)
+        mock_payment_link.assert_called_once()
+
 
 class TestPaymentNotify(ScanPayTestBase):
     @patch("abdm.tasks.scan_pay.scan_pay_notify.delay")

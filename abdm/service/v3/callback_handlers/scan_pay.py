@@ -5,6 +5,7 @@ from abdm.models.payment_order import PaymentOrderStatus
 from abdm.service.v3.callback_handlers import CallbackProcessingError
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.scan_pay import (
+    ScanPayItemsUnavailable,
     ScanPayPaymentLinkError,
     build_procedures,
     build_scan_pay_acknowledgement,
@@ -158,10 +159,15 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
             order.health_facility.facility,
             order.abha_number.patient,
             abha_address,
+            order,
         )
     except ObjectLocked:
         # propagates to the task which retries shortly after
         raise
+    except ScanPayItemsUnavailable:
+        return send_error(
+            "One or more selected services are no longer available for payment"
+        )
     except ScanPayPaymentLinkError:
         logger.exception(
             f"Failed to create payment link for scan and pay order {open_order_request_id}"
@@ -172,23 +178,6 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
             f"Failed to create invoice for scan and pay order {open_order_request_id}"
         )
         return send_error("Failed to create payment order")
-
-    order.invoice = invoice
-    order.order_number = payment["order_number"]
-    order.payment_link_id = payment["payment_link_id"]
-    order.provider = payment.get("provider", "")
-    order.amount = payment.get("amount")
-    order.status = PaymentOrderStatus.PAYMENT_INITIATED
-    order.save(
-        update_fields=[
-            "invoice",
-            "order_number",
-            "payment_link_id",
-            "provider",
-            "amount",
-            "status",
-        ]
-    )
 
     GatewayService.patient__on_selection(
         {

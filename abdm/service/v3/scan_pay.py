@@ -75,6 +75,10 @@ class ScanPayPaymentLinkError(Exception):
     pass
 
 
+class ScanPayItemsUnavailable(Exception):
+    """A selected charge item was billed by another order before this one."""
+
+
 def get_open_charge_items(patient, facility, service_ids=None):
     queryset = ChargeItem.objects.filter(
         patient=patient,
@@ -124,23 +128,27 @@ def _create_invoice(charge_items, account, facility, patient, abha_address, crea
     with InvoiceCreateLock():
         invoice.number = evaluate_invoice_identifier_default_expression(facility)
         invoice.save()
-    ChargeItem.objects.filter(id__in=invoice.charge_items).update(
-        status=ChargeItemStatusOptions.billed.value, paid_invoice=invoice
-    )
+    charge_item_ids = list(dict.fromkeys(invoice.charge_items))
+    updated = ChargeItem.objects.filter(
+        id__in=charge_item_ids,
+        status=ChargeItemStatusOptions.billable.value,
+    ).update(status=ChargeItemStatusOptions.billed.value, paid_invoice=invoice)
+    if updated != len(charge_item_ids):
+        raise ScanPayItemsUnavailable
     sync_invoice_items(invoice)
     invoice.save()
     return invoice
 
 
 def create_scan_pay_invoice_with_payment_link(
-    charge_items, account, facility, patient, abha_address
+    charge_items, account, facility, patient, abha_address, order: PaymentOrder
 ):
     """
     Invoice the selected charge items and get a payment link for the invoice.
 
-    Runs in one transaction under the account lock: if the gateway does not
-    return a link, the invoice and charge item updates are rolled back so the
-    items stay billable.
+    Runs in one transaction under the account lock. A missing link, or a charge
+    item that is no longer billable, rolls the invoice back so the items stay
+    billable. The order is marked initiated in that same transaction.
     """
     created_by = get_or_create_abdm_user()
     with transaction.atomic(), AccountLock(account):
@@ -151,6 +159,22 @@ def create_scan_pay_invoice_with_payment_link(
             payment = create_scan_pay_payment_link(invoice)
         except Exception as exc:
             raise ScanPayPaymentLinkError(str(exc)) from exc
+        order.invoice = invoice
+        order.order_number = payment["order_number"]
+        order.payment_link_id = payment["payment_link_id"]
+        order.provider = payment.get("provider", "")
+        order.amount = payment.get("amount")
+        order.status = PaymentOrderStatus.PAYMENT_INITIATED
+        order.save(
+            update_fields=[
+                "invoice",
+                "order_number",
+                "payment_link_id",
+                "provider",
+                "amount",
+                "status",
+            ]
+        )
         transaction.on_commit(lambda: rebalance_account_task.delay(account.id))
     return invoice, payment
 
