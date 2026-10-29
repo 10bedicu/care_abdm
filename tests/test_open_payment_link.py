@@ -246,6 +246,30 @@ class TestOpenScanPayPaymentLink(CareAPITestBase):
         order.refresh_from_db()
         self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
 
+    def test_direct_payment_create_is_rejected_before_insert(self):
+        invoice, _item = self.make_invoice()
+        self.open_link(invoice)
+
+        with self.assertRaises(ValidationError):
+            PaymentReconciliation.objects.create(
+                facility=self.facility,
+                account=self.account,
+                target_invoice=invoice,
+                reconciliation_type="payment",
+                status="active",
+                kind="online",
+                issuer_type="patient",
+                outcome="complete",
+                method="cash",
+                tendered_amount=Decimal("100"),
+                returned_amount=Decimal("0"),
+                amount=Decimal("100"),
+            )
+
+        self.assertFalse(
+            PaymentReconciliation.objects.filter(target_invoice=invoice).exists()
+        )
+
     def test_closed_link_allows_cancel(self):
         for status in (
             PaymentOrderStatus.SUCCESS,

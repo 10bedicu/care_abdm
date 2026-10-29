@@ -1,7 +1,7 @@
 import logging
 
 from django.db.models import Sum
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -36,12 +36,17 @@ def as_payment_datetime(value):
     return value
 
 
+@receiver(pre_save, sender=PaymentReconciliation)
+def reject_payment_while_scan_pay_link_is_open(sender, instance, **kwargs):
+    if not instance._state.adding or not instance.target_invoice_id:
+        return
+    ensure_staff_may_edit(instance.target_invoice_id)
+
+
 @receiver(post_save, sender=PaymentReconciliation)
 def notify_scan_pay_payment(sender, instance, created, **kwargs):
     if not created or not instance.target_invoice_id:
         return
-
-    ensure_staff_may_edit(instance.target_invoice_id)
 
     order = (
         PaymentOrder.objects.filter(invoice_id=instance.target_invoice_id)
