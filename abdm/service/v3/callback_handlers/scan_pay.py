@@ -9,6 +9,7 @@ from abdm.service.v3.scan_pay import (
     ScanPayPaymentLinkError,
     build_procedures,
     build_scan_pay_acknowledgement,
+    charge_items_for_selection,
     create_scan_pay_invoice_with_payment_link,
     get_open_charge_items,
     scan_pay_status_error,
@@ -129,22 +130,21 @@ def handle_patient_selection(validated_data: dict, headers: dict):  # noqa: PLR0
     if order.status != PaymentOrderStatus.OPEN_ORDER_SHARED:
         return send_error("Open order has expired; please scan again")
 
-    service_ids = [
-        service.get("serviceId")
-        for procedure in validated_data.get("procedures")
-        for service in procedure.get("services")
+    procedures = validated_data.get("procedures") or []
+    services = [
+        service
+        for procedure in procedures
+        for service in procedure.get("services") or []
     ]
-
-    if not service_ids:
+    if not services:
         return send_error("No services selected")
 
-    charge_items = get_open_charge_items(
+    charge_items = charge_items_for_selection(
         order.abha_number.patient,
         order.health_facility.facility,
-        service_ids=service_ids,
+        procedures,
     )
-
-    if len(charge_items) != len(set(service_ids)):
+    if not charge_items:
         return send_error(
             "One or more selected services are no longer available for payment"
         )

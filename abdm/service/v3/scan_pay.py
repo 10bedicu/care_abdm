@@ -1,6 +1,7 @@
 import logging
 from collections import defaultdict
 from datetime import UTC
+from decimal import Decimal
 from urllib.parse import urlencode
 
 import jwt
@@ -91,6 +92,58 @@ def get_open_charge_items(patient, facility, service_ids=None):
     if service_ids is not None:
         queryset = queryset.filter(external_id__in=service_ids)
     return list(queryset.select_related("account"))
+
+
+def _money(value) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    return Decimal(str(value)).quantize(Decimal("0.01"))
+
+
+def charge_items_for_selection(patient, facility, procedures) -> list | None:
+    """Open charge items a selection refers to.
+
+    ABDM's selection echoes ``serviceId`` from the open order. The sandbox PHR
+    sends that field as null, so a line without an id is matched on the name
+    and amount that were shared. Returns None when a line cannot be matched
+    to exactly one still-open item.
+    """
+    open_items = get_open_charge_items(patient, facility)
+    by_id = {str(item.external_id): item for item in open_items}
+    remaining = {item.id: item for item in open_items}
+    chosen = []
+
+    for procedure in procedures or []:
+        for service in procedure.get("services") or []:
+            item = _match_selected_service(service, by_id, remaining)
+            if item is None:
+                return None
+            remaining.pop(item.id, None)
+            chosen.append(item)
+    return chosen
+
+
+def _match_selected_service(service, by_id, remaining):
+    service_id = str(service.get("serviceId") or "").strip()
+    if service_id:
+        item = by_id.get(service_id)
+        if item is None or item.id not in remaining:
+            return None
+        return item
+
+    name = str(service.get("name") or "").strip()
+    if not name:
+        return None
+    amount = _money(service.get("amount"))
+    matches = [
+        item
+        for item in remaining.values()
+        if str(item.title or "").strip() == name
+        and (amount is None or _money(item.total_price) == amount)
+    ]
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def build_procedures(charge_items):

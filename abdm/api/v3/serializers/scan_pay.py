@@ -53,7 +53,9 @@ class PatientShareOpenOrderSerializer(Serializer):
 class PatientSelectionSerializer(Serializer):
     class ProcedureSerializer(Serializer):
         class ServiceSerializer(Serializer):
-            serviceId = CharField(max_length=100, required=True)
+            serviceId = CharField(
+                max_length=100, required=False, allow_null=True, allow_blank=True
+            )
             name = CharField(max_length=1000, required=False, allow_null=True)
             description = CharField(required=False, allow_blank=True, allow_null=True)
             amount = FloatField(required=False, allow_null=True)

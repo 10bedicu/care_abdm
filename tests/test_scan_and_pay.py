@@ -108,13 +108,14 @@ class ScanPayTestBase(CareAPITestBase):
         amount = kwargs.pop("amount", 100)
         item_status = kwargs.pop("status", ChargeItemStatusOptions.billable.value)
         account = kwargs.pop("account", self.account)
+        title = kwargs.pop("title", "Test Service")
         return baker.make(
             ChargeItem,
             facility=self.facility,
             patient=self.patient,
             account=account,
             status=item_status,
-            title="Test Service",
+            title=title,
             quantity=1,
             total_price=Decimal(amount),
             total_price_components=[
@@ -407,6 +408,54 @@ class TestSelection(ScanPayTestBase):
             payload["payment_bundle"]["payment_url"], "https://rzp.io/test"
         )
         self.assertEqual(payload["payment_bundle"]["amount"], 100.0)
+
+    @patch("abdm.service.v3.scan_pay.create_scan_pay_payment_link")
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    def test_selection_matches_a_line_when_service_id_is_null(
+        self, mock_gateway, mock_payment_link
+    ):
+        mock_payment_link.return_value = {
+            "order_number": "INV-1",
+            "payment_link_id": "plink_test",
+            "payment_url": "https://rzp.io/test",
+        }
+        order = self.create_order()
+        chosen = self.create_charge_item(title="Ibuprofen 400mg Tablet", amount=30)
+        other = self.create_charge_item(title="Ibuprofen 400mg Tablet", amount=50)
+        payload = self.selection_payload(order, [chosen])
+        payload["procedures"][0]["services"][0]["serviceId"] = None
+
+        response = self.post_callback(SELECTION_URL, payload)
+
+        self.assertEqual(response.status_code, 202)
+        order.refresh_from_db()
+        chosen.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(order.status, PaymentOrderStatus.PAYMENT_INITIATED)
+        self.assertEqual(chosen.status, ChargeItemStatusOptions.billed.value)
+        self.assertEqual(other.status, ChargeItemStatusOptions.billable.value)
+        self.assertEqual(
+            mock_gateway.call_args[0][0]["procedures"][0]["services"][0]["service_id"],
+            str(chosen.external_id),
+        )
+
+    @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
+    def test_selection_refuses_an_ambiguous_line_without_service_id(self, mock_gateway):
+        order = self.create_order()
+        first = self.create_charge_item(title="Ibuprofen 400mg Tablet", amount=30)
+        second = self.create_charge_item(title="Ibuprofen 400mg Tablet", amount=30)
+        payload = self.selection_payload(order, [first])
+        payload["procedures"][0]["services"][0]["serviceId"] = None
+
+        handle_patient_selection(payload, {"REQUEST-ID": uuid()})
+
+        order.refresh_from_db()
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertIsNone(order.invoice_id)
+        self.assertEqual(first.status, ChargeItemStatusOptions.billable.value)
+        self.assertEqual(second.status, ChargeItemStatusOptions.billable.value)
+        self.assertIn("error", mock_gateway.call_args[0][0])
 
     @patch("abdm.service.v3.gateway.GatewayService.patient__on_selection")
     def test_selection_rejects_unavailable_items(self, mock_gateway):
