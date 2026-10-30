@@ -10,6 +10,7 @@ from unittest.mock import patch
 import jwt
 import requests
 from abdm.authentication import ABDMAuthentication
+from abdm.service.request import TOKEN_FETCH_ATTEMPTS, Request
 from abdm.settings import plugin_settings as abdm_settings
 from abdm.tasks.link_care_context import (
     RETRY_FOR as LINK_RETRY_FOR,
@@ -96,6 +97,30 @@ class GatewayJwkCacheTests(TestCase):
             self.assertEqual(result, {"sub": "abdm"})
             self.assertEqual(get.call_count, 2)
             self.assertEqual(decode.call_args_list[1].args[1], rotated)
+
+
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "abdm-token-fetch-tests",
+        }
+    }
+)
+class TokenFetchTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    @patch("abdm.service.request.time.sleep")
+    @patch("abdm.service.request.requests.post")
+    def test_last_network_error_is_reraised(self, post, sleep):
+        post.side_effect = requests.ConnectionError("gateway down")
+
+        with self.assertRaises(requests.ConnectionError):
+            Request("https://example.test").auth_header()
+
+        self.assertEqual(post.call_count, TOKEN_FETCH_ATTEMPTS)
+        self.assertEqual(sleep.call_count, TOKEN_FETCH_ATTEMPTS - 1)
 
 
 class RetryScopeTests(TestCase):
