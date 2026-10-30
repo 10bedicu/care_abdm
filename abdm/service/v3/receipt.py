@@ -574,7 +574,7 @@ def receipt_file(order):
 def receipt_signed_url(order) -> str:
     """A short-lived download URL for the stored receipt."""
     file = receipt_file(order)
-    return file.files_manager.read_signed_url(file, attachment=True)
+    return file.files_manager.read_signed_url(file)
 
 
 def _current_receipt_file(order):
