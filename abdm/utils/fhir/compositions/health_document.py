@@ -65,12 +65,18 @@ class HealthDocumentCompositionMixin:
                 ),
             ],
             subject=self._reference(self._patient(patient)),
-            encounter=self._reference(
-                self._encounter(encounter, include_diagnosis=True)
-            )
-            if encounter
-            else None,
-            author=[self._reference(self._practitioner(file.created_by))],
+            encounter=(
+                self._reference(self._encounter(encounter, include_diagnosis=True))
+                if encounter
+                else None
+            ),
+            author=[
+                (
+                    self._reference(self._practitioner(file.created_by))
+                    if file.created_by
+                    else self._reference(self._patient(patient))
+                )
+            ],
         )
 
     def create_health_document_record(

@@ -546,7 +546,7 @@ Key dependencies: `@tanstack/react-query` (server state), `react-hook-form` + `z
 - [src/config.ts](src/config.ts) — currently empty (no static config).
 - Runtime context: `window.__CORE_ENV__.apiUrl` (API base) and
   `__CARE_PLUGIN_RUNTIME__` meta (`faceAuthUrl`, `scanAndShareUrl`,
-  `enforceAbhaNumberLinking`). Auth token read from `localStorage.care_access_token`.
+  `enforceAbhaNumberLinking`, `enableScanPayMarkPaid`, `enableScanPayCancelOrder`). Auth token read from `localStorage.care_access_token`.
 
 ### 4.2 Pluggable Components
 
@@ -728,6 +728,8 @@ Facility configures HF ID → generates per-counter QR (scanAndShareUrl?hf=&coun
 | `ABDM_REQUEST_TIMEOUT` | — | `30` | request timeout (s) |
 | `ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME` | — | `1800` | token TTL (s) |
 | `ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT` | — | `True` | allow unverified ABHA linking |
+| `ABDM_SCAN_AND_PAY_POLLING_ENABLED` | — | `False` | Celery status polling for scan-and-pay orders. Off unless set in the environment |
+| `ABDM_SCAN_AND_PAY_POLLING_INTERVAL` | — | `10` | Polling interval in seconds, used only when polling is enabled |
 | `ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM` | — | `https://care.ohc.network/abha_number` | FHIR identifier system |
 
 ### Frontend runtime meta (`__CARE_PLUGIN_RUNTIME__` / `MetaConfig`)
@@ -737,6 +739,8 @@ Facility configures HF ID → generates per-counter QR (scanAndShareUrl?hf=&coun
 | `enforceAbhaNumberLinking` | Force ABHA linking before proceeding |
 | `scanAndShareUrl` | Base URL embedded in Scan-and-Share QR |
 | `faceAuthUrl` | Face-auth helper URL for ABHA creation |
+| `enableScanPayMarkPaid` | When `true`, show Mark as paid on the Scan & Pay page and the invoice menu. Hidden when omitted or `false`. |
+| `enableScanPayCancelOrder` | When `true`, show Cancel order on the Scan & Pay page and the invoice menu. Hidden when omitted or `false`. |
 
 ---
 
