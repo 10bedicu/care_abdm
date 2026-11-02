@@ -28,14 +28,22 @@ def _get_or_create_abdm_user(apps):
     return user
 
 
-def _get_or_create_identifier_config(apps, *, system, display, created_by):
+def _get_or_create_identifier_config(apps, *, system, display, created_by, use):
     PatientIdentifierConfig = apps.get_model("emr", "PatientIdentifierConfig")
     patient_identifier_config = PatientIdentifierConfig.objects.filter(
         config__system=system,
     ).first()
     if patient_identifier_config:
-        if not patient_identifier_config.config.get("auto_maintained"):
-            patient_identifier_config.config["auto_maintained"] = True
+        config = dict(patient_identifier_config.config or {})
+        changed = False
+        if not config.get("auto_maintained"):
+            config["auto_maintained"] = True
+            changed = True
+        if config.get("use") != use:
+            config["use"] = use
+            changed = True
+        if changed:
+            patient_identifier_config.config = config
             patient_identifier_config.save(update_fields=["config"])
         return patient_identifier_config
 
@@ -44,7 +52,7 @@ def _get_or_create_identifier_config(apps, *, system, display, created_by):
         facility=None,
         created_by=created_by,
         config={
-            "use": "official",
+            "use": use,
             "description": display,
             "required": False,
             "unique": True,
@@ -123,12 +131,14 @@ def backfill_abha_patient_identifiers(apps, schema_editor):
         system=abha_number_system,
         display=abha_number_display,
         created_by=abdm_user,
+        use="official",
     )
     abha_address_config = _get_or_create_identifier_config(
         apps,
         system=abha_address_system,
         display=abha_address_display,
         created_by=abdm_user,
+        use="usual",
     )
 
     patients_to_rebuild = set()
@@ -163,8 +173,7 @@ def backfill_abha_patient_identifiers(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("abdm", "0002_inboundcallback"),
-        ("emr", "0078_merge_20260409_1618"),
+        ("abdm", "0010_paymentorder_status_index"),
     ]
 
     operations = [
