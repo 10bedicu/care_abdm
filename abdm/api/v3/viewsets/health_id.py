@@ -38,8 +38,7 @@ from abdm.service.helper import (
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
-from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
-from abdm.utils.user import get_or_create_abdm_user
+from abdm.utils.patient_identifier import ensure_abha_patient_identifiers
 from care.emr.models.patient import Patient
 from care.security.authorization.base import AuthorizationController
 
@@ -205,23 +204,10 @@ class HealthIdViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        abdm_user = get_or_create_abdm_user()
-
         with transaction.atomic():
             abha_number.patient = patient
             abha_number.save(update_fields=["patient"])
-
-            if abha_number.abha_number:
-                ensure_abdm_patient_identifier(
-                    patient,
-                    system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                    display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                    value=abha_number.abha_number,
-                    created_by=abdm_user,
-                )
-
-            patient.build_instance_identifiers()
-            patient.save()
+            ensure_abha_patient_identifiers(patient, abha_number)
 
         hf_care_contexts = generate_care_contexts_for_existing_data(patient)
 
