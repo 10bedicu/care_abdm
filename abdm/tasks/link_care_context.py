@@ -58,13 +58,18 @@ def enqueue_link_care_context(
 )
 def link_care_context(
     self,
-    reference_id: str,
     patient_external_id: str,
     care_context: dict,
     hf_id: str,
     user_id: int | None = None,
     questionnaire_response_external_id: str | None = None,
+    # Optional, and last, so messages enqueued by an older revision still bind.
+    # Adding a required parameter to a task signature breaks every message already
+    # sitting on the queue at deploy time.
+    reference_id: str | None = None,
 ):
+    # a message from before this parameter existed falls back to the old behaviour
+    reference_id = reference_id or uuid()
     if questionnaire_response_external_id:
         questionnaire_response = QuestionnaireResponse.objects.filter(
             external_id=questionnaire_response_external_id
