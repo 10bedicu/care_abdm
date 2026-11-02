@@ -1,21 +1,44 @@
 import json
 import logging
-from datetime import datetime
 
 import jwt
 import requests
 from django.core.cache import cache
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken
 
 from abdm.service.helper import cm_id, timestamp, uuid
+from abdm.service.v3.scan_pay import scan_pay_receipt_token_matches
 from abdm.settings import plugin_settings as settings
-from care.users.models import User
+from abdm.utils.user import get_or_create_abdm_user
 
 logger = logging.getLogger(__name__)
 
 JWK_CACHE_KEY_PREFIX = "abdm_gateway_jwk"
 JWK_CACHE_TTL = 60 * 60 * 24  # ABDM rotates its signing key rarely
+
+
+class ScanPayReceiptAuthentication(BaseAuthentication):
+    """Authorize the public receipt URL with a query token bound to the order id."""
+
+    def authenticate_header(self, request):
+        # Without this DRF turns AuthenticationFailed into HTTP 403.
+        return "Bearer"
+
+    def authenticate(self, request):
+        order_id = request.parser_context.get("kwargs", {}).get("order_external_id")
+        if not order_id:
+            return None
+
+        token = request.query_params.get("token")
+        if not token:
+            raise AuthenticationFailed("Receipt token is required")
+        if not scan_pay_receipt_token_matches(order_id, token):
+            raise AuthenticationFailed("Invalid receipt token")
+
+        return get_or_create_abdm_user(), token
 
 
 class ABDMAuthentication(JWTAuthentication):
@@ -87,17 +110,4 @@ class ABDMAuthentication(JWTAuthentication):
             raise InvalidToken({"detail": f"Invalid Authorization token: {e}"})
 
     def get_user(self, validated_token):
-        user = User.objects.filter(username=settings.ABDM_USERNAME).first()
-        if not user:
-            password = User.objects.make_random_password()
-            user = User(
-                username=settings.ABDM_USERNAME,
-                email="abdm@ohc.network",
-                password=f"{password}123",
-                gender=3,
-                phone_number="917777777777",
-                verified=True,
-                date_of_birth=datetime.now().date(),
-            )
-            user.save()
-        return user
+        return get_or_create_abdm_user()

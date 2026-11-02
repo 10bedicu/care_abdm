@@ -329,6 +329,29 @@ class PhrWebLoginAbhaSearchResponse(TypedDict):
     mobile: str
 
 
+class PhrWebLoginProfileAbhaProfileBody(TypedDict):
+    x_token: str
+
+
+class PhrWebLoginProfileAbhaProfileResponse(TypedDict):
+    abhaAddress: str
+    abhaNumber: str
+    address: str
+    firstName: str
+    middleName: str
+    lastName: str
+    fullName: str
+    gender: Literal["M", "F", "O"]
+    yearOfBirth: str
+    monthOfBirth: str
+    dayOfBirth: str
+    email: str
+    mobile: str
+    pinCode: str
+    profilePhoto: str
+    stateName: str
+
+
 class ProfileLoginVerifyUserBody(TypedDict):
     abha_number: str
     transaction_id: str
