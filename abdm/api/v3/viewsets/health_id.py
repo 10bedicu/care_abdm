@@ -56,6 +56,76 @@ def mask_abha_number(value):
     return masked + visible
 
 
+def with_cm_id(abha_address):
+    abha_address = (abha_address or "").strip()
+    suffix = f"@{settings.ABDM_CM_ID}"
+    if abha_address.endswith(suffix):
+        return abha_address
+    return f"{abha_address}{suffix}"
+
+
+def abha_login_identifier(login_type, value):
+    value = (value or "").strip()
+    if login_type == "abha-number":
+        # ABDM validates the decrypted loginId as NN-NNNN-NNNN-NNNN. Bare digits
+        # are rejected with {"loginId": "LoginId is invalid"}.
+        digits = "".join(char for char in value if char.isdigit())
+        if len(digits) == 14:
+            return f"{digits[:2]}-{digits[2:6]}-{digits[6:10]}-{digits[10:]}"
+        return value
+    if login_type == "abha-address":
+        return with_cm_id(value)
+    return value
+
+
+def profile_fields_from_account(profile):
+    return {
+        "abha_number": profile.get("ABHANumber"),
+        "health_id": profile.get("preferredAbhaAddress"),
+        "name": profile.get("name"),
+        "first_name": profile.get("firstName"),
+        "middle_name": profile.get("middleName"),
+        "last_name": profile.get("lastName"),
+        "gender": profile.get("gender"),
+        "date_of_birth": validate_and_format_date(
+            profile.get("yearOfBirth"),
+            profile.get("monthOfBirth"),
+            profile.get("dayOfBirth"),
+        ),
+        "address": profile.get("address"),
+        "district": profile.get("districtName"),
+        "state": profile.get("stateName"),
+        "pincode": profile.get("pincode"),
+        "email": profile.get("email") or None,
+        "mobile": profile.get("mobile"),
+        "profile_photo": profile.get("profilePhoto"),
+    }
+
+
+def profile_fields_from_abha_address(profile):
+    return {
+        "abha_number": profile.get("abhaNumber"),
+        "health_id": profile.get("abhaAddress"),
+        "name": profile.get("fullName"),
+        "first_name": profile.get("firstName"),
+        "middle_name": profile.get("middleName"),
+        "last_name": profile.get("lastName"),
+        "gender": profile.get("gender"),
+        "date_of_birth": validate_and_format_date(
+            profile.get("yearOfBirth"),
+            profile.get("monthOfBirth"),
+            profile.get("dayOfBirth"),
+        ),
+        "address": profile.get("address"),
+        "district": None,
+        "state": profile.get("stateName"),
+        "pincode": profile.get("pinCode"),
+        "email": profile.get("email") or None,
+        "mobile": profile.get("mobile"),
+        "profile_photo": profile.get("profilePhoto"),
+    }
+
+
 @extend_schema(tags=["ABDM: Health ID"])
 class HealthIdViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
@@ -682,6 +752,8 @@ class HealthIdViewSet(GenericViewSet):
         elif otp_system == "abdm":
             scope.append("mobile-verify")
 
+        value = abha_login_identifier(type, validated_data.get("value"))
+
         if type == "abha-address":
             scope.insert(0, "abha-address-login")
             result = HealthIdService.phr__web__login__abha__request__otp(
@@ -689,7 +761,7 @@ class HealthIdViewSet(GenericViewSet):
                     "scope": scope,
                     "type": "abha-address",
                     "otp_system": otp_system,
-                    "value": validated_data.get("value"),
+                    "value": value,
                 }
             )
         else:
@@ -698,7 +770,7 @@ class HealthIdViewSet(GenericViewSet):
                 {
                     "scope": scope,
                     "type": type,
-                    "value": validated_data.get("value"),
+                    "value": value,
                     "otp_system": otp_system,
                 }
             )
@@ -742,17 +814,28 @@ class HealthIdViewSet(GenericViewSet):
                 }
             )
 
+            if result.get("authResult") in ("failed", "failure"):
+                return Response(
+                    {
+                        "transaction_id": result.get("txnId") or transaction_id,
+                        "detail": result.get("message"),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            tokens = result.get("tokens") or {}
             login_state.update(
                 {
-                    "txn_id": result.get("txnId"),
-                    "access_token": result.get("token"),
-                    "refresh_token": result.get("refreshToken"),
+                    "txn_id": result.get("txnId") or transaction_id,
+                    "access_token": tokens.get("token"),
+                    "refresh_token": tokens.get("refreshToken"),
                     "requires_user_verification": False,
                     "accounts": [
                         {
                             "abha_number": user.get("abhaNumber"),
                             "preferred_abha_address": user.get("abhaAddress"),
                             "name": user.get("fullName"),
+                            "profile_photo": user.get("profilePhoto"),
                         }
                         for user in (result.get("users") or [])
                     ],
@@ -892,37 +975,25 @@ class HealthIdViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        profile_result = HealthIdService.profile__account({"x_token": access_token})
+        if login_state.get("type") == "abha-address":
+            profile = profile_fields_from_abha_address(
+                HealthIdService.phr__web__login__profile__abha_profile(
+                    {"x_token": access_token}
+                )
+            )
+        else:
+            profile = profile_fields_from_account(
+                HealthIdService.profile__account({"x_token": access_token})
+            )
 
         abha_number = AbhaNumber.objects.filter(
-            Q(health_id=profile_result.get("preferredAbhaAddress"))
-            | (
-                Q(abha_number=profile_result.get("ABHANumber"))
-                & Q(abha_number__isnull=False)
-            )
+            Q(health_id=profile.get("health_id"))
+            | (Q(abha_number=profile.get("abha_number")) & Q(abha_number__isnull=False))
         ).first()
         abha_number, created = AbhaNumber.objects.update_or_create(
             pk=abha_number.pk if abha_number else None,
             defaults={
-                "abha_number": profile_result.get("ABHANumber"),
-                "health_id": profile_result.get("preferredAbhaAddress"),
-                "name": profile_result.get("name"),
-                "first_name": profile_result.get("firstName"),
-                "middle_name": profile_result.get("middleName"),
-                "last_name": profile_result.get("lastName"),
-                "gender": profile_result.get("gender"),
-                "date_of_birth": validate_and_format_date(
-                    profile_result.get("yearOfBirth"),
-                    profile_result.get("monthOfBirth"),
-                    profile_result.get("dayOfBirth"),
-                ),
-                "address": profile_result.get("address"),
-                "district": profile_result.get("districtName"),
-                "state": profile_result.get("stateName"),
-                "pincode": profile_result.get("pincode"),
-                "email": profile_result.get("email"),
-                "mobile": profile_result.get("mobile"),
-                "profile_photo": profile_result.get("profilePhoto"),
+                **profile,
                 "access_token": access_token,
                 "refresh_token": refresh_token,
             },
@@ -951,10 +1022,7 @@ class HealthIdViewSet(GenericViewSet):
     def abha_login__check_auth_methods(self, request):
         validated_data = self.validate_request(request)
 
-        abha_address = validated_data.get("abha_address")
-
-        if not abha_address.endswith(f"@{settings.ABDM_CM_ID}"):
-            abha_address = f"{abha_address}@{settings.ABDM_CM_ID}"
+        abha_address = with_cm_id(validated_data.get("abha_address"))
 
         result = HealthIdService.phr__web__login__abha__search(
             {

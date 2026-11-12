@@ -10,11 +10,13 @@ from pathlib import Path
 
 import segno
 from dateutil.relativedelta import relativedelta
+from django.conf import settings as django_settings
 from django.template.loader import render_to_string
 from django.utils import timezone
 from weasyprint import HTML
 
 from abdm.service.v3.payment_providers.reconciliation import PaymentOrderLock
+from abdm.settings import plugin_settings as settings
 from abdm.utils.user import get_or_create_abdm_user
 from care.emr.models.charge_item import ChargeItem
 from care.emr.models.file_upload import FileUpload
@@ -146,7 +148,7 @@ def build_receipt_context(order) -> dict:
         "generated_on": _format_generated_on(timezone.now()),
         "location": payments[0]["location"] if payments else None,
         "watermark": _watermark(invoice.status),
-        "logo_url": (_ASSETS_DIR / "care_logo.svg").as_uri(),
+        "logo_url": _receipt_logo_url(),
         "font_400": (_ASSETS_DIR / "fonts" / "figtree-400.woff").as_uri(),
         "font_500": (_ASSETS_DIR / "fonts" / "figtree-500.woff").as_uri(),
         "font_600": (_ASSETS_DIR / "fonts" / "figtree-600.woff").as_uri(),
@@ -488,6 +490,35 @@ def _format_generated_on(value) -> str:
         f"{_FULL_MONTHS[local.month - 1]} {_ordinal(local.day)}, {local.year} at "
         f"{_clock(local, padded_hour=False)}"
     )
+
+
+def _bundled_logo_url() -> str:
+    return (_ASSETS_DIR / "care_logo.svg").as_uri()
+
+
+def _receipt_logo_url() -> str:
+    """URI for the receipt logo.
+
+    ``ABDM_SCAN_AND_PAY_RECEIPT_LOGO`` is a filesystem path or an http(s) URL.
+    WeasyPrint embeds SVG, PNG, JPEG, and the other formats it can read. An
+    empty setting uses the bundled Care logo.
+    """
+    configured = (settings.ABDM_SCAN_AND_PAY_RECEIPT_LOGO or "").strip()
+    if not configured:
+        return _bundled_logo_url()
+    if configured.startswith(("http://", "https://")):
+        return configured
+
+    path = Path(configured).expanduser()
+    if not path.is_absolute():
+        path = Path(django_settings.BASE_DIR) / path
+    if not path.is_file():
+        logger.warning(
+            "ABDM_SCAN_AND_PAY_RECEIPT_LOGO %s is not a file; using the bundled logo",
+            configured,
+        )
+        return _bundled_logo_url()
+    return path.resolve().as_uri()
 
 
 def _qr_data_uri(value) -> str:
