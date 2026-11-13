@@ -18,7 +18,7 @@ from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.callback_handlers import CallbackProcessingError
 from abdm.service.v3.gateway import GatewayService
 from abdm.settings import plugin_settings as settings
-from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
+from abdm.utils.patient_identifier import ensure_abha_patient_identifiers
 from abdm.utils.token import get_or_create_scan_and_share_token
 from abdm.utils.user import get_or_create_abdm_user
 from care.emr.locks.billing import PatientCreateLock
@@ -435,23 +435,15 @@ def handle_patient_share(validated_data: dict, headers: dict):
                     abha_number.patient = patient
                     abha_number.save(update_fields=["patient"])
 
-                    if abha_number.abha_number:
-                        abdm_user = get_or_create_abdm_user()
-                        ensure_abdm_patient_identifier(
-                            patient,
-                            system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                            display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                            value=abha_number.abha_number,
-                            created_by=abdm_user,
-                        )
-
-                    patient.build_instance_identifiers()
-                    patient.save()
+                ensure_abha_patient_identifiers(abha_number.patient, abha_number)
 
             transaction.on_commit(lock.release)
         except Exception:
             lock.release()
             raise
+    else:
+        with transaction.atomic():
+            ensure_abha_patient_identifiers(abha_number.patient, abha_number)
 
     patient = abha_number.patient
 
