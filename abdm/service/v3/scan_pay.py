@@ -178,7 +178,7 @@ def _create_invoice(charge_items, account, facility, patient, abha_address, crea
         charge_items=[item.id for item in charge_items],
         created_by=created_by,
     )
-    with InvoiceCreateLock():
+    with InvoiceCreateLock(facility):
         invoice.number = evaluate_invoice_identifier_default_expression(facility)
         invoice.save()
     charge_item_ids = list(dict.fromkeys(invoice.charge_items))
