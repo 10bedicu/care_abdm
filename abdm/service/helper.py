@@ -25,6 +25,9 @@ from care.emr.models.questionnaire import QuestionnaireResponse
 from care.emr.resources.encounter.constants import ClassChoices
 from care.emr.resources.file_upload.spec import FileTypeChoices
 from care.emr.resources.invoice.spec import InvoiceStatusOptions
+from care.emr.resources.questionnaire_response.spec import (
+    QuestionnaireResponseStatusChoices,
+)
 
 
 class ABDMAPIException(APIException):
@@ -172,7 +175,7 @@ def generate_care_contexts_for_existing_data(
         questionnaire_responses = QuestionnaireResponse.objects.filter(
             encounter_id=encounter.id,
             patient_id=patient.id,
-        )
+        ).exclude(status=QuestionnaireResponseStatusChoices.entered_in_error.value)
         for response in questionnaire_responses:
             observations = Observation.objects.filter(
                 questionnaire_response_id=response.id
@@ -242,9 +245,11 @@ def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911
         return create_file_upload_care_context(file_upload)
 
     if model == "questionnaire_response":
-        questionnaire_response = QuestionnaireResponse.objects.filter(
-            external_id=param
-        ).first()
+        questionnaire_response = (
+            QuestionnaireResponse.objects.filter(external_id=param)
+            .exclude(status=QuestionnaireResponseStatusChoices.entered_in_error.value)
+            .first()
+        )
 
         if not questionnaire_response:
             return None

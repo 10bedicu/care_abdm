@@ -11,6 +11,9 @@ from abdm.tasks.process_inbound_callback import LOW_PRIORITY
 from care.emr.models.observation import Observation
 from care.emr.models.patient import Patient
 from care.emr.models.questionnaire import QuestionnaireResponse
+from care.emr.resources.questionnaire_response.spec import (
+    QuestionnaireResponseStatusChoices,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +69,17 @@ def link_care_context(
     questionnaire_response_external_id: str | None = None,
 ):
     if questionnaire_response_external_id:
-        questionnaire_response = QuestionnaireResponse.objects.filter(
-            external_id=questionnaire_response_external_id
-        ).first()
+        questionnaire_response = (
+            QuestionnaireResponse.objects.filter(
+                external_id=questionnaire_response_external_id
+            )
+            .exclude(status=QuestionnaireResponseStatusChoices.entered_in_error.value)
+            .first()
+        )
 
         if not questionnaire_response:
             logger.warning(
-                "LINK_CARE_CONTEXT :: Questionnaire response %s not found, skipping",
+                "LINK_CARE_CONTEXT :: Questionnaire response %s not found or entered in error, skipping",
                 questionnaire_response_external_id,
             )
             return

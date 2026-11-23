@@ -15,7 +15,13 @@ from fhir.resources.R4B.quantity import Quantity
 
 from abdm.utils.fhir.base import cache_profiles
 from care.emr.models.observation import Observation as ObservationModel
-from care.emr.resources.observation.spec import ObservationReadSpec
+from care.emr.resources.observation.spec import ObservationReadSpec, ObservationStatus
+
+OBSERVATION_STATUS_CODE_MAP = {
+    ObservationStatus.final: "final",
+    ObservationStatus.amended: "amended",
+    ObservationStatus.entered_in_error: "entered-in-error",
+}
 
 
 def is_float(value):
@@ -103,7 +109,7 @@ class ObservationMixin:
                 + "</div>",
             ),
             identifier=[Identifier(value=id)],
-            status=observation_spec.status,
+            status=OBSERVATION_STATUS_CODE_MAP.get(observation_spec.status, "unknown"),
             category=[
                 CodeableConcept(
                     coding=[Coding(**observation_spec.category)]

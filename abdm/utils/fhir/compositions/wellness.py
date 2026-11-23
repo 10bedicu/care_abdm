@@ -11,6 +11,7 @@ from care.emr.models.observation import Observation as ObservationModel
 from care.emr.models.questionnaire import (
     QuestionnaireResponse as QuestionnaireResponseModel,
 )
+from care.emr.resources.observation.spec import ObservationStatus
 
 
 class WellnessCompositionMixin:
@@ -19,11 +20,15 @@ class WellnessCompositionMixin:
         questionnaire_response: QuestionnaireResponseModel,
         care_context_id: str,
     ):
-        observations = ObservationModel.objects.filter(
-            questionnaire_response=questionnaire_response,
-        ).filter(
-            Q(main_code__isnull=False) & ~Q(main_code={})
-            | Q(alternate_coding__isnull=False) & ~Q(alternate_coding=[])
+        observations = (
+            ObservationModel.objects.filter(
+                questionnaire_response=questionnaire_response,
+            )
+            .exclude(status=ObservationStatus.entered_in_error.value)
+            .filter(
+                Q(main_code__isnull=False) & ~Q(main_code={})
+                | Q(alternate_coding__isnull=False) & ~Q(alternate_coding=[])
+            )
         )
 
         if not observations:
