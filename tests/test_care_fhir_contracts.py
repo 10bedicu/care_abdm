@@ -2,6 +2,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import patch
 
+from abdm.service.helper import (
+    ABDMAPIException,
+    care_context_dict_from_reference_id,
+    create_questionnaire_response_care_context,
+)
 from abdm.utils.fhir.fhir import Fhir
 from abdm.utils.fhir.resources.encounter import ENCOUNTER_CLASS_CODE_MAP
 from model_bakery import baker
@@ -56,6 +61,9 @@ from care.emr.resources.medication.request.spec import (
 from care.emr.resources.medication.statement.spec import MedicationStatementStatus
 from care.emr.resources.observation.spec import ObservationStatus
 from care.emr.resources.questionnaire.spec import QuestionType, SubjectType
+from care.emr.resources.questionnaire_response.spec import (
+    QuestionnaireResponseStatusChoices,
+)
 from care.emr.resources.service_request.spec import (
     ServiceRequestIntentChoices,
     ServiceRequestPriorityChoices,
@@ -387,3 +395,64 @@ class CareFhirContractTests(CareAPITestBase):
             [item.resource_type for item in compositions],
             ["Composition"] * len(compositions),
         )
+
+    def make_observation(self, status, **kwargs):
+        return baker.make(
+            Observation,
+            patient=self.patient,
+            encounter=self.encounter,
+            status=status,
+            value_type=QuestionType.integer.value,
+            value={"value": "98"},
+            main_code=CODE,
+            subject_type=SubjectType.encounter.value,
+            subject_id=self.encounter.external_id,
+            effective_datetime=care_now(),
+            note="",
+            **kwargs,
+        )
+
+    def test_observation_status_uses_fhir_codes(self):
+        for status, code in [
+            (ObservationStatus.final, "final"),
+            (ObservationStatus.amended, "amended"),
+            (ObservationStatus.entered_in_error, "entered-in-error"),
+        ]:
+            observation = self.make_observation(status.value)
+            self.assertEqual(self.fhir._observation(observation).status, code)
+
+    def test_encounter_compositions_skip_entered_in_error_observations(self):
+        kept = self.make_observation(ObservationStatus.final.value)
+        self.make_observation(ObservationStatus.entered_in_error.value)
+
+        for build in (
+            self.fhir._op_consult_composition,
+            self.fhir._discharge_summary_composition,
+        ):
+            composition = build(self.encounter, "context-1")
+            section = next(
+                s for s in composition.section if s.title == "Physical Examination"
+            )
+            self.assertEqual(
+                [entry.reference for entry in section.entry],
+                [self.fhir._reference(self.fhir._observation(kept)).reference],
+            )
+
+    def test_entered_in_error_questionnaire_response_is_not_shared(self):
+        response = baker.make(
+            QuestionnaireResponse,
+            patient=self.patient,
+            encounter=self.encounter,
+            created_by=self.user,
+            subject_id=self.encounter.external_id,
+            status=QuestionnaireResponseStatusChoices.entered_in_error.value,
+        )
+        self.make_observation(
+            ObservationStatus.entered_in_error.value,
+            questionnaire_response=response,
+        )
+        reference = create_questionnaire_response_care_context(response)["reference"]
+
+        with self.assertRaises(ABDMAPIException):
+            self.fhir._wellness_composition(response, "context-1")
+        self.assertIsNone(care_context_dict_from_reference_id(reference))

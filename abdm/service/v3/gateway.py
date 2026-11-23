@@ -68,6 +68,9 @@ from care.emr.models.file_upload import FileUpload
 from care.emr.models.invoice import Invoice
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.questionnaire import QuestionnaireResponse
+from care.emr.resources.questionnaire_response.spec import (
+    QuestionnaireResponseStatusChoices,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -637,9 +640,13 @@ class GatewayService:
                 model == "questionnaire_response"
                 and HealthInformationType.WELLNESS_RECORD in consent.hi_types
             ):
-                questionnaire_response = QuestionnaireResponse.objects.filter(
-                    external_id=param,
-                ).first()
+                questionnaire_response = (
+                    QuestionnaireResponse.objects.filter(external_id=param)
+                    .exclude(
+                        status=QuestionnaireResponseStatusChoices.entered_in_error.value
+                    )
+                    .first()
+                )
 
                 if not questionnaire_response:
                     continue

@@ -21,6 +21,7 @@ from care.emr.models.medication_statement import (
     MedicationStatement as MedicationStatementModel,
 )
 from care.emr.models.observation import Observation as ObservationModel
+from care.emr.resources.observation.spec import ObservationStatus
 
 from .op_consult import _empty_reason
 
@@ -31,7 +32,9 @@ class DischargeSummaryCompositionMixin:
     ):
         conditions = ConditionModel.objects.filter(encounter=encounter)
         observations = ObservationModel.objects.filter(encounter=encounter).exclude(
-            Q(main_code__isnull=True) | Q(main_code={})
+            Q(main_code__isnull=True)
+            | Q(main_code={})
+            | Q(status=ObservationStatus.entered_in_error.value)
         )
         allergies = AllergyIntoleranceModel.objects.filter(encounter=encounter)
         med_requests = MedicationRequestModel.objects.filter(encounter=encounter)
