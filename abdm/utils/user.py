@@ -16,7 +16,6 @@ def get_or_create_abdm_user():
             "last_name": "User",
             "email": "abdm@ohc.network",
             "phone_number": "917777777777",
-            "verified": True,
         },
     )
     ABDM_USER = user
