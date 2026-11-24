@@ -70,14 +70,16 @@ class HealthInformationTransferTests(CareAPITestBase):
 
         self.assertEqual([entry["careContextReference"] for entry in entries], [GOOD])
         self.assertEqual(result["errored_care_context_references"], [BAD])
+        self.assertEqual(result["skipped_care_context_references"], [])
 
-    def test_skipped_care_context_is_not_reported_as_errored(self):
+    def test_care_context_without_data_is_reported_as_skipped(self):
         result, entries = self.transfer(
             lambda reference, bundle: bundle if reference == GOOD else None
         )
 
         self.assertEqual([entry["careContextReference"] for entry in entries], [GOOD])
         self.assertEqual(result["errored_care_context_references"], [])
+        self.assertEqual(result["skipped_care_context_references"], [BAD])
 
     def test_transfer_fails_when_no_care_context_could_be_built(self):
         def build(reference, bundle):
@@ -87,7 +89,12 @@ class HealthInformationTransferTests(CareAPITestBase):
             self.transfer(build)
         self.post.assert_not_called()
 
-    def notify(self, status, errored, notifier_type="HIP"):
+    def test_transfer_fails_when_there_is_nothing_to_send(self):
+        with self.assertRaises(ABDMAPIException):
+            self.transfer(lambda reference, bundle: None)
+        self.post.assert_not_called()
+
+    def notify(self, status, errored, notifier_type="HIP", skipped=()):
         with patch.object(GatewayService.request, "post") as post:
             post.return_value.status_code = 202
             GatewayService.data_flow__health_information__notify(
@@ -100,6 +107,7 @@ class HealthInformationTransferTests(CareAPITestBase):
                     "status": status,
                     "hip_id": "hip",
                     "errored_care_context_references": errored,
+                    "skipped_care_context_references": list(skipped),
                 }
             )
         responses = post.call_args.args[1]["notification"]["statusNotification"][
@@ -116,6 +124,15 @@ class HealthInformationTransferTests(CareAPITestBase):
             {
                 GOOD: ("DELIVERED", "TRANSFERRED"),
                 BAD: ("ERRORED", "Failed to generate health information"),
+            },
+        )
+
+    def test_notify_reports_skipped_care_contexts_as_errored(self):
+        self.assertEqual(
+            self.notify("TRANSFERRED", [], skipped=[BAD]),
+            {
+                GOOD: ("DELIVERED", "TRANSFERRED"),
+                BAD: ("ERRORED", "No health information found"),
             },
         )
 

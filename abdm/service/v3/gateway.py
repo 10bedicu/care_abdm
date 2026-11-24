@@ -651,6 +651,7 @@ class GatewayService:
 
         entries = []
         errored_care_context_references = []
+        skipped_care_context_references = []
         for care_context in consent.care_contexts:
             try:
                 fhir_data = _care_context_fhir_bundle(care_context, consent)
@@ -665,6 +666,9 @@ class GatewayService:
                 continue
 
             if not fhir_data:
+                skipped_care_context_references.append(
+                    care_context.get("careContextReference")
+                )
                 continue
 
             logger.info(
@@ -680,9 +684,9 @@ class GatewayService:
             }
             entries.append(entry)
 
-        if not entries and errored_care_context_references:
+        if not entries:
             raise ABDMAPIException(
-                detail="Failed to generate health information for the requested care contexts"
+                detail="No health information could be generated for the requested care contexts"
             )
 
         logger.info(
@@ -735,7 +739,10 @@ class GatewayService:
             },
         )
 
-        return {"errored_care_context_references": errored_care_context_references}
+        return {
+            "errored_care_context_references": errored_care_context_references,
+            "skipped_care_context_references": skipped_care_context_references,
+        }
 
     @staticmethod
     def data_flow__health_information__notify(
@@ -749,6 +756,7 @@ class GatewayService:
         succeeded = data.get("status") in ("TRANSFERRED", "RECEIVED")
         success_hi_status = "OK" if data.get("notifier__type") == "HIU" else "DELIVERED"
         errored = set(data.get("errored_care_context_references") or [])
+        skipped = set(data.get("skipped_care_context_references") or [])
 
         status_responses = []
         for care_context in consent.care_contexts or []:
@@ -756,6 +764,9 @@ class GatewayService:
             if succeeded and reference in errored:
                 hi_status = "ERRORED"
                 description = "Failed to generate health information"
+            elif succeeded and reference in skipped:
+                hi_status = "ERRORED"
+                description = "No health information found"
             else:
                 hi_status = success_hi_status if succeeded else "ERRORED"
                 description = data.get("status")

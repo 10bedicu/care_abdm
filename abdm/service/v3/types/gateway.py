@@ -103,6 +103,7 @@ class DataFlowHealthInformationTransferBody(TypedDict):
 
 class DataFlowHealthInformationTransferResponse(TypedDict):
     errored_care_context_references: list[str]
+    skipped_care_context_references: list[str]
 
 
 class DataFlowHealthInformationNotifyBody(TypedDict):
@@ -114,6 +115,7 @@ class DataFlowHealthInformationNotifyBody(TypedDict):
     status: Literal["TRANSFERRED", "RECEIVED", "FAILED"]
     hip_id: str
     errored_care_context_references: NotRequired[list[str]]
+    skipped_care_context_references: NotRequired[list[str]]
 
 
 class DataFlowHealthInformationNotifyResponse(TypedDict):
