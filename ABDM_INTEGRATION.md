@@ -34,6 +34,8 @@
 5. [End-to-End Flows](#5-end-to-end-flows)
 6. [Configuration Reference](#6-configuration-reference)
 7. [Glossary](#7-glossary)
+8. [Known Gaps](#8-known-gaps)
+   - [8.1 Health Information Push Format](#81-health-information-push-format)
 
 ---
 
@@ -380,6 +382,7 @@ The `Request` class is the single outbound HTTP wrapper:
   - `create_questionnaire_response_care_context()`
   - `create_diagnostic_report_care_context()`
   - `create_invoice_care_context()`
+  - `create_immunization_care_context()`
   - `generate_care_contexts_for_existing_data(patient, hf_id)` — full back-scan of a
     patient's records.
 
@@ -418,6 +421,7 @@ The mapping used in `data_flow__health_information__transfer()`:
 | `questionnaire_response` | `QuestionnaireResponse` | `create_wellness_record()` |
 | `diagnostic_report` | `DiagnosticReport` | `create_diagnostic_report_record()` |
 | `invoice` | `Invoice` | `create_invoice_record()` |
+| `immunization` | `Immunization` | `create_immunization_record()` |
 
 #### `HealthIdService` — [abdm/service/v3/health_id.py](abdm/service/v3/health_id.py)
 
@@ -474,7 +478,8 @@ Fidelius for `ConsentArtefact` key material: `generate_key_pair()`, `encrypt()` 
 
 `create_prescription_record`, `create_op_consult_record`,
 `create_discharge_summary_record`, `create_health_document_record`,
-`create_wellness_record`, `create_diagnostic_report_record`, `create_invoice_record`.
+`create_wellness_record`, `create_diagnostic_report_record`, `create_invoice_record`,
+`create_immunization_record`.
 
 ### 3.10 Signals (Auto Care-Context Linking)
 
@@ -490,6 +495,7 @@ records become discoverable without manual steps:
 | `post_save` | `QuestionnaireResponse` | questionnaire filled |
 | `post_save` | `DiagnosticReport` | report created |
 | `post_save` | `Invoice` | non-draft invoice issued |
+| `pre_save` | `Immunization` | dose recorded as `completed` / `not_done`, or a draft finalised |
 
 Each receiver checks that the patient has an ABHA and the encounter's facility is a
 **registered HIP**, then calls `GatewayService.link__carecontext()` inside
@@ -756,3 +762,43 @@ Facility configures HF ID → generates per-counter QR (scanAndShareUrl?hf=&coun
 - **Fidelius** — ABDM's reference ECDH(Curve25519)+AES-256-GCM crypto scheme.
 - **Scan & Share** — QR-based token onboarding at the registration desk.
 - **RD Service** — local Registered Device (port 11100) for biometric capture.
+
+---
+
+## 8. Known Gaps
+
+### 8.1 Health Information Push Format
+
+ABDM's rules for pushing records to the HIU's `dataPushUrl` are in the ABDM
+developer docs at
+`/docs/hiecm/v3/api/m2/endpoints/m2-callbacks/10-m2-post-health-information-transfer#m2-on-data-notification`.
+
+**HIP (sending)** — `GatewayService.data_flow__health_information__transfer`
+in `abdm/service/v3/gateway.py`:
+
+| ABDM rule | Current behaviour |
+| --- | --- |
+| One entry per page, with `pageNumber` / `pageCount` | Every care context on one page (`1` of `1`) |
+| Fresh `keyMaterial` and nonce for every page | One key pair and nonce for the whole transfer |
+| `checksum` is the hex MD5 of the entry's content before encryption | `checksum` is `""` |
+
+Fix: send one POST per care context with a fresh `Cipher`, set the MD5
+checksum, and when one page's POST fails, report that care context as
+`ERRORED` in the notify while still sending the remaining pages.
+
+**HIU (receiving)** — must ship with the HIP change, because one care context
+per page exposes these:
+
+- **Viewer shows only the last page.** `HealthInformationViewSet.retrieve` in
+  `abdm/api/viewsets/health_information.py` reads every page file but returns
+  `json.loads(content)`, the last file read. A multi-record fetch would show
+  one record.
+- **Notify fires on every page.** `handle_health_information_transfer` in
+  `abdm/service/v3/callback_handlers/hiu.py` sends `RECEIVED` after each page.
+  ABDM: collect every page up to `pageCount` before reporting, so notify once
+  after the last page.
+- **No failure notify.** A page that fails to decrypt raises and nothing is
+  reported to ABDM; it should send a `FAILED` notify.
+
+This changes what goes over the wire, so verify it against the ABDM sandbox
+before release.

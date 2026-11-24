@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 
 from fhir.resources.R4B.address import Address
+from fhir.resources.R4B.codeableconcept import CodeableConcept
+from fhir.resources.R4B.coding import Coding
 from fhir.resources.R4B.contactpoint import ContactPoint
 from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
@@ -75,7 +77,22 @@ class PatientMixin:
                 + "".join(patient_div_parts)
                 + "</div>",
             ),
-            identifier=[Identifier(value=id)],
+            # NRCES Patient requires identifier.type; the value is CARE's patient id
+            identifier=[
+                Identifier(
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                                code="MR",
+                                display="Medical record number",
+                            )
+                        ],
+                        text="Medical record number",
+                    ),
+                    value=id,
+                )
+            ],
             name=[HumanName(text=patient_spec.name)],
             telecom=[
                 *(

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 from importlib import import_module
@@ -18,6 +18,7 @@ from care.emr.models.allergy_intolerance import AllergyIntolerance
 from care.emr.models.condition import Condition
 from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.file_upload import FileUpload
+from care.emr.models.immunisation import Immunization, ImmunizationRecommendation
 from care.emr.models.invoice import Invoice
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.medication_statement import MedicationStatement
@@ -54,6 +55,13 @@ from care.emr.resources.condition.spec import (
 from care.emr.resources.diagnostic_report.spec import DiagnosticReportStatusChoices
 from care.emr.resources.encounter.constants import ClassChoices
 from care.emr.resources.file_upload.spec import FileCategoryChoices, FileTypeChoices
+from care.emr.resources.immunisation.immunization import (
+    ImmunizationReason,
+    ImmunizationStatus,
+)
+from care.emr.resources.immunisation.recommendation import (
+    ImmunizationRecommendationForecastStatus,
+)
 from care.emr.resources.invoice.spec import InvoiceStatusOptions
 from care.emr.resources.medication.request.spec import (
     MedicationRequestCategory,
@@ -82,12 +90,20 @@ CODE = {
     "display": "Fever",
 }
 
+VACCINE = {
+    "system": "http://snomed.info/sct",
+    "code": "1119305005",
+    "display": "COVID-19 antigen vaccine",
+}
+
 FHIR_RESOURCE_MODULES = [
     "allergy_intolerance",
     "charge_item",
     "condition",
     "diagnostic_report",
     "encounter",
+    "immunization",
+    "immunization_recommendation",
     "invoice",
     "medication_request",
     "medication_statement",
@@ -151,6 +167,7 @@ class CareFhirContractTests(CareAPITestBase):
 
         self.assertEqual(patient.resource_type, "Patient")
         self.assertEqual(patient.name[0].text, self.patient.name)
+        self.assertEqual(patient.identifier[0].type.coding[0].code, "MR")
         self.assertEqual(organization.resource_type, "Organization")
         self.assertEqual(organization.name, self.facility.name)
         self.assertEqual(practitioner.resource_type, "Practitioner")
@@ -330,6 +347,137 @@ class CareFhirContractTests(CareAPITestBase):
         self.assertEqual(invoiced.resource_type, "Invoice")
         self.assertEqual(invoiced.totalGross.value, 100.0)
 
+    def make_immunization(self, **kwargs):
+        return baker.make(
+            Immunization,
+            **{
+                "patient": self.patient,
+                "encounter": self.encounter,
+                "facility": self.facility,
+                "created_by": self.user,
+                "status": ImmunizationStatus.completed.value,
+                "code": VACCINE,
+                "primary_source": True,
+                "occurrence": care_now(),
+                **kwargs,
+            },
+        )
+
+    def make_recommendation(self, **kwargs):
+        return baker.make(
+            ImmunizationRecommendation,
+            **{
+                "patient": self.patient,
+                "codes": [VACCINE],
+                "forecast_status": ImmunizationRecommendationForecastStatus.due.value,
+                "is_group": False,
+                **kwargs,
+            },
+        )
+
+    def test_immunization_record_carries_the_dose_and_due_recommendations(self):
+        given = self.make_recommendation(
+            forecast_status=ImmunizationRecommendationForecastStatus.complete.value,
+            series="Primary",
+            dose_number="1",
+            series_number="2",
+            diseases=[CODE],
+        )
+        next_dose = self.make_recommendation(
+            series="Primary",
+            dose_number="2",
+            series_number="2",
+            due_date=care_now().date() + timedelta(days=28),
+        )
+        self.make_recommendation(
+            forecast_status=ImmunizationRecommendationForecastStatus.immune.value
+        )
+        self.make_recommendation(is_group=True, codes=[])
+        product = baker.make(
+            "emr.Product",
+            facility=self.facility,
+            batch={"lot_number": "LOT-42"},
+            product_knowledge=baker.make("emr.ProductKnowledge", name="Covishield"),
+        )
+        immunization = self.make_immunization(
+            recommendation=given,
+            product=product,
+            administered_by=self.user,
+            dose_quantity={
+                "value": "0.5",
+                "unit": {
+                    "system": "http://unitsofmeasure.org",
+                    "code": "mL",
+                    "display": "milliliter",
+                },
+            },
+        )
+
+        composition = self.fhir._immunization_record_composition(
+            immunization, "context-1"
+        )
+        dose = self.fhir._immunization(immunization)
+        forecast = next(
+            profile
+            for profile in self.fhir.cached_profiles()
+            if profile.resource_type == "ImmunizationRecommendation"
+        )
+
+        self.assertEqual(composition.type.coding[0].code, "41000179103")
+        self.assertEqual(
+            [(entry.type, entry.reference) for entry in composition.section[0].entry],
+            [
+                ("Immunization", self.fhir._reference(dose).reference),
+                (
+                    "ImmunizationRecommendation",
+                    self.fhir._reference(forecast).reference,
+                ),
+            ],
+        )
+        self.assertEqual(dose.status, "completed")
+        self.assertEqual(dose.vaccineCode.coding[0].code, VACCINE["code"])
+        self.assertEqual(dose.lotNumber, "LOT-42")
+        self.assertEqual(dose.extension[0].valueString, "Covishield")
+        self.assertEqual(dose.doseQuantity.value, Decimal("0.5"))
+        self.assertEqual(dose.performer[0].function.coding[0].code, "AP")
+        self.assertEqual(
+            (
+                dose.protocolApplied[0].doseNumberPositiveInt,
+                dose.protocolApplied[0].seriesDosesPositiveInt,
+                dose.protocolApplied[0].targetDisease[0].coding[0].code,
+            ),
+            (1, 2, CODE["code"]),
+        )
+        [recommended] = forecast.recommendation
+        self.assertEqual(recommended.forecastStatus.coding[0].code, "due")
+        self.assertEqual(recommended.doseNumberPositiveInt, 2)
+        self.assertEqual(
+            [
+                (criterion.code.coding[0].code, criterion.value)
+                for criterion in recommended.dateCriterion
+            ],
+            [("30980-7", next_dose.due_date)],
+        )
+
+    def test_not_done_immunization_carries_its_reason(self):
+        immunization = self.make_immunization(
+            status=ImmunizationStatus.not_done.value,
+            reason=ImmunizationReason.PATOBJ.value,
+            note="<refused>",
+        )
+
+        composition = self.fhir._immunization_record_composition(
+            immunization, "context-1"
+        )
+        dose = self.fhir._immunization(immunization)
+
+        self.assertEqual(dose.status, "not-done")
+        self.assertEqual(dose.statusReason.coding[0].code, "PATOBJ")
+        self.assertIn("&lt;refused&gt;", dose.text.div)
+        self.assertEqual(
+            [entry.type for entry in composition.section[0].entry], ["Immunization"]
+        )
+
     def test_compositions_build_from_care_records(self):
         condition = baker.make(
             Condition,
@@ -431,6 +579,9 @@ class CareFhirContractTests(CareAPITestBase):
             self.fhir._diagnostic_report_composition(report, context),
             self.fhir._invoice_record_composition(invoice, context),
             self.fhir._health_document_composition(upload, context),
+            self.fhir._immunization_record_composition(
+                self.make_immunization(), context
+            ),
         ]
 
         self.assertTrue(condition.id)

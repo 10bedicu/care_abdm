@@ -3,9 +3,11 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from abdm.service.helper import (
+    SHAREABLE_IMMUNIZATION_STATUSES,
     create_diagnostic_report_care_context,
     create_encounter_care_context,
     create_file_upload_care_context,
+    create_immunization_care_context,
     create_invoice_care_context,
     create_medication_request_care_context,
     create_questionnaire_response_care_context,
@@ -15,10 +17,12 @@ from abdm.tasks.link_care_context import enqueue_link_care_context
 from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
+from care.emr.models.immunisation import Immunization
 from care.emr.models.invoice import Invoice
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.questionnaire import QuestionnaireResponse
 from care.emr.resources.file_upload.spec import FileTypeChoices
+from care.emr.resources.immunisation.immunization import ImmunizationStatus
 from care.emr.resources.invoice.spec import InvoiceStatusOptions
 
 
@@ -188,6 +192,39 @@ def create_care_context_on_invoice_issue(sender, instance: Invoice, **kwargs):
         lambda: enqueue_link_care_context(
             patient_external_id=str(patient.external_id),
             care_context=create_invoice_care_context(instance),
+            hf_id=hf_id,
+            user_id=instance.created_by_id,
+        )
+    )
+
+
+@receiver(pre_save, sender=Immunization)
+def create_care_context_on_immunization_record(
+    sender, instance: Immunization, **kwargs
+):
+    if instance.status not in SHAREABLE_IMMUNIZATION_STATUSES:
+        return
+
+    # Link only when the record first becomes shareable: on creation, or when a draft is finalised. Later edits keep the care context linked earlier.
+    if instance.pk:
+        previous_status = (
+            sender.objects.filter(pk=instance.pk)
+            .values_list("status", flat=True)
+            .first()
+        )
+        if previous_status not in (None, ImmunizationStatus.draft.value):
+            return
+
+    patient = instance.patient
+    hf_id = hf_id_from_encounter(instance.encounter)
+
+    if not patient or not hf_id or getattr(patient, "abha_number", None) is None:
+        return
+
+    transaction.on_commit(
+        lambda: enqueue_link_care_context(
+            patient_external_id=str(patient.external_id),
+            care_context=create_immunization_care_context(instance),
             hf_id=hf_id,
             user_id=instance.created_by_id,
         )
