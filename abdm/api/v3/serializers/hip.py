@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC
 
 from rest_framework.serializers import (
     CharField,
@@ -10,6 +10,7 @@ from rest_framework.serializers import (
     Serializer,
     URLField,
     UUIDField,
+    ValidationError,
 )
 
 from abdm.models import (
@@ -118,19 +119,16 @@ class ConsentRequestHipNotifySerializer(Serializer):
 
             class PermissionSerializer(Serializer):
                 class DateRangeSerializer(Serializer):
-                    fromTime = DateTimeField(source="from", required=True)
-                    toTime = DateTimeField(source="to", required=True)
+                    fromTime = DateTimeField(
+                        source="from", required=True, default_timezone=UTC
+                    )
+                    toTime = DateTimeField(
+                        source="to", required=True, default_timezone=UTC
+                    )
 
                     def to_internal_value(self, data):
                         return super().to_internal_value(
-                            {
-                                "fromTime": datetime.strptime(
-                                    data.get("from"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                                ).replace(tzinfo=UTC),
-                                "toTime": datetime.strptime(
-                                    data.get("to"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                                ).replace(tzinfo=UTC),
-                            }
+                            {"fromTime": data.get("from"), "toTime": data.get("to")}
                         )
 
                 class FrequencySerializer(Serializer):
@@ -140,6 +138,7 @@ class ConsentRequestHipNotifySerializer(Serializer):
 
                 accessMode = ChoiceField(choices=AccessMode.choices, required=True)
                 dateRange = DateRangeSerializer(required=True)
+                dataEraseAt = DateTimeField(required=True, default_timezone=UTC)
                 frequency = FrequencySerializer(required=True)
 
             schemaVersion = CharField(max_length=50, required=True)
@@ -158,8 +157,15 @@ class ConsentRequestHipNotifySerializer(Serializer):
 
         status = ChoiceField(choices=Status.choices, required=True)
         consentId = UUIDField(required=True)
-        consentDetail = ConsentDetailSerializer(required=True)
-        signature = CharField(max_length=500, required=True)
+        consentDetail = ConsentDetailSerializer(required=False)
+        signature = CharField(max_length=500, required=False, allow_null=True)
+
+        def validate(self, attrs):
+            if attrs.get("status") == Status.GRANTED and not attrs.get("consentDetail"):
+                raise ValidationError(
+                    {"consentDetail": "Required when the consent is granted"}
+                )
+            return attrs
 
     notification = NotificationSerializer(required=True)
 
@@ -170,19 +176,12 @@ class HipHealthInformationRequestSerializer(Serializer):
             id = UUIDField(required=True)
 
         class DateRangeSerializer(Serializer):
-            fromTime = DateTimeField(source="from", required=True)
-            toTime = DateTimeField(source="to", required=True)
+            fromTime = DateTimeField(source="from", required=True, default_timezone=UTC)
+            toTime = DateTimeField(source="to", required=True, default_timezone=UTC)
 
             def to_internal_value(self, data):
                 return super().to_internal_value(
-                    {
-                        "fromTime": datetime.strptime(
-                            data.get("from"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                        ).replace(tzinfo=UTC),
-                        "toTime": datetime.strptime(
-                            data.get("to"), "%Y-%m-%dT%H:%M:%S.%fZ"
-                        ).replace(tzinfo=UTC),
-                    }
+                    {"fromTime": data.get("from"), "toTime": data.get("to")}
                 )
 
         class KeyMaterialSerializer(Serializer):

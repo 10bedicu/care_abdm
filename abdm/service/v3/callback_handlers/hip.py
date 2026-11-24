@@ -13,6 +13,7 @@ from abdm.models import (
     TransactionStatus,
     TransactionType,
 )
+from abdm.models.base import Status
 from abdm.models.consent import ConsentArtefact
 from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.callback_handlers import CallbackProcessingError
@@ -29,6 +30,7 @@ from care.emr.resources.patient.spec import GenderChoices
 from care.emr.resources.patient_identifier.default_expression_evaluator import (
     evaluate_patient_instance_default_values,
 )
+from care.utils.time_util import care_now
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +213,25 @@ def handle_consent_request_hip_notify(validated_data: dict, headers: dict):
     # TODO: handle the case where hip/notify is called before hip/on-init
 
     notification = validated_data.get("notification")
+
+    if notification.get("status") != Status.GRANTED:
+        if not ConsentArtefact.objects.filter(
+            consent_id=notification.get("consentId")
+        ).update(status=notification.get("status")):
+            logger.warning(
+                "Consent %s was %s but is not known to this HIP",
+                notification.get("consentId"),
+                notification.get("status"),
+            )
+
+        GatewayService.consent__request__hip__on_notify(
+            {
+                "consent_id": str(notification.get("consentId")),
+                "request_id": headers.get("REQUEST-ID"),
+            }
+        )
+        return
+
     consent_detail = notification.get("consentDetail")
     permission = consent_detail.get("permission")
     frequency = permission.get("frequency")
@@ -234,8 +255,8 @@ def handle_consent_request_hip_notify(validated_data: dict, headers: dict):
             "cm": consent_detail.get("consentManager").get("id"),
             "requester": get_or_create_abdm_user(),
             "access_mode": permission.get("accessMode"),
-            "from_time": permission.get("dateRange").get("fromTime"),
-            "to_time": permission.get("dateRange").get("toTime"),
+            "from_time": permission.get("dateRange").get("from"),
+            "to_time": permission.get("dateRange").get("to"),
             "expiry": permission.get("dataEraseAt"),
             "frequency_unit": frequency.get("unit"),
             "frequency_value": frequency.get("value"),
@@ -252,6 +273,29 @@ def handle_consent_request_hip_notify(validated_data: dict, headers: dict):
     )
 
 
+def _health_information_request_error(consent: ConsentArtefact, date_range: dict):
+    if consent.status == Status.EXPIRED or (
+        consent.expiry and consent.expiry <= care_now()
+    ):
+        return {
+            "code": "ABDM-1112",
+            "message": "Invalid or already expired consent artefact id",
+        }
+
+    if consent.status != Status.GRANTED:
+        return {"code": "ABDM-1062", "message": "Consent Not granted"}
+
+    requested_from, requested_to = date_range.get("from"), date_range.get("to")
+    if (
+        requested_from > requested_to
+        or (consent.from_time and requested_from < consent.from_time)
+        or (consent.to_time and requested_to > consent.to_time)
+    ):
+        return {"code": "ABDM-1063", "message": "Date Range given is invalid"}
+
+    return None
+
+
 def handle_health_information_request(validated_data: dict, headers: dict):
     hi_request = validated_data.get("hiRequest")
     key_material = hi_request.get("keyMaterial")
@@ -265,12 +309,24 @@ def handle_health_information_request(validated_data: dict, headers: dict):
             f"Consent with ID: {hi_request.get('consent').get('id')} not found in the database"
         )
 
+    error = _health_information_request_error(consent, hi_request.get("dateRange"))
+
     GatewayService.data_flow__health_information__hip__on_request(
         {
             "request_id": headers.get("REQUEST-ID"),
             "transaction_id": str(validated_data.get("transactionId")),
+            "error": error,
         }
     )
+
+    if error:
+        logger.warning(
+            "Refused health information request %s for consent %s: %s",
+            validated_data.get("transactionId"),
+            consent.consent_id,
+            error["message"],
+        )
+        return
 
     try:
         transfer = GatewayService.data_flow__health_information__transfer(
@@ -278,6 +334,7 @@ def handle_health_information_request(validated_data: dict, headers: dict):
                 "transaction_id": str(validated_data.get("transactionId")),
                 "consent": consent,
                 "url": hi_request.get("dataPushUrl"),
+                "date_range": hi_request.get("dateRange"),
                 "key_material__crypto_algorithm": key_material.get("cryptoAlg"),
                 "key_material__curve": key_material.get("curve"),
                 "key_material__public_key": key_material.get("dhPublicKey").get(

@@ -5,6 +5,7 @@ from typing import Any
 
 import requests
 from django.core.cache import cache
+from django.db.models import Q
 
 from abdm.models import HealthInformationType, Purpose, Transaction, TransactionType
 from abdm.models.transaction import TransactionStatus
@@ -71,13 +72,26 @@ from care.emr.models.questionnaire import QuestionnaireResponse
 from care.emr.resources.questionnaire_response.spec import (
     QuestionnaireResponseStatusChoices,
 )
+from care.utils.time_util import care_now
 
 logger = logging.getLogger(__name__)
 
 
-def _care_context_fhir_bundle(care_context: dict, consent):  # noqa: PLR0911
+def _encounter_in_range(encounter: Encounter, date_range: dict) -> bool:
+    period = encounter.period or {}
+    start = (
+        datetime.fromisoformat(period["start"])
+        if period.get("start")
+        else encounter.created_date
+    )
+    end = datetime.fromisoformat(period["end"]) if period.get("end") else care_now()
+    return start <= date_range["to"] and end >= date_range["from"]
+
+
+def _care_context_fhir_bundle(care_context: dict, consent, date_range: dict):  # noqa: PLR0911
     care_context_reference = care_context.get("careContextReference", "")
     patient_reference = care_context.get("patientReference", "")
+    requested_range = (date_range["from"], date_range["to"])
 
     if "::" not in care_context_reference:
         care_context_reference = f"v0::consultation::{care_context_reference}"
@@ -94,6 +108,7 @@ def _care_context_fhir_bundle(care_context: dict, consent):  # noqa: PLR0911
     ):
         medication_requests = MedicationRequest.objects.filter(
             created_date__date=param,
+            created_date__range=requested_range,
             patient__external_id=patient_reference,
         )
         if not medication_requests.exists():
@@ -105,20 +120,26 @@ def _care_context_fhir_bundle(care_context: dict, consent):  # noqa: PLR0911
         and HealthInformationType.OP_CONSULTATION in consent.hi_types
     ):
         encounter = Encounter.objects.filter(external_id=param).first()
-        return Fhir().create_op_consult_record(encounter) if encounter else None
+        if not encounter or not _encounter_in_range(encounter, date_range):
+            return None
+        return Fhir().create_op_consult_record(encounter)
 
     if (
         model == "encounter"
         and HealthInformationType.DISCHARGE_SUMMARY in consent.hi_types
     ):
         encounter = Encounter.objects.filter(external_id=param).first()
-        return Fhir().create_discharge_summary_record(encounter) if encounter else None
+        if not encounter or not _encounter_in_range(encounter, date_range):
+            return None
+        return Fhir().create_discharge_summary_record(encounter)
 
     if (
         model == "file_upload"
         and HealthInformationType.RECORD_ARTIFACT in consent.hi_types
     ):
-        file_upload = FileUpload.objects.filter(external_id=param).first()
+        file_upload = FileUpload.objects.filter(
+            external_id=param, created_date__range=requested_range
+        ).first()
         return (
             Fhir().create_health_document_record(file_upload) if file_upload else None
         )
@@ -128,7 +149,9 @@ def _care_context_fhir_bundle(care_context: dict, consent):  # noqa: PLR0911
         and HealthInformationType.WELLNESS_RECORD in consent.hi_types
     ):
         questionnaire_response = (
-            QuestionnaireResponse.objects.filter(external_id=param)
+            QuestionnaireResponse.objects.filter(
+                external_id=param, created_date__range=requested_range
+            )
             .exclude(status=QuestionnaireResponseStatusChoices.entered_in_error.value)
             .first()
         )
@@ -142,7 +165,9 @@ def _care_context_fhir_bundle(care_context: dict, consent):  # noqa: PLR0911
         model == "diagnostic_report"
         and HealthInformationType.DIAGNOSTIC_REPORT in consent.hi_types
     ):
-        diagnostic_report = DiagnosticReport.objects.filter(external_id=param).first()
+        diagnostic_report = DiagnosticReport.objects.filter(
+            external_id=param, created_date__range=requested_range
+        ).first()
         return (
             Fhir().create_diagnostic_report_record(diagnostic_report)
             if diagnostic_report
@@ -150,7 +175,14 @@ def _care_context_fhir_bundle(care_context: dict, consent):  # noqa: PLR0911
         )
 
     if model == "invoice" and HealthInformationType.INVOICE in consent.hi_types:
-        invoice = Invoice.objects.filter(external_id=param).first()
+        invoice = (
+            Invoice.objects.filter(external_id=param)
+            .filter(
+                Q(issue_date__range=requested_range)
+                | Q(issue_date__isnull=True, modified_date__range=requested_range)
+            )
+            .first()
+        )
         return Fhir().create_invoice_record(invoice) if invoice else None
 
     return None
@@ -605,12 +637,15 @@ class GatewayService:
         data: DataFlowHealthInformationHipOnRequestBody,
     ) -> DataFlowHealthInformationHipOnRequestResponse:
         payload = {
-            "hiRequest": {
-                "transactionId": data.get("transaction_id"),
-                "sessionStatus": "ACKNOWLEDGED",
-            },
             "response": {"requestId": data.get("request_id")},
         }
+        if data.get("error"):
+            payload["error"] = data["error"]
+        else:
+            payload["hiRequest"] = {
+                "transactionId": data.get("transaction_id"),
+                "sessionStatus": "ACKNOWLEDGED",
+            }
 
         path = "/data-flow/v3/health-information/hip/on-request"
         response = GatewayService.request.post(
@@ -654,7 +689,9 @@ class GatewayService:
         skipped_care_context_references = []
         for care_context in consent.care_contexts:
             try:
-                fhir_data = _care_context_fhir_bundle(care_context, consent)
+                fhir_data = _care_context_fhir_bundle(
+                    care_context, consent, data.get("date_range")
+                )
             except Exception:
                 logger.exception(
                     "ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: Failed to build FHIR data for %s",
