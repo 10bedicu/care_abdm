@@ -37,6 +37,10 @@ ALLERGY_VERIFICATION_STATUS_CODE_MAP = {
         "unconfirmed",
         "Unconfirmed",
     ),
+    AllergyIntoleranceVerificationStatusChoices.presumed: (
+        "unconfirmed",
+        "Unconfirmed",
+    ),
     AllergyIntoleranceVerificationStatusChoices.confirmed: ("confirmed", "Confirmed"),
     AllergyIntoleranceVerificationStatusChoices.refuted: ("refuted", "Refuted"),
     AllergyIntoleranceVerificationStatusChoices.entered_in_error: (

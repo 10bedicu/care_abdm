@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+from enum import Enum
+from importlib import import_module
 from unittest.mock import patch
 
 from abdm.service.helper import (
@@ -9,6 +11,7 @@ from abdm.service.helper import (
 )
 from abdm.utils.fhir.fhir import Fhir
 from abdm.utils.fhir.resources.encounter import ENCOUNTER_CLASS_CODE_MAP
+from django.test import SimpleTestCase
 from model_bakery import baker
 
 from care.emr.models.allergy_intolerance import AllergyIntolerance
@@ -78,6 +81,46 @@ CODE = {
     "code": "386661006",
     "display": "Fever",
 }
+
+FHIR_RESOURCE_MODULES = [
+    "allergy_intolerance",
+    "charge_item",
+    "condition",
+    "diagnostic_report",
+    "encounter",
+    "invoice",
+    "medication_request",
+    "medication_statement",
+    "observation",
+    "service_request",
+    "specimen",
+]
+
+
+class FhirCodeMapCoverageTests(SimpleTestCase):
+    def test_every_care_enum_value_has_a_fhir_mapping(self):
+        for name in FHIR_RESOURCE_MODULES:
+            module = import_module(f"abdm.utils.fhir.resources.{name}")
+            for attr, mapping in vars(module).items():
+                if not attr.endswith("_CODE_MAP") or not mapping:
+                    continue
+                enum_cls = type(next(iter(mapping)))
+                if not issubclass(enum_cls, Enum):
+                    continue
+                with self.subTest(map=f"{name}.{attr}"):
+                    self.assertEqual(
+                        [member.value for member in enum_cls if member not in mapping],
+                        [],
+                    )
+
+    def test_unmapped_value_falls_back_to_default(self):
+        coding = Fhir()._coding_from_mapping(
+            system="http://example.org",
+            mapping={"known": ("K", "Known")},
+            key="unknown",
+            default="known",
+        )
+        self.assertEqual((coding.code, coding.display), ("K", "Known"))
 
 
 class CareFhirContractTests(CareAPITestBase):
@@ -456,3 +499,48 @@ class CareFhirContractTests(CareAPITestBase):
         with self.assertRaises(ABDMAPIException):
             self.fhir._wellness_composition(response, "context-1")
         self.assertIsNone(care_context_dict_from_reference_id(reference))
+
+    def test_previously_unmapped_values_build(self):
+        chronic = baker.make(
+            Condition,
+            patient=self.patient,
+            encounter=self.encounter,
+            clinical_status=ConditionClinicalStatusChoices.active.value,
+            verification_status=ConditionVerificationStatusChoices.differential.value,
+            category=ConditionCategoryChoices.chronic_condition.value,
+            code=CODE,
+        )
+        allergy = baker.make(
+            AllergyIntolerance,
+            patient=self.patient,
+            encounter=self.encounter,
+            created_by=self.user,
+            clinical_status=AllergyClinicalStatusChoices.active.value,
+            verification_status=AllergyVerificationStatusChoices.presumed.value,
+            category=AllergyCategoryChoices.food.value,
+            criticality=AllergyCriticalityChoices.low.value,
+            code=CODE,
+        )
+        request = baker.make(
+            MedicationRequest,
+            patient=self.patient,
+            encounter=self.encounter,
+            created_by=self.user,
+            status=MedicationRequestStatus.ended.value,
+            intent=MedicationRequestIntent.order.value,
+            category=MedicationRequestCategory.inpatient.value,
+            priority=MedicationRequestPriority.routine.value,
+            do_not_perform=False,
+            medication=CODE,
+            dosage_instruction=[],
+        )
+
+        condition = self.fhir._condition(chronic)
+        self.assertEqual(condition.category[0].coding[0].code, "problem-list-item")
+        self.assertEqual(condition.verificationStatus.coding[0].code, "differential")
+        self.assertEqual(
+            self.fhir._allergy_intolerance(allergy).verificationStatus.coding[0].code,
+            "unconfirmed",
+        )
+        self.assertEqual(self.fhir._medication_request(request).status, "stopped")
+        self.fhir._op_consult_composition(self.encounter, "context-1")
