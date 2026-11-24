@@ -38,6 +38,7 @@ from care.emr.resources.medication.request.spec import (
 MEDICATION_REQUEST_STATUS_CODE_MAP = {
     MedicationRequestStatus.active: "active",
     MedicationRequestStatus.on_hold: "on-hold",
+    MedicationRequestStatus.ended: "stopped",
     MedicationRequestStatus.cancelled: "cancelled",
     MedicationRequestStatus.completed: "completed",
     MedicationRequestStatus.entered_in_error: "entered-in-error",

@@ -33,11 +33,16 @@ CONDITION_CATEGORY_CODE_MAP = {
         "encounter-diagnosis",
         "Encounter Diagnosis",
     ),
+    ConditionCategoryChoices.chronic_condition: (
+        "problem-list-item",
+        "Problem List Item",
+    ),
 }
 
 CONDITION_VERIFICATION_STATUS_CODE_MAP = {
     ConditionVerificationStatusChoices.unconfirmed: ("unconfirmed", "Unconfirmed"),
     ConditionVerificationStatusChoices.provisional: ("provisional", "Provisional"),
+    ConditionVerificationStatusChoices.differential: ("differential", "Differential"),
     ConditionVerificationStatusChoices.confirmed: ("confirmed", "Confirmed"),
     ConditionVerificationStatusChoices.refuted: ("refuted", "Refuted"),
     ConditionVerificationStatusChoices.entered_in_error: (

@@ -93,7 +93,7 @@ class FhirBase:
         self, system: str, mapping: dict[str, tuple[str, str]], key: str, default: str
     ):
         coding = mapping.get(key)
-        if not mapping:
+        if not coding:
             coding = mapping.get(default)
 
         return Coding(
