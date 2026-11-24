@@ -87,7 +87,7 @@ class HealthInformationTransferTests(CareAPITestBase):
             self.transfer(build)
         self.post.assert_not_called()
 
-    def notify(self, status, errored):
+    def notify(self, status, errored, notifier_type="HIP"):
         with patch.object(GatewayService.request, "post") as post:
             post.return_value.status_code = 202
             GatewayService.data_flow__health_information__notify(
@@ -95,7 +95,7 @@ class HealthInformationTransferTests(CareAPITestBase):
                     "consent": self.consent,
                     "consent_id": "consent",
                     "transaction_id": "txn",
-                    "notifier__type": "HIP",
+                    "notifier__type": notifier_type,
                     "notifier__id": "hip",
                     "status": status,
                     "hip_id": "hip",
@@ -122,6 +122,16 @@ class HealthInformationTransferTests(CareAPITestBase):
     def test_notify_reports_every_care_context_errored_on_failed_session(self):
         self.assertEqual(
             self.notify("FAILED", []),
+            {GOOD: ("ERRORED", "FAILED"), BAD: ("ERRORED", "FAILED")},
+        )
+
+    def test_hiu_notify_uses_hiu_status_values(self):
+        self.assertEqual(
+            self.notify("RECEIVED", [], notifier_type="HIU"),
+            {GOOD: ("OK", "RECEIVED"), BAD: ("OK", "RECEIVED")},
+        )
+        self.assertEqual(
+            self.notify("FAILED", [], notifier_type="HIU"),
             {GOOD: ("ERRORED", "FAILED"), BAD: ("ERRORED", "FAILED")},
         )
 

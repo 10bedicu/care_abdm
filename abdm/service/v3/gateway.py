@@ -746,17 +746,18 @@ class GatewayService:
         if not consent:
             raise ABDMAPIException(detail="Provide a consent to notify")
 
-        transferred = data.get("status") == "TRANSFERRED"
+        succeeded = data.get("status") in ("TRANSFERRED", "RECEIVED")
+        success_hi_status = "OK" if data.get("notifier__type") == "HIU" else "DELIVERED"
         errored = set(data.get("errored_care_context_references") or [])
 
         status_responses = []
         for care_context in consent.care_contexts or []:
             reference = care_context.get("careContextReference")
-            if transferred and reference in errored:
+            if succeeded and reference in errored:
                 hi_status = "ERRORED"
                 description = "Failed to generate health information"
             else:
-                hi_status = "DELIVERED" if transferred else "ERRORED"
+                hi_status = success_hi_status if succeeded else "ERRORED"
                 description = data.get("status")
             status_responses.append(
                 {
