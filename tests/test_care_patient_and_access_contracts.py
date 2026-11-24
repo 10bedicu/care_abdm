@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from abdm.models import AbhaNumber
+from abdm.models import AbhaNumber, Transaction, TransactionType
 from abdm.models.base import HealthInformationType
 from abdm.models.consent import ConsentRequest
 from abdm.service.helper import uuid
@@ -8,6 +8,7 @@ from abdm.service.v3.callback_handlers.hip import handle_patient_share
 from abdm.utils import token as token_utils
 from abdm.utils import user as abdm_user
 from django.core.exceptions import ValidationError
+from model_bakery import baker
 
 from care.emr.models.patient import Patient, PatientIdentifier, PatientIdentifierConfig
 from care.emr.models.scheduling.schedule import SchedulableResource
@@ -76,6 +77,51 @@ class CarePatientAndAccessContractTests(ScanPayOrderTestBase):
         self.assertEqual(patient.name, "New Patient")
         self.assertTrue(
             PatientIdentifier.objects.filter(patient=patient, value="P0").exists()
+        )
+
+    def share_with_address(self, address):
+        with self.captureOnCommitCallbacks(execute=True):
+            handle_patient_share(
+                self.share_payload(
+                    abhaNumber=self.abha_number.abha_number, abhaAddress=address
+                ),
+                {"REQUEST-ID": uuid()},
+            )
+        self.abha_number.refresh_from_db()
+
+    @patch("abdm.service.v3.callback_handlers.hip.GatewayService.patient_share__on_share")
+    def test_patient_share_keeps_an_address_that_consents_reference(self, gateway):
+        baker.make("abdm.ConsentArtefact", patient_abha=self.abha_number)
+
+        self.share_with_address("newaddress@sbx")
+
+        self.assertEqual(self.abha_number.health_id, "testpatient@sbx")
+        acknowledgement = gateway.call_args.args[0]["acknowledgement"]
+        self.assertEqual(acknowledgement["status"], "SUCCESS")
+        self.assertEqual(acknowledgement["abha_address"], "newaddress@sbx")
+
+    @patch("abdm.service.v3.callback_handlers.hip.GatewayService.patient_share__on_share")
+    def test_patient_share_matches_the_number_when_another_record_holds_the_address(
+        self, _gateway
+    ):
+        for address, deleted in (("held@sbx", False), ("deleted@sbx", True)):
+            with self.subTest(deleted=deleted):
+                holder = baker.make(AbhaNumber, abha_number=None, health_id=address)
+                if deleted:
+                    holder.delete()
+
+                self.share_with_address(address)
+
+                holder.refresh_from_db()
+                self.assertIsNone(holder.abha_number)
+                self.assertEqual(self.abha_number.health_id, "testpatient@sbx")
+
+        self.assertEqual(
+            Transaction.objects.filter(
+                type=TransactionType.SCAN_AND_SHARE,
+                meta_data__abha_number=str(self.abha_number.external_id),
+            ).count(),
+            2,
         )
 
     def test_scan_and_share_token_is_created_once_and_can_be_found(self):
