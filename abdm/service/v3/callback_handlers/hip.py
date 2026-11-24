@@ -299,6 +299,9 @@ def handle_health_information_request(validated_data: dict, headers: dict):
                 "errored_care_context_references": transfer[
                     "errored_care_context_references"
                 ],
+                "skipped_care_context_references": transfer[
+                    "skipped_care_context_references"
+                ],
             }
         )
     except Exception as exception:
