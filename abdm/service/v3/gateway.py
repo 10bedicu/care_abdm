@@ -10,6 +10,7 @@ from django.db.models import Q
 from abdm.models import HealthInformationType, Purpose, Transaction, TransactionType
 from abdm.models.transaction import TransactionStatus
 from abdm.service.helper import (
+    SHAREABLE_IMMUNIZATION_STATUSES,
     ABDMAPIException,
     cm_id,
     generate_care_contexts_for_existing_data,
@@ -66,6 +67,7 @@ from abdm.utils.fhir import Fhir
 from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
+from care.emr.models.immunisation import Immunization
 from care.emr.models.invoice import Invoice
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.questionnaire import QuestionnaireResponse
@@ -88,7 +90,7 @@ def _encounter_in_range(encounter: Encounter, date_range: dict) -> bool:
     return start <= date_range["to"] and end >= date_range["from"]
 
 
-def _care_context_fhir_bundle(care_context: dict, consent, date_range: dict):  # noqa: PLR0911
+def _care_context_fhir_bundle(care_context: dict, consent, date_range: dict):  # noqa: PLR0911, PLR0912
     care_context_reference = care_context.get("careContextReference", "")
     patient_reference = care_context.get("patientReference", "")
     requested_range = (date_range["from"], date_range["to"])
@@ -184,6 +186,17 @@ def _care_context_fhir_bundle(care_context: dict, consent, date_range: dict):  #
             .first()
         )
         return Fhir().create_invoice_record(invoice) if invoice else None
+
+    if (
+        model == "immunization"
+        and HealthInformationType.IMMUNIZATION_RECORD in consent.hi_types
+    ):
+        immunization = Immunization.objects.filter(
+            external_id=param,
+            created_date__range=requested_range,
+            status__in=SHAREABLE_IMMUNIZATION_STATUSES,
+        ).first()
+        return Fhir().create_immunization_record(immunization) if immunization else None
 
     return None
 

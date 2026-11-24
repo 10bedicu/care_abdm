@@ -7,6 +7,8 @@ from abdm.service.v3.gateway import GatewayService, _care_context_fhir_bundle
 from model_bakery import baker
 
 from care.emr.models.file_upload import FileUpload
+from care.emr.models.immunisation import Immunization
+from care.emr.resources.immunisation.immunization import ImmunizationStatus
 from care.utils.tests.base import CareAPITestBase
 from care.utils.time_util import care_now
 
@@ -229,3 +231,42 @@ class HealthInformationTransferTests(CareAPITestBase):
                 self.last_month,
             )
         )
+
+    def test_immunization_is_shared_only_while_it_is_shareable(self):
+        user = self.create_super_user()
+        facility = self.create_facility(user)
+        patient = self.create_patient(name="Vaccine Patient", gender="female")
+        encounter = self.create_encounter(
+            patient, facility, self.create_facility_organization(facility)
+        )
+        immunization = baker.make(
+            Immunization,
+            patient=patient,
+            encounter=encounter,
+            facility=facility,
+            created_by=user,
+            status=ImmunizationStatus.completed.value,
+            code={"system": "http://snomed.info/sct", "code": "1119305005"},
+            primary_source=True,
+        )
+        reference = {
+            "patientReference": str(patient.external_id),
+            "careContextReference": f"v2::immunization::{immunization.external_id}",
+        }
+        self.consent.hi_types = [HealthInformationType.IMMUNIZATION_RECORD]
+
+        bundle = _care_context_fhir_bundle(reference, self.consent, self.last_month)
+        self.assertEqual(bundle.entry[0].resource.type.coding[0].code, "41000179103")
+
+        self.consent.hi_types = [HealthInformationType.OP_CONSULTATION]
+        self.assertIsNone(
+            _care_context_fhir_bundle(reference, self.consent, self.last_month)
+        )
+
+        self.consent.hi_types = [HealthInformationType.IMMUNIZATION_RECORD]
+        for status in (ImmunizationStatus.draft, ImmunizationStatus.entered_in_error):
+            Immunization.objects.filter(pk=immunization.pk).update(status=status.value)
+            with self.subTest(status=status):
+                self.assertIsNone(
+                    _care_context_fhir_bundle(reference, self.consent, self.last_month)
+                )

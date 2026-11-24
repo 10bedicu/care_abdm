@@ -17,6 +17,7 @@ from abdm.settings import plugin_settings as settings
 from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
+from care.emr.models.immunisation import Immunization
 from care.emr.models.invoice import Invoice
 from care.emr.models.medication_request import MedicationRequest
 from care.emr.models.observation import Observation
@@ -24,9 +25,16 @@ from care.emr.models.patient import Patient
 from care.emr.models.questionnaire import QuestionnaireResponse
 from care.emr.resources.encounter.constants import ClassChoices
 from care.emr.resources.file_upload.spec import FileTypeChoices
+from care.emr.resources.immunisation.immunization import ImmunizationStatus
 from care.emr.resources.invoice.spec import InvoiceStatusOptions
 from care.emr.resources.questionnaire_response.spec import (
     QuestionnaireResponseStatusChoices,
+)
+
+
+SHAREABLE_IMMUNIZATION_STATUSES = (
+    ImmunizationStatus.completed.value,
+    ImmunizationStatus.not_done.value,
 )
 
 
@@ -203,6 +211,16 @@ def generate_care_contexts_for_existing_data(
         for invoice in invoices:
             encounter_care_contexts.append(create_invoice_care_context(invoice))
 
+        immunizations = Immunization.objects.filter(
+            encounter_id=encounter.id,
+            patient_id=patient.id,
+            status__in=SHAREABLE_IMMUNIZATION_STATUSES,
+        )
+        for immunization in immunizations:
+            encounter_care_contexts.append(
+                create_immunization_care_context(immunization)
+            )
+
         hf_id = facility.healthfacility.hf_id
         if hf_id in care_contexts:
             care_contexts[hf_id].extend(encounter_care_contexts)
@@ -212,7 +230,7 @@ def generate_care_contexts_for_existing_data(
     return care_contexts
 
 
-def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911
+def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911, PLR0912
     [version, model, param] = reference_id.split("::")
 
     if version != "v2":
@@ -271,6 +289,16 @@ def care_context_dict_from_reference_id(reference_id: str):  # noqa: PLR0911
             return None
 
         return create_invoice_care_context(invoice)
+
+    if model == "immunization":
+        immunization = Immunization.objects.filter(
+            external_id=param, status__in=SHAREABLE_IMMUNIZATION_STATUSES
+        ).first()
+
+        if not immunization:
+            return None
+
+        return create_immunization_care_context(immunization)
 
     return None
 
@@ -349,4 +377,14 @@ def create_invoice_care_context(invoice: Invoice):
             f"{display_label} on {invoice.modified_date.strftime('%Y-%m-%d %H:%M:%S')}"
         ),
         "hi_type": HealthInformationType.INVOICE,
+    }
+
+
+def create_immunization_care_context(immunization: Immunization):
+    return {
+        "reference": f"v2::immunization::{immunization.external_id}",
+        "display": clean_care_context_display(
+            f"Immunization Recorded on {immunization.created_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        ),
+        "hi_type": HealthInformationType.IMMUNIZATION_RECORD,
     }
