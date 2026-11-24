@@ -241,7 +241,7 @@ def handle_health_information_transfer(validated_data: dict, headers: dict):
             "transaction_id": str(artefact.transaction_id),
             "notifier__type": "HIU",
             "notifier__id": artefact.hiu,
-            "status": "TRANSFERRED",
+            "status": "RECEIVED",
             "hip_id": artefact.hip,
         }
     )

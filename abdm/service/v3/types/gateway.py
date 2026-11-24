@@ -111,7 +111,7 @@ class DataFlowHealthInformationNotifyBody(TypedDict):
     consent: ConsentArtefact
     notifier__type: Literal["HIP", "HIU"]
     notifier__id: str
-    status: Literal["TRANSFERRED", "FAILED"]
+    status: Literal["TRANSFERRED", "RECEIVED", "FAILED"]
     hip_id: str
     errored_care_context_references: NotRequired[list[str]]
 
