@@ -75,6 +75,87 @@ from care.emr.resources.questionnaire_response.spec import (
 logger = logging.getLogger(__name__)
 
 
+def _care_context_fhir_bundle(care_context: dict, consent):  # noqa: PLR0911
+    care_context_reference = care_context.get("careContextReference", "")
+    patient_reference = care_context.get("patientReference", "")
+
+    if "::" not in care_context_reference:
+        care_context_reference = f"v0::consultation::{care_context_reference}"
+
+    [version, model, param] = care_context_reference.split("::")
+
+    if version != "v2":
+        # TODO: Register the v1 care contexts as v2 after emr migration
+        return None
+
+    if (
+        model == "prescription"
+        and HealthInformationType.PRESCRIPTION in consent.hi_types
+    ):
+        medication_requests = MedicationRequest.objects.filter(
+            created_date__date=param,
+            patient__external_id=patient_reference,
+        )
+        if not medication_requests.exists():
+            return None
+        return Fhir().create_prescription_record(list(medication_requests))
+
+    if (
+        model == "encounter"
+        and HealthInformationType.OP_CONSULTATION in consent.hi_types
+    ):
+        encounter = Encounter.objects.filter(external_id=param).first()
+        return Fhir().create_op_consult_record(encounter) if encounter else None
+
+    if (
+        model == "encounter"
+        and HealthInformationType.DISCHARGE_SUMMARY in consent.hi_types
+    ):
+        encounter = Encounter.objects.filter(external_id=param).first()
+        return Fhir().create_discharge_summary_record(encounter) if encounter else None
+
+    if (
+        model == "file_upload"
+        and HealthInformationType.RECORD_ARTIFACT in consent.hi_types
+    ):
+        file_upload = FileUpload.objects.filter(external_id=param).first()
+        return (
+            Fhir().create_health_document_record(file_upload) if file_upload else None
+        )
+
+    if (
+        model == "questionnaire_response"
+        and HealthInformationType.WELLNESS_RECORD in consent.hi_types
+    ):
+        questionnaire_response = (
+            QuestionnaireResponse.objects.filter(external_id=param)
+            .exclude(status=QuestionnaireResponseStatusChoices.entered_in_error.value)
+            .first()
+        )
+        return (
+            Fhir().create_wellness_record(questionnaire_response)
+            if questionnaire_response
+            else None
+        )
+
+    if (
+        model == "diagnostic_report"
+        and HealthInformationType.DIAGNOSTIC_REPORT in consent.hi_types
+    ):
+        diagnostic_report = DiagnosticReport.objects.filter(external_id=param).first()
+        return (
+            Fhir().create_diagnostic_report_record(diagnostic_report)
+            if diagnostic_report
+            else None
+        )
+
+    if model == "invoice" and HealthInformationType.INVOICE in consent.hi_types:
+        invoice = Invoice.objects.filter(external_id=param).first()
+        return Fhir().create_invoice_record(invoice) if invoice else None
+
+    return None
+
+
 class GatewayService:
     request = Request(settings.ABDM_GATEWAY_URL)
 
@@ -569,116 +650,21 @@ class GatewayService:
         )
 
         entries = []
+        errored_care_context_references = []
         for care_context in consent.care_contexts:
-            care_context_reference = care_context.get("careContextReference", "")
-            patient_reference = care_context.get("patientReference", "")
-
-            if "::" not in care_context_reference:
-                care_context_reference = f"v0::consultation::{care_context_reference}"
-
-            [version, model, param] = care_context_reference.split("::")
-
-            if version != "v2":
-                # Skip if version is not v2
-                # TODO: Register the v1 care contexts as v2 after emr migration
+            try:
+                fhir_data = _care_context_fhir_bundle(care_context, consent)
+            except Exception:
+                logger.exception(
+                    "ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: Failed to build FHIR data for %s",
+                    care_context.get("careContextReference"),
+                )
+                errored_care_context_references.append(
+                    care_context.get("careContextReference")
+                )
                 continue
 
-            if (
-                model == "prescription"
-                and HealthInformationType.PRESCRIPTION in consent.hi_types
-            ):
-                medication_requests = MedicationRequest.objects.filter(
-                    created_date__date=param,
-                    patient__external_id=patient_reference,
-                )
-
-                if not medication_requests.exists():
-                    continue
-
-                fhir_data = Fhir().create_prescription_record(list(medication_requests))
-
-            elif (
-                model == "encounter"
-                and HealthInformationType.OP_CONSULTATION in consent.hi_types
-            ):
-                encounter = Encounter.objects.filter(
-                    external_id=param,
-                ).first()
-
-                if not encounter:
-                    continue
-
-                fhir_data = Fhir().create_op_consult_record(encounter)
-
-            elif (
-                model == "encounter"
-                and HealthInformationType.DISCHARGE_SUMMARY in consent.hi_types
-            ):
-                encounter = Encounter.objects.filter(
-                    external_id=param,
-                ).first()
-
-                if not encounter:
-                    continue
-
-                fhir_data = Fhir().create_discharge_summary_record(encounter)
-
-            elif (
-                model == "file_upload"
-                and HealthInformationType.RECORD_ARTIFACT in consent.hi_types
-            ):
-                file_upload = FileUpload.objects.filter(
-                    external_id=param,
-                ).first()
-
-                if not file_upload:
-                    continue
-
-                fhir_data = Fhir().create_health_document_record(file_upload)
-
-            elif (
-                model == "questionnaire_response"
-                and HealthInformationType.WELLNESS_RECORD in consent.hi_types
-            ):
-                questionnaire_response = (
-                    QuestionnaireResponse.objects.filter(external_id=param)
-                    .exclude(
-                        status=QuestionnaireResponseStatusChoices.entered_in_error.value
-                    )
-                    .first()
-                )
-
-                if not questionnaire_response:
-                    continue
-
-                fhir_data = Fhir().create_wellness_record(questionnaire_response)
-
-            elif (
-                model == "diagnostic_report"
-                and HealthInformationType.DIAGNOSTIC_REPORT in consent.hi_types
-            ):
-                diagnostic_report = DiagnosticReport.objects.filter(
-                    external_id=param,
-                ).first()
-
-                if not diagnostic_report:
-                    continue
-
-                fhir_data = Fhir().create_diagnostic_report_record(diagnostic_report)
-
-            elif (
-                model == "invoice" and HealthInformationType.INVOICE in consent.hi_types
-            ):
-                invoice = Invoice.objects.filter(
-                    external_id=param,
-                ).first()
-
-                if not invoice:
-                    continue
-
-                fhir_data = Fhir().create_invoice_record(invoice)
-
-            else:
+            if not fhir_data:
                 continue
 
             logger.info(
@@ -693,6 +679,11 @@ class GatewayService:
                 "careContextReference": care_context.get("careContextReference"),
             }
             entries.append(entry)
+
+        if not entries and errored_care_context_references:
+            raise ABDMAPIException(
+                detail="Failed to generate health information for the requested care contexts"
+            )
 
         logger.info(
             f"ABDM_DEBUG__DATA_FLOW__HEALTH_INFORMATION__TRANSFER :: Entries: {entries}"
@@ -744,7 +735,7 @@ class GatewayService:
             },
         )
 
-        return {}
+        return {"errored_care_context_references": errored_care_context_references}
 
     @staticmethod
     def data_flow__health_information__notify(
@@ -754,6 +745,26 @@ class GatewayService:
 
         if not consent:
             raise ABDMAPIException(detail="Provide a consent to notify")
+
+        transferred = data.get("status") == "TRANSFERRED"
+        errored = set(data.get("errored_care_context_references") or [])
+
+        status_responses = []
+        for care_context in consent.care_contexts or []:
+            reference = care_context.get("careContextReference")
+            if transferred and reference in errored:
+                hi_status = "ERRORED"
+                description = "Failed to generate health information"
+            else:
+                hi_status = "DELIVERED" if transferred else "ERRORED"
+                description = data.get("status")
+            status_responses.append(
+                {
+                    "careContextReference": reference,
+                    "hiStatus": hi_status,
+                    "description": description,
+                }
+            )
 
         payload = {
             "notification": {
@@ -767,22 +778,7 @@ class GatewayService:
                 "statusNotification": {
                     "sessionStatus": data.get("status"),
                     "hipId": data.get("hip_id"),
-                    "statusResponses": list(
-                        map(
-                            lambda care_context: {
-                                "careContextReference": care_context.get(
-                                    "careContextReference"
-                                ),
-                                "hiStatus": (
-                                    "DELIVERED"
-                                    if data.get("status") == "TRANSFERRED"
-                                    else "FAILED"
-                                ),
-                                "description": data.get("status"),
-                            },
-                            consent.care_contexts or [],
-                        )
-                    ),
+                    "statusResponses": status_responses,
                 },
             }
         }
