@@ -273,7 +273,7 @@ def handle_health_information_request(validated_data: dict, headers: dict):
     )
 
     try:
-        GatewayService.data_flow__health_information__transfer(
+        transfer = GatewayService.data_flow__health_information__transfer(
             {
                 "transaction_id": str(validated_data.get("transactionId")),
                 "consent": consent,
@@ -296,6 +296,9 @@ def handle_health_information_request(validated_data: dict, headers: dict):
                 "notifier__id": headers.get("X-HIP-ID"),
                 "status": "TRANSFERRED",
                 "hip_id": headers.get("X-HIP-ID"),
+                "errored_care_context_references": transfer[
+                    "errored_care_context_references"
+                ],
             }
         )
     except Exception as exception:

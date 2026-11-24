@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from abdm.models import (
     AbhaNumber,
@@ -102,7 +102,7 @@ class DataFlowHealthInformationTransferBody(TypedDict):
 
 
 class DataFlowHealthInformationTransferResponse(TypedDict):
-    pass
+    errored_care_context_references: list[str]
 
 
 class DataFlowHealthInformationNotifyBody(TypedDict):
@@ -113,6 +113,7 @@ class DataFlowHealthInformationNotifyBody(TypedDict):
     notifier__id: str
     status: Literal["TRANSFERRED", "FAILED"]
     hip_id: str
+    errored_care_context_references: NotRequired[list[str]]
 
 
 class DataFlowHealthInformationNotifyResponse(TypedDict):
