@@ -15,19 +15,9 @@ from abdm.models.base import AccessMode, HealthInformationType, Purpose, Status
 
 
 class IdentityAuthenticationSerializer(Serializer):
-    abha_number = CharField(max_length=50, required=False)
-    patient = UUIDField(required=False)
-
-    def validate(self, data):
-        abha_number = data.get("abha_number")
-        patient = data.get("patient")
-
-        if not abha_number and not patient:
-            raise ValidationError(
-                "At least one of 'abha_number' or 'patient' must be provided."
-            )
-
-        return data
+    patient = UUIDField(required=True)
+    # the Care facility whose ABHA auth of the patient is used
+    facility = UUIDField(required=True)
 
 
 class HiuConsentRequestOnInitSerializer(Serializer):

@@ -60,6 +60,7 @@ def handle_consent_request_on_status(validated_data: dict, headers: dict):
                     external_id=artefact.get("id"),
                     consent_request=consent,
                     **consent.consent_details_dict(),
+                    **consent.artefact_scope_dict(),
                 )
 
             consent_artefact.status = consent_status
@@ -94,6 +95,7 @@ def handle_consent_request_notify(validated_data: dict, headers: dict):
                     external_id=artefact.get("id"),
                     consent_request=consent,
                     **consent.consent_details_dict(),
+                    **consent.artefact_scope_dict(),
                 )
 
             consent_artefact.status = consent_status

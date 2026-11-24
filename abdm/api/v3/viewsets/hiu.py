@@ -24,6 +24,7 @@ from abdm.api.v3.serializers.hiu import (
 from abdm.api.viewsets.consent import ConsentViewSet
 from abdm.authentication import ABDMAuthentication
 from abdm.models import AbhaNumber, CallbackType, ConsentArtefact, ConsentRequest
+from abdm.service.abha import health_facility_for_facility, latest_valid_auth
 from abdm.service.v3.gateway import GatewayService
 from abdm.utils.callback import store_and_enqueue_callback
 
@@ -58,22 +59,21 @@ class HIUViewSet(GenericViewSet):
     def identity__authentication(self, request):
         validated_data = self.validate_request(request)
 
-        abha_number = AbhaNumber.objects.filter(
-            Q(
-                Q(abha_number=validated_data.get("abha_number"))
-                & Q(abha_number__isnull=False)
-            )
-            | Q(health_id=validated_data.get("abha_number"))
-            | Q(patient__external_id=validated_data.get("patient"))
-        ).first()
+        health_facility = health_facility_for_facility(validated_data.get("facility"))
+        abha_auth = latest_valid_auth(
+            AbhaNumber.objects.filter(
+                patient__external_id=validated_data.get("patient")
+            ).first(),
+            health_facility,
+        )
 
-        if not abha_number:
+        if not abha_auth:
             return Response(
                 {"detail": "No Abha Number Found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        result = GatewayService.identity__authentication({"abha_number": abha_number})
+        result = GatewayService.identity__authentication({"abha_auth": abha_auth})
 
         return Response(
             {

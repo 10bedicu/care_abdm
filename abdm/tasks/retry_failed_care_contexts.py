@@ -1,105 +1,37 @@
 import logging
 
 from celery import shared_task
-from django.db.models import Count, F, Q
 
-from abdm.models.abha_number import AbhaNumber
-from abdm.models.transaction import Transaction, TransactionStatus, TransactionType
-from abdm.service.helper import care_context_dict_from_reference_id
-from abdm.service.v3.gateway import GatewayService
+from abdm.models import AbhaAuth
+from abdm.service.linking import requeue_care_contexts, send_pending_care_contexts
+from abdm.utils.user import get_or_create_abdm_user
 
 logger = logging.getLogger(__name__)
 
-TRANSACTION_BATCH_SIZE = 500
-CARE_CONTEXT_BATCH_SIZE = 20
+AUTH_BATCH_SIZE = 100
+
 
 @shared_task
 def retry_failed_care_contexts():
-    qs = (
-        Transaction.objects.filter(
-            status__in=[TransactionStatus.INITIATED, TransactionStatus.FAILED],
-            type=TransactionType.LINK_CARE_CONTEXT,
-        )
-        .order_by("id")  # ensures consistent batching
-        .values_list("id", flat=True)
+    auth_ids = requeue_care_contexts()
+
+    logger.info(
+        "Dispatching %s ABHA auths with pending care contexts", len(auth_ids)
     )
 
-    ids = list(qs)
-
-    logger.info(f"Dispatching {len(ids)} transactions for retry")
-
-    for i in range(0, len(ids), TRANSACTION_BATCH_SIZE):
-        batch_ids = ids[i : i + TRANSACTION_BATCH_SIZE]
-
-        process_care_context_batch.delay(batch_ids)
+    for i in range(0, len(auth_ids), AUTH_BATCH_SIZE):
+        send_pending_care_contexts_batch.delay(auth_ids[i : i + AUTH_BATCH_SIZE])
 
 
 @shared_task(bind=True, queue="care_context_queue")
-def process_care_context_batch(self, transaction_ids: list[int]):
-    filtered_transactions = Transaction.objects.filter(id__in=transaction_ids)
-
-    grouped_transactions = filtered_transactions.values(
-        hf_id=F("meta_data__hf_id"),
-        abha_number=F("meta_data__abha_number"),
-    ).annotate(count=Count("id"))
-
-    for transaction_query in grouped_transactions:
-        abha_id = transaction_query["abha_number"]
-        abha_number = AbhaNumber.objects.filter(
-            Q(abha_number=abha_id) | Q(health_id=abha_id) | Q(external_id=abha_id)
-        ).first()
-        if not abha_number:
-            continue
-
-        patient = abha_number.patient
-        if not patient:
-            continue
-
-        patients_transactions = filtered_transactions.filter(
-            meta_data__hf_id=transaction_query["hf_id"],
-            meta_data__abha_number=transaction_query["abha_number"],
-        )
-
-        care_contexts = []
-        for transaction in patients_transactions:
-            if transaction.meta_data.get("type") != "hip_initiated_linking":
-                continue
-
-            for care_context_reference in transaction.meta_data.get(
-                "care_contexts", []
-            ):
-                care_context = care_context_dict_from_reference_id(
-                    care_context_reference
-                )
-
-                if care_context:
-                    care_contexts.append(care_context)
-
-            transaction.status = TransactionStatus.CANCELLED
-            transaction.save()
-
-        if len(care_contexts) == 0:
-            continue
-
-        for i in range(0, len(care_contexts), CARE_CONTEXT_BATCH_SIZE):
-            batch = care_contexts[i : i + CARE_CONTEXT_BATCH_SIZE]
-            try:
-                logger.info(
-                    f"ABDM_DEBUG__RETRY_CARE_CONTEXT_LINKING :: Initiated Care Context Linking for {batch!s} {patient!s} {transaction.meta_data.get('hf_id')}"
-                )
-
-                GatewayService.link__carecontext(
-                    {
-                        "patient": patient,
-                        "care_contexts": batch,
-                        "user": transaction.created_by,
-                        "hf_id": transaction.meta_data.get("hf_id"),
-                    }
-                )
-            except Exception as e:
-                logger.exception(
-                    "Error while retrying care context linking for transaction %s with error %s",
-                    transaction.id,
-                    str(e),
-                )
-                continue
+def send_pending_care_contexts_batch(self, auth_ids: list[int]):
+    for auth in AbhaAuth.objects.filter(id__in=auth_ids).select_related(
+        "abha_number", "health_facility"
+    ):
+        try:
+            send_pending_care_contexts(auth, user=get_or_create_abdm_user())
+        except Exception:
+            logger.exception(
+                "Error while sending the pending care contexts of ABHA auth %s",
+                auth.external_id,
+            )

@@ -21,7 +21,16 @@ from care.emr.models.medication_statement import (
     MedicationStatement as MedicationStatementModel,
 )
 from care.emr.models.observation import Observation as ObservationModel
+from care.emr.resources.encounter.constants import StatusChoices
 from care.emr.resources.observation.spec import ObservationStatus
+
+
+def _composition_status(encounter: EncounterModel) -> str:
+    # a linked record cannot be withdrawn, so an encounter entered in error is
+    # still sent, marked as such
+    if encounter.status == StatusChoices.entered_in_error.value:
+        return "entered-in-error"
+    return "final"
 
 
 def _empty_reason():
@@ -60,7 +69,7 @@ class OPConsultCompositionMixin:
                 ],
             ),
             identifier=Identifier(value=care_context_id),
-            status="final",
+            status=_composition_status(encounter),
             type=CodeableConcept(
                 coding=[
                     Coding(

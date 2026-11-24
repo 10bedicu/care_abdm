@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from uuid import UUID
 
 from django.contrib.postgres.search import TrigramSimilarity
 from django.core.cache import cache
@@ -7,18 +8,29 @@ from django.db import transaction
 from django.db.models import Q
 
 from abdm.models import (
-    AbhaNumber,
+    AbhaAuthMethod,
     HealthFacility,
     Transaction,
-    TransactionStatus,
     TransactionType,
 )
+from abdm.models.abha_auth import normalize_abha_address
 from abdm.models.base import Status
-from abdm.models.consent import ConsentArtefact, ConsentRequest
+from abdm.models.consent import ConsentArtefact
+from abdm.service.abha import patient_for_abha, record_abha_auth
 from abdm.service.helper import uuid, validate_and_format_date
+from abdm.service.linking import (
+    complete_care_context_notification,
+    complete_deep_link_sms,
+    complete_link_request,
+    discoverable_care_contexts,
+    ready_care_contexts,
+    receive_link_token,
+    record_user_initiated_links,
+)
 from abdm.service.v3.callback_handlers import CallbackProcessingError
 from abdm.service.v3.gateway import GatewayService
 from abdm.settings import plugin_settings as settings
+from abdm.tasks.link_care_context import enqueue_link_patient_care_contexts
 from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
 from abdm.utils.token import get_or_create_scan_and_share_token
 from abdm.utils.user import get_or_create_abdm_user
@@ -35,60 +47,57 @@ from care.utils.time_util import care_now
 logger = logging.getLogger(__name__)
 
 
-def get_patient_by_abha_id(abha_id: str):
-    patient = Patient.objects.filter(
-        Q(abha_number__abha_number=abha_id) | Q(abha_number__health_id=abha_id)
-    ).first()
-
-    if not patient and "@" in abha_id:
-        # TODO: get abha number using gateway api and search patient
-        pass
-
-    return patient
-
-
 def handle_token_on_generate_token(validated_data: dict, headers: dict):
-    hf_id = headers.get("X-HIP-ID")
-    health_id = validated_data.get("abhaAddress")
+    request_id = (validated_data.get("response") or {}).get("requestId")
 
-    abha_number = AbhaNumber.objects.filter(health_id=health_id).first()
-
-    if not abha_number:
-        raise CallbackProcessingError(f"ABHA number {health_id} not found")
-
-    cache.set(
-        f"abdm_link_token__{hf_id}__{health_id}",
-        validated_data.get("linkToken"),
-        timeout=60 * 30,
-    )
-
-    link_care_context_request_cache_keys = cache.keys(
-        f"abdm_link_care_context__{hf_id}__{health_id}__*"
-    )
-
-    for request_cache_key in link_care_context_request_cache_keys:
-        cached_data = cache.get(request_cache_key)
-
-        if cached_data.get("purpose") == "LINK_CARECONTEXT":
-            GatewayService.link__carecontext(
-                {
-                    "reference_id": cached_data.get("reference_id"),
-                    "patient": abha_number.patient,
-                    "care_contexts": cached_data.get("care_contexts", []),
-                    "user": get_or_create_abdm_user(),
-                    "hf_id": cached_data.get("hf_id"),
-                }
-            )
-
-            cache.delete(request_cache_key)
+    if not receive_link_token(
+        hf_id=headers.get("X-HIP-ID"),
+        abha_address=validated_data.get("abhaAddress"),
+        link_token=validated_data.get("linkToken"),
+        request_id=str(request_id) if request_id else None,
+        error=validated_data.get("error"),
+    ):
+        message = (
+            f"No valid ABHA auth is waiting for the link token of request {request_id}"
+        )
+        raise CallbackProcessingError(message)
 
 
 def handle_link_on_carecontext(validated_data: dict, headers: dict):
-    request_id = validated_data.get("response", {}).get("requestId")
-
-    Transaction.objects.filter(reference_id=request_id).update(
-        status=TransactionStatus.COMPLETED
+    complete_link_request(
+        str(validated_data.get("response", {}).get("requestId")),
+        error=validated_data.get("error"),
     )
+
+
+def _notify_outcome(validated_data: dict) -> tuple[str | None, dict | None]:
+    """The request an on-notify callback answers, and its error when it failed."""
+    request_id = (validated_data.get("response") or {}).get("requestId")
+    request_id = request_id if isinstance(request_id, str) and request_id else None
+    error = validated_data.get("error") or {}
+    status = (validated_data.get("acknowledgement") or {}).get("status") or ""
+
+    # the body is not confirmed against the sandbox: a failure is taken from
+    # either the error or the status, whichever says so
+    if not (error.get("code") or error.get("message")) and (
+        not status or status.upper() == "SUCCESS"
+    ):
+        return request_id, None
+
+    return request_id, {
+        "code": error.get("code") or status,
+        "message": error.get("message"),
+    }
+
+
+def handle_links_context_on_notify(validated_data: dict, headers: dict):
+    request_id, error = _notify_outcome(validated_data)
+    complete_care_context_notification(request_id, error=error)
+
+
+def handle_patients_sms_on_notify(validated_data: dict, headers: dict):
+    request_id, error = _notify_outcome(validated_data)
+    complete_deep_link_sms(request_id, error=error)
 
 
 def handle_patient_care_context_discover(validated_data: dict, headers: dict):
@@ -98,13 +107,12 @@ def handle_patient_care_context_discover(validated_data: dict, headers: dict):
         *(patient_data.get("unverifiedIdentifiers", []) or []),
     ]
 
-    health_id_number = next(
+    shared_abha_number = next(
         filter(lambda x: x.get("type") == "ABHA_NUMBER", identifiers), {}
     ).get("value")
-    patient = Patient.objects.filter(
-        Q(abha_number__abha_number=health_id_number)
-        | Q(abha_number__health_id=patient_data.get("id"))
-    ).first()
+    patient = patient_for_abha(
+        abha_number=shared_abha_number, abha_address=patient_data.get("id")
+    )
     matched_by = "ABHA_NUMBER"
 
     if not patient:
@@ -135,11 +143,20 @@ def handle_patient_care_context_discover(validated_data: dict, headers: dict):
         # TODO: handle MR matching
         pass
 
+    health_facility = HealthFacility.objects.filter(
+        hf_id=headers.get("X-HIP-ID")
+    ).first()
+
     GatewayService.user_initiated_linking__patient__care_context__on_discover(
         {
             "transaction_id": str(validated_data.get("transactionId")),
             "request_id": headers.get("REQUEST-ID"),
             "patient": patient,
+            "care_contexts": discoverable_care_contexts(
+                patient, health_facility, patient_data.get("id")
+            )
+            if patient and health_facility
+            else [],
             "matched_by": [matched_by],
             "hf_id": headers.get("X-HIP-ID"),
         }
@@ -199,14 +216,92 @@ def handle_link_care_context_confirm(validated_data: dict, headers: dict):
             f"Patient with ID: {patient_id} not found in the database"
         )
 
+    health_facility = HealthFacility.objects.filter(
+        hf_id=headers.get("X-HIP-ID")
+    ).first()
+
+    if not health_facility:
+        message = f"Health Facility with ID: {headers.get('X-HIP-ID')} not found in the database"
+        raise CallbackProcessingError(message)
+
+    chosen = set(cached_data.get("care_contexts") or [])
+    care_contexts = [
+        care_context
+        for care_context in ready_care_contexts(patient, health_facility)
+        if care_context["reference"] in chosen
+    ]
+
+    reference_id = uuid()
     GatewayService.user_initiated_linking__link__care_context__on_confirm(
         {
             "request_id": headers.get("REQUEST-ID"),
+            "reference_id": reference_id,
             "patient": patient,
-            "care_contexts": cached_data.get("care_contexts"),
-            "hf_id": headers.get("X-HIP-ID"),
+            "care_contexts": care_contexts,
+            "hf_id": health_facility.hf_id,
         }
     )
+
+    # the patient linked these from their PHR app: it is not an ABHA auth at the
+    # facility, and it says nothing about who the patient's ABHA record is
+    record_user_initiated_links(
+        patient=patient,
+        health_facility=health_facility,
+        abha_address=cached_data.get("abha_address"),
+        care_contexts=care_contexts,
+        request_id=reference_id,
+    )
+
+    abha_number = getattr(patient, "abha_number", None)
+    Transaction.objects.create(
+        reference_id=reference_id,
+        type=TransactionType.LINK_CARE_CONTEXT,
+        meta_data={
+            **({"abha_number": str(abha_number.external_id)} if abha_number else {}),
+            "patient": str(patient.external_id),
+            "type": "patient_initiated_linking",
+            "care_contexts": [
+                care_context["reference"] for care_context in care_contexts
+            ],
+            "hf_id": health_facility.hf_id,
+        },
+    )
+
+
+def _consented_patient(consent_detail: dict) -> Patient:
+    """The patient whose records a consent artefact covers.
+
+    The care contexts name the patient by our own reference, which holds whatever
+    ABHA address the consent was granted from. The address identifies the patient
+    only when the artefact lists no care context.
+    """
+    consent_id = consent_detail.get("consentId")
+    references = {
+        care_context.get("patientReference")
+        for care_context in consent_detail.get("careContexts") or []
+    }
+
+    if len(references) > 1:
+        message = f"Consent {consent_id} names care contexts of more than one patient"
+        raise CallbackProcessingError(message)
+
+    if references:
+        try:
+            patient = Patient.objects.filter(
+                external_id=UUID(str(references.pop()))
+            ).first()
+        except ValueError:
+            patient = None
+    else:
+        patient = patient_for_abha(
+            abha_address=consent_detail.get("patient").get("id")
+        )
+
+    if not patient:
+        message = f"Patient of consent {consent_id} not found in the database"
+        raise CallbackProcessingError(message)
+
+    return patient
 
 
 def handle_consent_request_hip_notify(validated_data: dict, headers: dict):
@@ -236,17 +331,23 @@ def handle_consent_request_hip_notify(validated_data: dict, headers: dict):
     permission = consent_detail.get("permission")
     frequency = permission.get("frequency")
 
-    patient = get_patient_by_abha_id(consent_detail.get("patient").get("id"))
+    hf_id = headers.get("X-HIP-ID") or consent_detail.get("hip").get("id")
+    health_facility = HealthFacility.objects.filter(hf_id=hf_id).first()
 
-    if not patient:
-        raise CallbackProcessingError(
-            f"Patient with ABHA ID: {consent_detail.get('patient').get('id')} not found in the database"
-        )
+    if not health_facility:
+        message = f"Health Facility with ID: {hf_id} not found in the database"
+        raise CallbackProcessingError(message)
+
+    patient = _consented_patient(consent_detail)
 
     ConsentArtefact.objects.update_or_create(
         consent_id=notification.get("consentId"),
         defaults={
-            "patient_abha": patient.abha_number,
+            "health_facility": health_facility,
+            "abha_address": normalize_abha_address(
+                consent_detail.get("patient").get("id")
+            ),
+            "patient": patient,
             "care_contexts": consent_detail.get("careContexts"),
             "status": notification.get("status"),
             "purpose": consent_detail.get("purpose").get("code"),
@@ -379,63 +480,6 @@ def handle_health_information_request(validated_data: dict, headers: dict):
         )
 
 
-def _can_set_abha_identifier(abha_number: AbhaNumber, field: str, value: str) -> bool:
-    # Both identifiers are unique across deleted rows too, and consents reference
-    # the address by value, so writing either one blindly fails the whole share.
-    if getattr(abha_number, field) == value:
-        return True
-
-    if (
-        AbhaNumber._base_manager.filter(**{field: value})  # noqa: SLF001
-        .exclude(pk=abha_number.pk)
-        .exists()
-    ):
-        return False
-
-    if field == "health_id" and abha_number.health_id:
-        return not any(
-            consent._base_manager.filter(  # noqa: SLF001
-                patient_abha_id=abha_number.health_id
-            ).exists()
-            for consent in (ConsentRequest, ConsentArtefact)
-        )
-
-    return True
-
-
-def _match_shared_abha(patient_data: dict) -> tuple[AbhaNumber | None, dict]:
-    identifiers = {
-        "abha_number": patient_data.get("abhaNumber"),
-        "health_id": patient_data.get("abhaAddress"),
-    }
-
-    # the ABHA number identifies the person; the address can differ between visits
-    abha_number = None
-    if identifiers["abha_number"]:
-        abha_number = AbhaNumber.objects.filter(
-            abha_number=identifiers["abha_number"]
-        ).first()
-    if not abha_number:
-        abha_number = AbhaNumber.objects.filter(
-            health_id=identifiers["health_id"]
-        ).first()
-    if not abha_number:
-        return None, identifiers
-
-    writable = {
-        field: value
-        for field, value in identifiers.items()
-        if value and _can_set_abha_identifier(abha_number, field, value)
-    }
-    if "health_id" not in writable:
-        logger.info(
-            "Shared ABHA address was not stored on ABHA record %s, keeping the one in use",
-            abha_number.external_id,
-        )
-
-    return abha_number, writable
-
-
 def handle_patient_share(validated_data: dict, headers: dict):
     hip_id = validated_data.get("metaData").get("hipId")
     health_facility = HealthFacility.objects.filter(hf_id=hip_id).first()
@@ -456,11 +500,11 @@ def handle_patient_share(validated_data: dict, headers: dict):
         )
 
     patient_data = validated_data.get("profile").get("patient")
-    abha_number, shared_identifiers = _match_shared_abha(patient_data)
-    (abha_number, created) = AbhaNumber.objects.update_or_create(
-        pk=abha_number.pk if abha_number else None,
-        defaults={
-            **shared_identifiers,
+    # ObjectLocked propagates to the task which retries shortly after
+    abha_number, _, _ = record_abha_auth(
+        abha_number=patient_data.get("abhaNumber"),
+        abha_address=patient_data.get("abhaAddress"),
+        profile={
             "name": patient_data.get("name"),
             "gender": patient_data.get("gender"),
             "date_of_birth": validate_and_format_date(
@@ -474,6 +518,8 @@ def handle_patient_share(validated_data: dict, headers: dict):
             "pincode": patient_data.get("address", {}).get("pinCode"),
             "mobile": patient_data.get("phoneNumber"),
         },
+        health_facility=health_facility,
+        method=AbhaAuthMethod.SCAN_AND_SHARE,
     )
 
     is_existing_patient = True
@@ -592,3 +638,9 @@ def handle_patient_share(validated_data: dict, headers: dict):
             "token": str(token.external_id),
         },
     )
+
+    if is_existing_patient:
+        # records made here before this auth existed could not be linked until now
+        transaction.on_commit(
+            lambda: enqueue_link_patient_care_contexts(patient, health_facility)
+        )

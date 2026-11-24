@@ -8,6 +8,8 @@ from rest_framework.serializers import (
 )
 
 class AbhaCreateVerifyAadhaarBioSerializer(Serializer):
+    # the Care facility the ABHA is being verified at
+    facility = UUIDField(required=True)
     transaction_id = UUIDField(required=False)
     aadhaar = CharField(max_length=12, min_length=12, required=True)
     fingerprint_pid = CharField(required=True)
@@ -23,12 +25,16 @@ class AbhaCreateCapturePIDViaFaceSerializer(Serializer):
 
 
 class AbhaCreateVerifyAadhaarFaceSerializer(Serializer):
+    # the Care facility the ABHA is being verified at
+    facility = UUIDField(required=True)
     transaction_id = UUIDField(required=False)
     aadhaar = CharField(max_length=12, min_length=12, required=True)
     mobile = CharField(max_length=10, min_length=10, required=True)
 
 
 class AbhaCreateVerifyAadhaarDemographicsSerializer(Serializer):
+    # the Care facility the ABHA is being verified at
+    facility = UUIDField(required=True)
     aadhaar = CharField(max_length=12, min_length=12, required=True)
     transaction_id = UUIDField(required=False)
     name = CharField(max_length=50, required=True)
@@ -48,6 +54,8 @@ class AbhaCreateSendAadhaarOtpSerializer(Serializer):
 
 
 class AbhaCreateVerifyAadhaarOtpSerializer(Serializer):
+    # the Care facility the ABHA is being verified at
+    facility = UUIDField(required=True)
     transaction_id = UUIDField(required=True)
     otp = CharField(max_length=6, min_length=6, required=True)
     mobile = CharField(max_length=10, min_length=10, required=True)
@@ -68,6 +76,8 @@ class AbhaCreateAbhaAddressSuggestionSerializer(Serializer):
 
 
 class AbhaCreateEnrolAbhaAddressSerializer(Serializer):
+    # the Care facility the ABHA is being verified at
+    facility = UUIDField(required=True)
     transaction_id = UUIDField(required=True)
     abha_address = CharField(min_length=3, max_length=50, required=True)
 
@@ -110,6 +120,8 @@ class AbhaLoginVerifyOtpSerializer(Serializer):
 
 
 class AbhaLoginVerifyUserSerializer(Serializer):
+    # the Care facility the ABHA is being verified at
+    facility = UUIDField(required=True)
     transaction_id = UUIDField(required=True)
     account_id = IntegerField(min_value=0, required=True)
 
@@ -121,3 +133,5 @@ class AbhaLoginCheckAuthMethodsSerializer(Serializer):
 class LinkAbhaNumberAndPatientSerializer(Serializer):
     patient = UUIDField(required=True)
     abha_number = UUIDField(required=True)
+    # the Care facility whose ABHA auth backs the link
+    facility = UUIDField(required=True)

@@ -147,13 +147,16 @@ class ReferenceIdTests(TestCase):
             reference_id = task.apply_async.call_args.kwargs["kwargs"]["reference_id"]
             self.assertTrue(reference_id)
 
-    def test_reference_id_reaches_the_gateway(self):
+    def test_task_links_its_one_care_context_at_the_health_facility(self):
         with (
             patch("abdm.tasks.link_care_context.Patient") as patient_model,
-            patch("abdm.tasks.link_care_context.GatewayService") as gateway,
+            patch("abdm.tasks.link_care_context.HealthFacility") as facility_model,
+            patch("abdm.tasks.link_care_context.link_care_contexts") as link,
         ):
-            patient_model.objects.filter.return_value.first.return_value = object()
+            patient = patient_model.objects.filter.return_value.first.return_value
+            health_facility = facility_model.objects.filter.return_value.first.return_value
 
+            # the parameters of tasks queued by the release before this one
             link_care_context.run(
                 reference_id="ref-1",
                 patient_external_id="0f1d2c3b-4a59-6879-8a9b-0c1d2e3f4a5b",
@@ -161,5 +164,7 @@ class ReferenceIdTests(TestCase):
                 hf_id="IN1410000017_4",
             )
 
-            payload = gateway.link__carecontext.call_args.args[0]
-            self.assertEqual(payload["reference_id"], "ref-1")
+            facility_model.objects.filter.assert_called_once_with(hf_id="IN1410000017_4")
+            link.assert_called_once_with(
+                patient, health_facility, care_contexts=[CARE_CONTEXT], user=None
+            )

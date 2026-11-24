@@ -16,11 +16,13 @@ from abdm.api.v3.serializers.hip import (
     HipPatientShareSerializer,
     HipTokenOnGenerateTokenSerializer,
     LinkOnCarecontextSerializer,
+    LinksContextOnNotifySerializer,
+    PatientsSmsOnNotifySerializer,
 )
 from abdm.authentication import ABDMAuthentication
 from abdm.models import CallbackType
 from abdm.tasks.patient_share import patient_share_on_share
-from abdm.utils.callback import store_and_enqueue_callback
+from abdm.utils.callback import store_and_enqueue_callback, without_personal_data
 from abdm.utils.token import get_scan_and_share_token_by_token_number
 from care.emr.resources.patient.spec import PatientRetrieveSpec
 from care.facility.models.facility import Facility
@@ -93,6 +95,8 @@ class HIPCallbackViewSet(GenericViewSet):
     serializer_action_classes = {
         "hip__token__on_generate_token": HipTokenOnGenerateTokenSerializer,
         "link__on_carecontext": LinkOnCarecontextSerializer,
+        "links__context__on_notify": LinksContextOnNotifySerializer,
+        "patients__sms__on_notify": PatientsSmsOnNotifySerializer,
         "hip__patient__care_context__discover": HipPatientCareContextDiscoverSerializer,
         "hip__link__care_context__init": HipLinkCareContextInitSerializer,
         "hip__link__care_context__confirm": HipLinkCareContextConfirmSerializer,
@@ -136,6 +140,34 @@ class HIPCallbackViewSet(GenericViewSet):
         self.validate_request(request)
 
         return store_and_enqueue_callback(request, CallbackType.LINK_ON_CARECONTEXT)
+
+    def log_unconfirmed_callback(self, request, callback_type):
+        # ABDM's pages for these bodies are not confirmed against the sandbox,
+        # so what actually arrives is kept in the logs
+        logger.debug(
+            "ABDM callback %s request_id=%s body=%s",
+            callback_type,
+            request.headers.get("REQUEST-ID"),
+            without_personal_data(request.data),
+        )
+
+    @action(detail=False, methods=["POST"], url_path="links/context/on-notify")
+    def links__context__on_notify(self, request):
+        self.log_unconfirmed_callback(request, CallbackType.LINKS_CONTEXT_ON_NOTIFY)
+        self.validate_request(request)
+
+        return store_and_enqueue_callback(
+            request, CallbackType.LINKS_CONTEXT_ON_NOTIFY
+        )
+
+    @action(detail=False, methods=["POST"], url_path="patients/sms/on-notify")
+    def patients__sms__on_notify(self, request):
+        self.log_unconfirmed_callback(request, CallbackType.PATIENTS_SMS_ON_NOTIFY)
+        self.validate_request(request)
+
+        return store_and_enqueue_callback(
+            request, CallbackType.PATIENTS_SMS_ON_NOTIFY
+        )
 
     @action(
         detail=False, methods=["POST"], url_path="hip/patient/care-context/discover"

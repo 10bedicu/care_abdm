@@ -1,3 +1,5 @@
+import re
+
 from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
@@ -9,6 +11,40 @@ from abdm.tasks.process_inbound_callback import (
 )
 
 STORED_HEADERS = ["REQUEST-ID", "TIMESTAMP", "X-HIP-ID", "X-CM-ID", "X-HIU-ID"]
+
+# a key with one of these in its name may hold personal data
+PERSONAL_DATA_KEY_PARTS = (
+    "patient",
+    "abha",
+    "phone",
+    "mobile",
+    "name",
+    "address",
+    "email",
+    "birth",
+    "gender",
+    "healthid",
+)
+# an ABHA address or an email, or a phone or ABHA number, wherever it turns up
+PERSONAL_DATA_VALUE = re.compile(r"@|(?<![\w-])\+?\d[\d\s-]{8,}\d(?![\w-])")
+REDACTED = "[redacted]"
+
+
+def without_personal_data(payload):
+    """A callback body that can be logged: its shape is kept, and the values of
+    the fields that may hold personal data are not."""
+    if isinstance(payload, dict):
+        return {
+            key: REDACTED
+            if any(part in str(key).lower() for part in PERSONAL_DATA_KEY_PARTS)
+            else without_personal_data(value)
+            for key, value in payload.items()
+        }
+    if isinstance(payload, list):
+        return [without_personal_data(item) for item in payload]
+    if isinstance(payload, str) and PERSONAL_DATA_VALUE.search(payload):
+        return REDACTED
+    return payload
 
 
 def _is_duplicate(request_id: str, callback_type: CallbackType) -> bool:

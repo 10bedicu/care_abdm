@@ -37,6 +37,14 @@ def _dispatch_table():
             hip_serializers.LinkOnCarecontextSerializer,
             hip.handle_link_on_carecontext,
         ),
+        CallbackType.LINKS_CONTEXT_ON_NOTIFY: (
+            hip_serializers.LinksContextOnNotifySerializer,
+            hip.handle_links_context_on_notify,
+        ),
+        CallbackType.PATIENTS_SMS_ON_NOTIFY: (
+            hip_serializers.PatientsSmsOnNotifySerializer,
+            hip.handle_patients_sms_on_notify,
+        ),
         CallbackType.PATIENT_CARE_CONTEXT_DISCOVER: (
             hip_serializers.HipPatientCareContextDiscoverSerializer,
             hip.handle_patient_care_context_discover,

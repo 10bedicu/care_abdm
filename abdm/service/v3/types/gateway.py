@@ -1,13 +1,13 @@
 from typing import Literal, NotRequired, TypedDict
 
 from abdm.models import (
-    AbhaNumber,
+    AbhaAuth,
     ConsentArtefact,
     ConsentRequest,
+    HealthFacility,
     HealthInformationType,
 )
 from care.emr.models.patient import Patient
-from care.users.models import User
 
 
 class CareContext(TypedDict):
@@ -17,11 +17,8 @@ class CareContext(TypedDict):
 
 
 class TokenGenerateTokenBody(TypedDict):
-    abha_number: AbhaNumber
-    hf_id: str
-    purpose: Literal["LINK_CARECONTEXT"] | None
-    care_contexts: list[CareContext] | None
-    reference_id: str | None
+    abha_auth: AbhaAuth
+    request_id: NotRequired[str | None]
 
 
 class TokenGenerateTokenResponse(TypedDict):
@@ -29,14 +26,37 @@ class TokenGenerateTokenResponse(TypedDict):
 
 
 class LinkCarecontextBody(TypedDict):
+    abha_auth: AbhaAuth
     patient: Patient
     care_contexts: list[CareContext]
-    hf_id: str
-    user: User
-    reference_id: str | None
+    link_token: str
+    request_id: NotRequired[str | None]
 
 
 class LinkCarecontextResponse(TypedDict):
+    pass
+
+
+class LinkContextNotifyBody(TypedDict):
+    hf_id: str
+    abha_address: str
+    patient: Patient
+    reference: str
+    hi_type: HealthInformationType
+    request_id: NotRequired[str | None]
+
+
+class LinkContextNotifyResponse(TypedDict):
+    pass
+
+
+class LinkPatientLinksSmsNotifyBody(TypedDict):
+    health_facility: HealthFacility
+    phone_number: str
+    request_id: NotRequired[str | None]
+
+
+class LinkPatientLinksSmsNotifyResponse(TypedDict):
     pass
 
 
@@ -44,6 +64,7 @@ class UserInitiatedLinkingPatientCareContextOnDiscoverBody(TypedDict):
     transaction_id: str
     request_id: str
     patient: Patient
+    care_contexts: list[CareContext]
     matched_by: list[Literal["MOBILE", "ABHA_NUMBER", "MR"]]
     hf_id: str
 
@@ -64,8 +85,9 @@ class UserInitiatedLinkingLinkCareContextOnInitResponse(TypedDict):
 
 class UserInitiatedLinkingLinkCareContextOnConfirmBody(TypedDict):
     request_id: str
+    reference_id: NotRequired[str | None]
     patient: Patient
-    care_contexts: list[str]
+    care_contexts: list[CareContext]
     hf_id: str
 
 
@@ -125,7 +147,7 @@ class DataFlowHealthInformationNotifyResponse(TypedDict):
 
 
 class IdentityAuthenticationBody(TypedDict):
-    abha_number: AbhaNumber
+    abha_auth: AbhaAuth
 
 
 class Response(TypedDict):

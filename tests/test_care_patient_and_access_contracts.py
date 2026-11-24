@@ -1,8 +1,16 @@
 from unittest.mock import patch
 
-from abdm.models import AbhaNumber, Transaction, TransactionType
+from abdm.models import (
+    AbhaAuth,
+    AbhaAuthInvalidationReason,
+    AbhaAuthMethod,
+    AbhaNumber,
+    Transaction,
+    TransactionType,
+)
 from abdm.models.base import HealthInformationType
-from abdm.models.consent import ConsentRequest
+from abdm.models.consent import ConsentArtefact, ConsentRequest
+from abdm.service.abha import abha_number_for_address, latest_valid_auth
 from abdm.service.helper import uuid
 from abdm.service.v3.callback_handlers.hip import handle_patient_share
 from abdm.utils import token as token_utils
@@ -71,8 +79,12 @@ class CarePatientAndAccessContractTests(ScanPayOrderTestBase):
         with self.captureOnCommitCallbacks(execute=True):
             handle_patient_share(self.share_payload(), {"REQUEST-ID": uuid()})
 
-        abha = AbhaNumber.objects.get(health_id="newpatient@sbx")
+        abha = abha_number_for_address("newpatient@sbx")
+        self.assertEqual(abha.abha_number, "91987654321098")
         self.assertIsNotNone(abha.patient_id)
+        auth = AbhaAuth.objects.get(abha_number=abha)
+        self.assertEqual(auth.health_facility, self.health_facility)
+        self.assertEqual(auth.method, AbhaAuthMethod.SCAN_AND_SHARE)
         patient = Patient.objects.get(id=abha.patient_id)
         self.assertEqual(patient.name, "New Patient")
         self.assertTrue(
@@ -90,38 +102,67 @@ class CarePatientAndAccessContractTests(ScanPayOrderTestBase):
         self.abha_number.refresh_from_db()
 
     @patch("abdm.service.v3.callback_handlers.hip.GatewayService.patient_share__on_share")
-    def test_patient_share_keeps_an_address_that_consents_reference(self, gateway):
-        baker.make("abdm.ConsentArtefact", patient_abha=self.abha_number)
+    def test_patient_share_with_a_second_address_keeps_the_patient_and_its_consents(
+        self, gateway
+    ):
+        request = baker.make(ConsentRequest, abha_auth=self.abha_auth)
+        artefact = baker.make(
+            ConsentArtefact,
+            consent_request=None,
+            health_facility=self.health_facility,
+            patient=self.patient,
+            abha_address=self.abha_address,
+        )
 
-        self.share_with_address("newaddress@sbx")
+        self.share_with_address("NewAddress@sbx")
 
-        self.assertEqual(self.abha_number.health_id, "testpatient@sbx")
+        self.assertEqual(AbhaNumber.objects.count(), 1)
+        self.assertEqual(self.abha_number.patient, self.patient)
+        auth = latest_valid_auth(self.abha_number, self.health_facility)
+        self.assertEqual(auth.abha_address, "newaddress@sbx")
+        self.assertEqual(auth.method, AbhaAuthMethod.SCAN_AND_SHARE)
+
+        # the earlier auth is history, not overwritten: what hangs off it stays
+        self.abha_auth.refresh_from_db()
+        self.assertEqual(self.abha_auth.abha_address, self.abha_address)
+        self.assertIsNone(self.abha_auth.invalidated_at)
+        request.refresh_from_db()
+        artefact.refresh_from_db()
+        self.assertEqual(request.abha_auth, self.abha_auth)
+        self.assertEqual(artefact.abha_address, self.abha_address)
+
         acknowledgement = gateway.call_args.args[0]["acknowledgement"]
         self.assertEqual(acknowledgement["status"], "SUCCESS")
-        self.assertEqual(acknowledgement["abha_address"], "newaddress@sbx")
+        self.assertEqual(acknowledgement["abha_address"], "NewAddress@sbx")
 
     @patch("abdm.service.v3.callback_handlers.hip.GatewayService.patient_share__on_share")
-    def test_patient_share_matches_the_number_when_another_record_holds_the_address(
+    def test_patient_share_follows_the_number_when_another_record_holds_the_address(
         self, _gateway
     ):
-        for address, deleted in (("held@sbx", False), ("deleted@sbx", True)):
-            with self.subTest(deleted=deleted):
-                holder = baker.make(AbhaNumber, abha_number=None, health_id=address)
-                if deleted:
-                    holder.delete()
+        holder = baker.make(AbhaNumber, abha_number=None)
+        held = baker.make(
+            AbhaAuth,
+            abha_number=holder,
+            health_facility=self.health_facility,
+            abha_address="held@sbx",
+            method=AbhaAuthMethod.SCAN_AND_SHARE,
+        )
 
-                self.share_with_address(address)
+        self.share_with_address("held@sbx")
 
-                holder.refresh_from_db()
-                self.assertIsNone(holder.abha_number)
-                self.assertEqual(self.abha_number.health_id, "testpatient@sbx")
-
+        holder.refresh_from_db()
+        held.refresh_from_db()
+        self.assertIsNone(holder.abha_number)
+        self.assertEqual(
+            held.invalidation_reason, AbhaAuthInvalidationReason.ADDRESS_MOVED
+        )
+        self.assertEqual(abha_number_for_address("held@sbx"), self.abha_number)
         self.assertEqual(
             Transaction.objects.filter(
                 type=TransactionType.SCAN_AND_SHARE,
                 meta_data__abha_number=str(self.abha_number.external_id),
             ).count(),
-            2,
+            1,
         )
 
     def test_scan_and_share_token_is_created_once_and_can_be_found(self):
@@ -179,7 +220,7 @@ class CarePatientAndAccessContractTests(ScanPayOrderTestBase):
             self.patient, self.facility, organization
         )
         shared = {
-            "patient_abha": self.abha_number,
+            "abha_auth": self.abha_auth,
             "encounter": encounter,
             "hi_types": [HealthInformationType.OP_CONSULTATION.value],
         }

@@ -13,6 +13,14 @@ class CallbackType(models.TextChoices):
         "hip/token/on-generate-token",
     )
     LINK_ON_CARECONTEXT = ("link__on_carecontext", "link/on_carecontext")
+    LINKS_CONTEXT_ON_NOTIFY = (
+        "links__context__on_notify",
+        "links/context/on-notify",
+    )
+    PATIENTS_SMS_ON_NOTIFY = (
+        "patients__sms__on_notify",
+        "patients/sms/on-notify",
+    )
     PATIENT_CARE_CONTEXT_DISCOVER = (
         "patient__care_context__discover",
         "hip/patient/care-context/discover",

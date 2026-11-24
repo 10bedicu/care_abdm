@@ -6,7 +6,14 @@ from zoneinfo import ZoneInfo
 
 import jwt
 import requests
-from abdm.models import AbhaNumber, HealthFacility, InboundCallback, PaymentOrder
+from abdm.models import (
+    AbhaAuth,
+    AbhaAuthMethod,
+    AbhaNumber,
+    HealthFacility,
+    InboundCallback,
+    PaymentOrder,
+)
 from abdm.models.inbound_callback import CallbackStatus
 from abdm.models.payment_order import PaymentOrderStatus
 from abdm.open_payment_link import allow_open_payment_link_mutation
@@ -90,9 +97,22 @@ class ScanPayTestBase(CareAPITestBase):
         self.abha_number = baker.make(
             AbhaNumber,
             patient=self.patient,
-            health_id="testpatient@sbx",
             abha_number="91123456789012",
         )
+        self.abha_address = "testpatient@sbx"
+        self.abha_auth = baker.make(
+            AbhaAuth,
+            abha_number=self.abha_number,
+            health_facility=self.health_facility,
+            abha_address=self.abha_address,
+            method=AbhaAuthMethod.SCAN_AND_SHARE,
+        )
+        # billing here issues invoices, which would otherwise go on to be linked
+        enqueue_link = patch(
+            "abdm.signals.register_care_contexts.enqueue_link_care_context"
+        )
+        self.enqueue_link_care_context = enqueue_link.start()
+        self.addCleanup(enqueue_link.stop)
         self.account = baker.make(
             "emr.Account",
             facility=self.facility,
@@ -132,7 +152,7 @@ class ScanPayTestBase(CareAPITestBase):
             "intent": "OPEN_PAYMENT_ORDER",
             "metadata": {"hipId": hip_id or self.health_facility.hf_id},
             "profile": {
-                "patient": {"abhaAddress": abha_address or self.abha_number.health_id}
+                "patient": {"abhaAddress": abha_address or self.abha_address}
             },
         }
 
@@ -191,7 +211,7 @@ class TestShareOpenOrder(ScanPayTestBase):
         self.assertEqual(callback.status, CallbackStatus.COMPLETED)
 
         payload = mock_gateway.call_args[0][0]
-        self.assertEqual(payload["abha_address"], self.abha_number.health_id)
+        self.assertEqual(payload["abha_address"], self.abha_address)
         self.assertEqual(len(payload["procedures"]), 1)
         self.assertEqual(
             payload["procedures"][0]["category"], "Laboratory and Diagnostics"
@@ -348,6 +368,7 @@ class TestSelection(ScanPayTestBase):
         return PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
         )
 
@@ -355,7 +376,7 @@ class TestSelection(ScanPayTestBase):
         return {
             "intent": "PAYMENT_ORDER",
             "openOrderRequestId": str(order.open_order_request_id),
-            "abhaAddress": self.abha_number.health_id,
+            "abhaAddress": self.abha_address,
             "procedures": [
                 {
                     "category": "Laboratory and Diagnostics",
@@ -620,7 +641,7 @@ class TestSelection(ScanPayTestBase):
             self.account,
             self.facility,
             self.patient,
-            self.abha_number.health_id,
+            self.abha_address,
             first,
         )
 
@@ -630,7 +651,7 @@ class TestSelection(ScanPayTestBase):
                 self.account,
                 self.facility,
                 self.patient,
-                self.abha_number.health_id,
+                self.abha_address,
                 second,
             )
 
@@ -662,6 +683,7 @@ class TestPaymentNotify(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-1",
@@ -714,6 +736,7 @@ class TestPaymentNotify(ScanPayTestBase):
         PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-COMMIT",
@@ -755,6 +778,7 @@ class TestPaymentNotify(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-2",
@@ -799,6 +823,7 @@ class TestCreatePaymentReconciliation(ScanPayTestBase):
         return PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-REC",
@@ -904,6 +929,7 @@ class TestOrderStatus(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             order_number="INV-3",
             status=PaymentOrderStatus.PAYMENT_INITIATED,
@@ -914,7 +940,7 @@ class TestOrderStatus(ScanPayTestBase):
             {
                 "queryStatus": {
                     "orderNumber": "INV-3",
-                    "abhaAddress": self.abha_number.health_id,
+                    "abhaAddress": self.abha_address,
                     "openOrderRequestId": str(order.open_order_request_id),
                 }
             },
@@ -931,7 +957,7 @@ class TestOrderStatus(ScanPayTestBase):
             {
                 "queryStatus": {
                     "orderNumber": "INV-404",
-                    "abhaAddress": self.abha_number.health_id,
+                    "abhaAddress": self.abha_address,
                     "openOrderRequestId": uuid(),
                 }
             },
@@ -944,7 +970,7 @@ class TestOrderStatus(ScanPayTestBase):
         return {
             "queryStatus": {
                 "orderNumber": order.order_number,
-                "abhaAddress": self.abha_number.health_id,
+                "abhaAddress": self.abha_address,
                 "openOrderRequestId": order.open_order_request_id,
             }
         }
@@ -954,6 +980,7 @@ class TestOrderStatus(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             order_number="INV-FAILED",
             status=PaymentOrderStatus.FAIL,
@@ -971,6 +998,7 @@ class TestOrderStatus(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             order_number="INV-EXPIRED",
             status=PaymentOrderStatus.EXPIRED,
@@ -988,6 +1016,7 @@ class TestOrderStatus(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             order_number="INV-PENDING",
             status=PaymentOrderStatus.PAYMENT_INITIATED,
@@ -1026,6 +1055,7 @@ class TestReceipt(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             status=PaymentOrderStatus.PAYMENT_INITIATED,
         )
@@ -1038,6 +1068,7 @@ class TestReceipt(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             status=PaymentOrderStatus.SUCCESS,
         )
@@ -1086,6 +1117,7 @@ class TestReceipt(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-4",
@@ -1122,6 +1154,7 @@ class TestReceipt(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-NAME",
@@ -1165,6 +1198,7 @@ class TestReceipt(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-FAIL",
@@ -1278,6 +1312,7 @@ class TestReceipt(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-489-26",
@@ -1330,6 +1365,7 @@ class TestReceipt(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-NOTIFY",
@@ -1372,6 +1408,7 @@ class TestReceipt(ScanPayTestBase):
         failed = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-FAIL-NOTIFY",
@@ -1446,6 +1483,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         return PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             order_number="INV-CLOSE",
             status=order_status,
@@ -1470,6 +1508,7 @@ class TestClosePaymentOrder(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number="INV-CLOSE",

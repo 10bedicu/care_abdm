@@ -2,7 +2,6 @@ from datetime import datetime
 
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Q
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -30,14 +29,17 @@ from abdm.api.v3.serializers.health_id import (
     AbhaLoginVerifyUserSerializer,
     LinkAbhaNumberAndPatientSerializer,
 )
-from abdm.models import AbhaNumber, Transaction, TransactionType
-from abdm.service.helper import (
-    generate_care_contexts_for_existing_data,
-    validate_and_format_date,
+from abdm.models import AbhaAuthMethod, AbhaNumber, Transaction, TransactionType
+from abdm.service.abha import (
+    find_abha_number,
+    health_facility_for_facility,
+    latest_valid_auth,
+    record_abha_auth,
 )
-from abdm.service.v3.gateway import GatewayService
+from abdm.service.helper import validate_and_format_date
 from abdm.service.v3.health_id import HealthIdService
 from abdm.settings import plugin_settings as settings
+from abdm.tasks.link_care_context import enqueue_link_patient_care_contexts
 from abdm.utils.patient_identifier import ensure_abdm_patient_identifier
 from abdm.utils.user import get_or_create_abdm_user
 from care.emr.models.patient import Patient
@@ -78,10 +80,50 @@ def abha_login_identifier(login_type, value):
     return value
 
 
+def auth_method_for_enrolment(is_new) -> AbhaAuthMethod:
+    return (
+        AbhaAuthMethod.ABHA_CREATION if is_new else AbhaAuthMethod.STAFF_VERIFICATION
+    )
+
+
+def profile_fields_from_enrolment(profile, is_new):
+    date_of_birth = datetime.strptime(profile.get("dob"), "%d-%m-%Y")  # noqa: DTZ007
+
+    return {
+        "abha_number": profile.get("ABHANumber"),
+        "abha_address": (profile.get("phrAddress") or [None])[0],
+        "name": " ".join(
+            filter(
+                lambda x: (x or "").strip(),
+                [
+                    profile.get("firstName"),
+                    profile.get("middleName"),
+                    profile.get("lastName"),
+                ],
+            )
+        ),
+        "first_name": profile.get("firstName"),
+        "middle_name": profile.get("middleName"),
+        "last_name": profile.get("lastName"),
+        "gender": profile.get("gender"),
+        "date_of_birth": validate_and_format_date(
+            date_of_birth.year, date_of_birth.month, date_of_birth.day
+        ),
+        "address": profile.get("address"),
+        "district": profile.get("districtName"),
+        "state": profile.get("stateName"),
+        "pincode": profile.get("pinCode"),
+        "email": profile.get("email"),
+        "mobile": profile.get("mobile"),
+        "profile_photo": profile.get("photo"),
+        "new": is_new,
+    }
+
+
 def profile_fields_from_account(profile):
     return {
         "abha_number": profile.get("ABHANumber"),
-        "health_id": profile.get("preferredAbhaAddress"),
+        "abha_address": profile.get("preferredAbhaAddress"),
         "name": profile.get("name"),
         "first_name": profile.get("firstName"),
         "middle_name": profile.get("middleName"),
@@ -105,7 +147,7 @@ def profile_fields_from_account(profile):
 def profile_fields_from_abha_address(profile):
     return {
         "abha_number": profile.get("abhaNumber"),
-        "health_id": profile.get("abhaAddress"),
+        "abha_address": profile.get("abhaAddress"),
         "name": profile.get("fullName"),
         "first_name": profile.get("firstName"),
         "middle_name": profile.get("middleName"),
@@ -161,6 +203,44 @@ class HealthIdViewSet(GenericViewSet):
 
         return serializer.validated_data
 
+    def abha_number_data(self, abha_number, health_facility):
+        return AbhaNumberSerializer(
+            abha_number,
+            context={**self.get_serializer_context(), "health_facility": health_facility},
+        ).data
+
+    def record_enrolment(self, request, transaction_id, result, health_facility, method):
+        """Record the ABHA an Aadhaar enrolment returned, and the auth it stands for."""
+        profile = profile_fields_from_enrolment(
+            result.get("ABHAProfile"), result.get("isNew")
+        )
+        token = result.get("tokens")
+
+        abha_number, _, created = record_abha_auth(
+            abha_number=profile.get("abha_number"),
+            abha_address=profile.get("abha_address"),
+            profile=profile,
+            health_facility=health_facility,
+            method=auth_method_for_enrolment(result.get("isNew")),
+            performed_by=request.user,
+            tokens={
+                "access_token": token.get("token"),
+                "refresh_token": token.get("refreshToken"),
+            },
+        )
+
+        Transaction.objects.create(
+            reference_id=str(transaction_id),
+            type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
+            meta_data={
+                "abha_number": str(abha_number.external_id),
+                "method": method,
+            },
+            created_by=request.user,
+        )
+
+        return abha_number, created
+
     @action(detail=False, methods=["post"], url_path="link_patient")
     def link_abha_number_and_patient(self, request):
         validated_data = self.validate_request(request)
@@ -169,7 +249,9 @@ class HealthIdViewSet(GenericViewSet):
             external_id=validated_data.get("patient")
         ).first()
 
-        if not AuthorizationController.call("can_create_patient", self.request.user):
+        if not patient or not AuthorizationController.call(
+            "can_create_patient", self.request.user
+        ):
             return Response(
                 {
                     "detail": "Patient not found or you do not have permission to access the patient",
@@ -177,13 +259,7 @@ class HealthIdViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if hasattr(patient, "abha_number"):
-            return Response(
-                {
-                    "detail": "Patient already linked to an ABHA Number",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        health_facility = health_facility_for_facility(validated_data.get("facility"))
 
         abha_number = AbhaNumber.objects.filter(
             external_id=validated_data.get("abha_number")
@@ -197,10 +273,11 @@ class HealthIdViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if abha_number.patient is not None:
+        # an auth made before the ABHA had an address still proves who it belongs to
+        if not latest_valid_auth(abha_number, health_facility, require_address=False):
             return Response(
                 {
-                    "detail": "ABHA Number already linked to a patient",
+                    "detail": "This ABHA has not been verified at this facility, Please verify it again",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -208,44 +285,61 @@ class HealthIdViewSet(GenericViewSet):
         abdm_user = get_or_create_abdm_user()
 
         with transaction.atomic():
-            abha_number.patient = patient
-            abha_number.save(update_fields=["patient"])
+            abha_number = AbhaNumber.objects.select_for_update().get(pk=abha_number.pk)
 
-            if abha_number.abha_number:
-                ensure_abdm_patient_identifier(
-                    patient,
-                    system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
-                    display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
-                    value=abha_number.abha_number,
-                    created_by=abdm_user,
-                )
-
-            patient.build_instance_identifiers()
-            patient.save()
-
-        hf_care_contexts = generate_care_contexts_for_existing_data(patient)
-
-        for hf_id in hf_care_contexts:
-            care_contexts = hf_care_contexts.get(hf_id, [])
-
-            if len(care_contexts) > 0:
-                GatewayService.link__carecontext(
+            # the one to one constraint counts soft-deleted ABHA records too
+            if (
+                AbhaNumber._base_manager.filter(patient=patient)  # noqa: SLF001
+                .exclude(pk=abha_number.pk)
+                .exists()
+            ):
+                return Response(
                     {
-                        "patient": patient,
-                        "care_contexts": care_contexts,
-                        "user": request.user,
-                        "hf_id": hf_id,
-                    }
+                        "detail": "This patient is linked to one ABHA number, and the one just verified is different",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            if abha_number.patient_id and abha_number.patient_id != patient.id:
+                return Response(
+                    {
+                        "detail": "ABHA Number already linked to a patient",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # a patient who already holds this ABHA record is verifying it again
+            if not abha_number.patient_id:
+                abha_number.patient = patient
+                abha_number.save(update_fields=["patient"])
+
+                if abha_number.abha_number:
+                    ensure_abdm_patient_identifier(
+                        patient,
+                        system=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM,
+                        display=settings.ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_DISPLAY,
+                        value=abha_number.abha_number,
+                        created_by=abdm_user,
+                    )
+
+                patient.build_instance_identifiers()
+                patient.save()
+
+        transaction.on_commit(
+            lambda: enqueue_link_patient_care_contexts(
+                patient, health_facility, user=request.user
+            )
+        )
 
         return Response(
-            AbhaNumberSerializer(abha_number).data,
+            self.abha_number_data(abha_number, health_facility),
             status=status.HTTP_200_OK,
         )
 
     @action(detail=False, methods=["post"], url_path="create/verify_aadhaar_bio")
     def abha_create__verify_aadhaar_bio(self, request):
         validated_data = self.validate_request(request)
+        health_facility = health_facility_for_facility(validated_data.get("facility"))
 
         result = HealthIdService.enrollment__enrol__byAadhaar__via_bio(
             {
@@ -256,67 +350,18 @@ class HealthIdViewSet(GenericViewSet):
             }
         )
 
-        abha_profile = result.get("ABHAProfile")
-        token = result.get("tokens")
-        abha_number, created = AbhaNumber.objects.update_or_create(
-            abha_number=abha_profile.get("ABHANumber"),
-            defaults={
-                "abha_number": abha_profile.get("ABHANumber"),
-                "health_id": abha_profile.get("phrAddress", [None])[0],
-                "name": " ".join(
-                    list(
-                        filter(
-                            lambda x: x.strip(),
-                            [
-                                abha_profile.get("firstName"),
-                                abha_profile.get("middleName"),
-                                abha_profile.get("lastName"),
-                            ],
-                        )
-                    )
-                ),
-                "first_name": abha_profile.get("firstName"),
-                "middle_name": abha_profile.get("middleName"),
-                "last_name": abha_profile.get("lastName"),
-                "gender": abha_profile.get("gender"),
-                "date_of_birth": validate_and_format_date(
-                    datetime.strptime(
-                        abha_profile.get("dob"), "%d-%m-%Y"
-                    ).year,  # noqa DTZ007
-                    datetime.strptime(
-                        abha_profile.get("dob"), "%d-%m-%Y"
-                    ).month,  # noqa DTZ007
-                    datetime.strptime(
-                        abha_profile.get("dob"), "%d-%m-%Y"
-                    ).day,  # noqa DTZ007
-                ),
-                "address": abha_profile.get("address"),
-                "district": abha_profile.get("districtName"),
-                "state": abha_profile.get("stateName"),
-                "pincode": abha_profile.get("pinCode"),
-                "email": abha_profile.get("email"),
-                "mobile": abha_profile.get("mobile"),
-                "profile_photo": abha_profile.get("photo"),
-                "new": result.get("isNew"),
-                "access_token": token.get("token"),
-                "refresh_token": token.get("refreshToken"),
-            },
-        )
-
-        Transaction.objects.create(
-            reference_id=str(validated_data.get("transaction_id")),
-            type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
-            meta_data={
-                "abha_number": str(abha_number.external_id),
-                "method": "create_via_aadhaar_bio",
-            },
-            created_by=request.user,
+        abha_number, created = self.record_enrolment(
+            request,
+            validated_data.get("transaction_id"),
+            result,
+            health_facility,
+            "create_via_aadhaar_bio",
         )
 
         return Response(
             {
                 "transaction_id": result.get("txnId"),
-                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "abha_number": self.abha_number_data(abha_number, health_facility),
                 "created": created,
             },
             status=status.HTTP_200_OK,
@@ -358,6 +403,7 @@ class HealthIdViewSet(GenericViewSet):
     @action(detail=False, methods=["post"], url_path="create/verify_aadhaar_face")
     def abha_create__verify_aadhaar_face(self, request):
         validated_data = self.validate_request(request)
+        health_facility = health_facility_for_facility(validated_data.get("facility"))
 
         result = HealthIdService.enrollment__enrol__byAadhaar__via_face(
             {
@@ -367,67 +413,18 @@ class HealthIdViewSet(GenericViewSet):
             }
         )
 
-        abha_profile = result.get("ABHAProfile")
-        token = result.get("tokens")
-        abha_number, created = AbhaNumber.objects.update_or_create(
-            abha_number=abha_profile.get("ABHANumber"),
-            defaults={
-                "abha_number": abha_profile.get("ABHANumber"),
-                "health_id": abha_profile.get("phrAddress", [None])[0],
-                "name": " ".join(
-                    list(
-                        filter(
-                            lambda x: x.strip(),
-                            [
-                                abha_profile.get("firstName"),
-                                abha_profile.get("middleName"),
-                                abha_profile.get("lastName"),
-                            ],
-                        )
-                    )
-                ),
-                "first_name": abha_profile.get("firstName"),
-                "middle_name": abha_profile.get("middleName"),
-                "last_name": abha_profile.get("lastName"),
-                "gender": abha_profile.get("gender"),
-                "date_of_birth": validate_and_format_date(
-                    datetime.strptime(
-                        abha_profile.get("dob"), "%d-%m-%Y"
-                    ).year,  # noqa DTZ007
-                    datetime.strptime(
-                        abha_profile.get("dob"), "%d-%m-%Y"
-                    ).month,  # noqa DTZ007
-                    datetime.strptime(
-                        abha_profile.get("dob"), "%d-%m-%Y"
-                    ).day,  # noqa DTZ007
-                ),
-                "address": abha_profile.get("address"),
-                "district": abha_profile.get("districtName"),
-                "state": abha_profile.get("stateName"),
-                "pincode": abha_profile.get("pinCode"),
-                "email": abha_profile.get("email"),
-                "mobile": abha_profile.get("mobile"),
-                "profile_photo": abha_profile.get("photo"),
-                "new": result.get("isNew"),
-                "access_token": token.get("token"),
-                "refresh_token": token.get("refreshToken"),
-            },
-        )
-
-        Transaction.objects.create(
-            reference_id=str(validated_data.get("transaction_id")),
-            type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
-            meta_data={
-                "abha_number": str(abha_number.external_id),
-                "method": "create_via_aadhaar_face",
-            },
-            created_by=request.user,
+        abha_number, created = self.record_enrolment(
+            request,
+            validated_data.get("transaction_id"),
+            result,
+            health_facility,
+            "create_via_aadhaar_face",
         )
 
         return Response(
             {
                 "transaction_id": result.get("txnId"),
-                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "abha_number": self.abha_number_data(abha_number, health_facility),
                 "created": created,
             },
             status=status.HTTP_200_OK,
@@ -438,6 +435,7 @@ class HealthIdViewSet(GenericViewSet):
     )
     def abha_create__verify_aadhaar_demographics(self, request):
         validated_data = self.validate_request(request)
+        health_facility = health_facility_for_facility(validated_data.get("facility"))
 
         result = HealthIdService.enrollment__enrol__byAadhaar__via_demographics(
             {
@@ -459,11 +457,10 @@ class HealthIdViewSet(GenericViewSet):
 
         abha_profile = result
         token = result.get("jwtResponse")
-        abha_number, created = AbhaNumber.objects.update_or_create(
+        abha_number, _, created = record_abha_auth(
             abha_number=abha_profile.get("healthIdNumber"),
-            defaults={
-                "abha_number": abha_profile.get("healthIdNumber"),
-                "health_id": abha_profile.get("healthId"),
+            abha_address=abha_profile.get("healthId"),
+            profile={
                 "name": abha_profile.get("name"),
                 "first_name": abha_profile.get("firstName"),
                 "middle_name": abha_profile.get("middleName"),
@@ -482,6 +479,11 @@ class HealthIdViewSet(GenericViewSet):
                 "mobile": abha_profile.get("mobile"),
                 "profile_photo": abha_profile.get("profilePhoto"),
                 "new": result.get("new"),
+            },
+            health_facility=health_facility,
+            method=auth_method_for_enrolment(result.get("new")),
+            performed_by=request.user,
+            tokens={
                 "access_token": token.get("token"),
                 "refresh_token": token.get("refreshToken"),
             },
@@ -500,7 +502,7 @@ class HealthIdViewSet(GenericViewSet):
         return Response(
             {
                 "transaction_id": result.get("txnId"),
-                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "abha_number": self.abha_number_data(abha_number, health_facility),
                 "created": created,
             },
             status=status.HTTP_200_OK,
@@ -530,6 +532,7 @@ class HealthIdViewSet(GenericViewSet):
     @action(detail=False, methods=["post"], url_path="create/verify_aadhaar_otp")
     def abha_create__verify_aadhaar_otp(self, request):
         validated_data = self.validate_request(request)
+        health_facility = health_facility_for_facility(validated_data.get("facility"))
 
         result = HealthIdService.enrollment__enrol__byAadhaar__via_otp(
             {
@@ -539,68 +542,19 @@ class HealthIdViewSet(GenericViewSet):
             }
         )
 
-        abha_profile = result.get("ABHAProfile")
-        token = result.get("tokens")
-        abha_number, created = AbhaNumber.objects.update_or_create(
-            abha_number=abha_profile.get("ABHANumber"),
-            defaults={
-                "abha_number": abha_profile.get("ABHANumber"),
-                "health_id": abha_profile.get("phrAddress", [None])[0],
-                "name": " ".join(
-                    list(
-                        filter(
-                            lambda x: x.strip(),
-                            [
-                                abha_profile.get("firstName"),
-                                abha_profile.get("middleName"),
-                                abha_profile.get("lastName"),
-                            ],
-                        )
-                    )
-                ),
-                "first_name": abha_profile.get("firstName"),
-                "middle_name": abha_profile.get("middleName"),
-                "last_name": abha_profile.get("lastName"),
-                "gender": abha_profile.get("gender"),
-                "date_of_birth": validate_and_format_date(
-                    datetime.strptime(
-                        abha_profile.get("dob"), "%d-%m-%Y"
-                    ).year,  # noqa DTZ007
-                    datetime.strptime(
-                        abha_profile.get("dob"), "%d-%m-%Y"
-                    ).month,  # noqa DTZ007
-                    datetime.strptime(
-                        abha_profile.get("dob"), "%d-%m-%Y"
-                    ).day,  # noqa DTZ007
-                ),
-                "address": abha_profile.get("address"),
-                "district": abha_profile.get("districtName"),
-                "state": abha_profile.get("stateName"),
-                "pincode": abha_profile.get("pinCode"),
-                "email": abha_profile.get("email"),
-                "mobile": abha_profile.get("mobile"),
-                "profile_photo": abha_profile.get("photo"),
-                "new": result.get("isNew"),
-                "access_token": token.get("token"),
-                "refresh_token": token.get("refreshToken"),
-            },
-        )
-
-        Transaction.objects.create(
-            reference_id=str(validated_data.get("transaction_id")),
-            type=TransactionType.CREATE_OR_LINK_ABHA_NUMBER,
-            meta_data={
-                "abha_number": str(abha_number.external_id),
-                "method": "create_via_aadhaar_otp",
-            },
-            created_by=request.user,
+        abha_number, created = self.record_enrolment(
+            request,
+            validated_data.get("transaction_id"),
+            result,
+            health_facility,
+            "create_via_aadhaar_otp",
         )
 
         return Response(
             {
                 "transaction_id": result.get("txnId"),
                 "detail": result.get("message"),
-                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "abha_number": self.abha_number_data(abha_number, health_facility),
                 "created": created,
             },
             status=status.HTTP_200_OK,
@@ -668,6 +622,7 @@ class HealthIdViewSet(GenericViewSet):
     @action(detail=False, methods=["post"], url_path="create/enrol_abha_address")
     def abha_create__enrol_abha_address(self, request):
         validated_data = self.validate_request(request)
+        health_facility = health_facility_for_facility(validated_data.get("facility"))
 
         result = HealthIdService.enrollment__enrol__abha_address(
             {
@@ -677,10 +632,7 @@ class HealthIdViewSet(GenericViewSet):
             }
         )
 
-        abha_number = AbhaNumber.objects.filter(
-            Q(abha_number=result.get("healthIdNumber"))
-            | Q(health_id=result.get("healthIdNumber"))
-        ).first()
+        abha_number = find_abha_number(result.get("healthIdNumber"))
 
         if not abha_number:
             return Response(
@@ -693,30 +645,23 @@ class HealthIdViewSet(GenericViewSet):
         profile_result = HealthIdService.profile__account(
             {"x_token": abha_number.access_token}
         )
+        profile = profile_fields_from_account(profile_result)
 
-        abha_number, _ = AbhaNumber.objects.update_or_create(
-            pk=abha_number.pk,
-            defaults={
-                "abha_number": profile_result.get("ABHANumber"),
-                "health_id": profile_result.get("preferredAbhaAddress"),
-                "name": profile_result.get("name"),
-                "first_name": profile_result.get("firstName"),
-                "middle_name": profile_result.get("middleName"),
-                "last_name": profile_result.get("lastName"),
-                "gender": profile_result.get("gender"),
-                "date_of_birth": validate_and_format_date(
-                    profile_result.get("yearOfBirth"),
-                    profile_result.get("monthOfBirth"),
-                    profile_result.get("dayOfBirth"),
-                ),
-                "address": profile_result.get("address"),
-                "district": profile_result.get("districtName"),
-                "state": profile_result.get("stateName"),
-                "pincode": profile_result.get("pincode"),
-                "email": profile_result.get("email"),
-                "mobile": profile_result.get("mobile"),
-                "profile_photo": profile_result.get("profilePhoto"),
-            },
+        # the address is enrolled as part of the verification that came before
+        # it, so the auth for it is of the same kind
+        previous_auth = latest_valid_auth(
+            abha_number, health_facility, require_address=False
+        )
+        abha_number, _, _ = record_abha_auth(
+            abha_number=profile.get("abha_number") or abha_number.abha_number,
+            abha_address=profile.get("abha_address")
+            or result.get("preferredAbhaAddress"),
+            profile=profile,
+            health_facility=health_facility,
+            method=previous_auth.method
+            if previous_auth and previous_auth.method != AbhaAuthMethod.LEGACY
+            else auth_method_for_enrolment(abha_number.new),
+            performed_by=request.user,
         )
 
         Transaction.objects.create(
@@ -733,7 +678,7 @@ class HealthIdViewSet(GenericViewSet):
                 "transaction_id": result.get("txnId"),
                 "health_id": result.get("healthIdNumber"),
                 "preferred_abha_address": result.get("preferredAbhaAddress"),
-                "abha_number": AbhaNumberSerializer(abha_number).data,
+                "abha_number": self.abha_number_data(abha_number, health_facility),
             },
             status=status.HTTP_200_OK,
         )
@@ -925,6 +870,7 @@ class HealthIdViewSet(GenericViewSet):
     @action(detail=False, methods=["post"], url_path="login/verify_user")
     def abha_login__verify_user(self, request):
         validated_data = self.validate_request(request)
+        health_facility = health_facility_for_facility(validated_data.get("facility"))
 
         transaction_id = str(validated_data.get("transaction_id"))
         account_id = validated_data.get("account_id")
@@ -986,17 +932,14 @@ class HealthIdViewSet(GenericViewSet):
                 HealthIdService.profile__account({"x_token": access_token})
             )
 
-        abha_number = AbhaNumber.objects.filter(
-            Q(health_id=profile.get("health_id"))
-            | (Q(abha_number=profile.get("abha_number")) & Q(abha_number__isnull=False))
-        ).first()
-        abha_number, created = AbhaNumber.objects.update_or_create(
-            pk=abha_number.pk if abha_number else None,
-            defaults={
-                **profile,
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-            },
+        abha_number, _, created = record_abha_auth(
+            abha_number=profile.get("abha_number"),
+            abha_address=profile.get("abha_address"),
+            profile=profile,
+            health_facility=health_facility,
+            method=AbhaAuthMethod.STAFF_VERIFICATION,
+            performed_by=request.user,
+            tokens={"access_token": access_token, "refresh_token": refresh_token},
         )
 
         Transaction.objects.create(
@@ -1014,7 +957,10 @@ class HealthIdViewSet(GenericViewSet):
         cache.delete(cache_key)
 
         return Response(
-            {"abha_number": AbhaNumberSerializer(abha_number).data, "created": created},
+            {
+                "abha_number": self.abha_number_data(abha_number, health_facility),
+                "created": created,
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -1050,9 +996,7 @@ class HealthIdViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        abha_number = AbhaNumber.objects.filter(
-            Q(abha_number=abha_id) | Q(health_id=abha_id)
-        ).first()
+        abha_number = find_abha_number(abha_id)
 
         if not abha_number:
             return Response(

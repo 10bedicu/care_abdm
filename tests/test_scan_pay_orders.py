@@ -72,6 +72,7 @@ class ScanPayOrderTestBase(ScanPayTestBase):
         order = PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             invoice=invoice,
             order_number=number,
@@ -105,6 +106,7 @@ class TestScanPayOrderList(ScanPayOrderTestBase):
         PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=other_hf,
             order_number="ELSEWHERE",
         )
@@ -120,7 +122,7 @@ class TestScanPayOrderList(ScanPayOrderTestBase):
         self.assertEqual(row["invoice"]["id"], str(invoice.external_id))
         self.assertEqual(row["invoice"]["number"], "ORD-1")
         self.assertEqual(row["patient"]["name"], self.patient.name)
-        self.assertEqual(row["abha_address"], self.abha_number.health_id)
+        self.assertEqual(row["abha_address"], self.abha_address)
         self.assertIsNone(row["receipt_url"])
 
     def test_hides_awaiting_selection_orders(self):
