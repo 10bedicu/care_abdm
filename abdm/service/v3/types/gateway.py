@@ -85,6 +85,7 @@ class ConsentRequestHipOnNotifyResponse(TypedDict):
 class DataFlowHealthInformationHipOnRequestBody(TypedDict):
     transaction_id: str
     request_id: str
+    error: NotRequired[dict | None]
 
 
 class DataFlowHealthInformationHipOnRequestResponse(TypedDict):
@@ -95,6 +96,7 @@ class DataFlowHealthInformationTransferBody(TypedDict):
     url: str
     consent: ConsentArtefact
     transaction_id: str
+    date_range: dict
     key_material__crypto_algorithm: str
     key_material__curve: str
     key_material__public_key: str
