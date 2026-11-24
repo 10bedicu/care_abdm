@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
+from html import escape
 
+from django.conf import settings
 from fhir.resources.R4B.codeableconcept import CodeableConcept
 from fhir.resources.R4B.coding import Coding
 from fhir.resources.R4B.contactpoint import ContactPoint
@@ -7,7 +9,8 @@ from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.meta import Meta
 from fhir.resources.R4B.narrative import Narrative
-from fhir.resources.R4B.practitioner import Practitioner
+from fhir.resources.R4B.practitioner import Practitioner, PractitionerQualification
+from fhir.resources.R4B.reference import Reference
 
 from abdm.utils.fhir.base import cache_profiles
 from care.emr.resources.patient.spec import GenderChoices
@@ -20,6 +23,48 @@ GENDER_MAP = {
     GenderChoices.non_binary: "other",
     GenderChoices.transgender: "other",
 }
+
+
+def _qualifications(user: UserModel):
+    displays = {
+        (degree.get("system"), degree.get("code")): degree.get("display")
+        for degree in settings.USER_QUALIFICATION_DEGREES
+    }
+    qualifications = []
+    for qualification in user.qualifications or []:
+        degree = qualification.get("degree") or {}
+        if not degree.get("code") or not degree.get("system"):
+            continue
+        qualifications.append(
+            {
+                "system": degree["system"],
+                "code": degree["code"],
+                "display": displays.get((degree["system"], degree["code"]))
+                or degree["code"],
+                "registration_number": (
+                    qualification.get("registration_number") or ""
+                ).strip(),
+                "issuer": (qualification.get("issuer") or "").strip(),
+            }
+        )
+    return qualifications
+
+
+def _registration_identifier(registration_number: str, issuer: str):
+    return Identifier(
+        type=CodeableConcept(
+            coding=[
+                Coding(
+                    system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                    code="LN",
+                    display="License number",
+                )
+            ],
+            text="License number",
+        ),
+        value=registration_number,
+        assigner=Reference(display=issuer) if issuer else None,
+    )
 
 
 class PractitionerMixin:
@@ -43,6 +88,34 @@ class PractitionerMixin:
             )
         if user_spec.email:
             practitioner_div_parts.append(f"<p><b>Email:</b> {user_spec.email}</p>")
+
+        qualifications = _qualifications(user)
+        for qualification in qualifications:
+            details = ", ".join(
+                filter(
+                    None,
+                    [
+                        f"Reg. No. {qualification['registration_number']}"
+                        if qualification["registration_number"]
+                        else None,
+                        qualification["issuer"],
+                    ],
+                )
+            )
+            practitioner_div_parts.append(
+                f"<p><b>Qualification:</b> {escape(qualification['display'])}"
+                + (f" ({escape(details)})" if details else "")
+                + "</p>"
+            )
+
+        # One council registration often covers several degrees, so list it once
+        registrations = list(
+            dict.fromkeys(
+                (qualification["registration_number"], qualification["issuer"])
+                for qualification in qualifications
+                if qualification["registration_number"]
+            )
+        )
 
         return Practitioner(
             id=id,
@@ -72,7 +145,11 @@ class PractitionerMixin:
                         ],
                         text="Provider number",
                     ),
-                )
+                ),
+                *[
+                    _registration_identifier(registration_number, issuer)
+                    for registration_number, issuer in registrations
+                ],
             ],
             name=[HumanName(text=user.full_name or user.username)],
             telecom=[
@@ -91,4 +168,26 @@ class PractitionerMixin:
             if user_spec.gender
             else None,
             birthDate=user.date_of_birth,
+            qualification=[
+                PractitionerQualification(
+                    identifier=[Identifier(value=qualification["registration_number"])]
+                    if qualification["registration_number"]
+                    else None,
+                    code=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system=qualification["system"],
+                                code=qualification["code"],
+                                display=qualification["display"],
+                            )
+                        ],
+                        text=qualification["display"],
+                    ),
+                    issuer=Reference(display=qualification["issuer"])
+                    if qualification["issuer"]
+                    else None,
+                )
+                for qualification in qualifications
+            ]
+            or None,
         )

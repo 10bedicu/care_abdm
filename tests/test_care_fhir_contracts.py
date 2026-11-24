@@ -11,7 +11,7 @@ from abdm.service.helper import (
 )
 from abdm.utils.fhir.fhir import Fhir
 from abdm.utils.fhir.resources.encounter import ENCOUNTER_CLASS_CODE_MAP
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from model_bakery import baker
 
 from care.emr.models.allergy_intolerance import AllergyIntolerance
@@ -96,6 +96,8 @@ VACCINE = {
     "display": "COVID-19 antigen vaccine",
 }
 
+DEGREE_SYSTEM = "http://ohc.network/codes/qualification-degree"
+
 FHIR_RESOURCE_MODULES = [
     "allergy_intolerance",
     "charge_item",
@@ -171,6 +173,50 @@ class CareFhirContractTests(CareAPITestBase):
         self.assertEqual(organization.resource_type, "Organization")
         self.assertEqual(organization.name, self.facility.name)
         self.assertEqual(practitioner.resource_type, "Practitioner")
+
+    @override_settings(
+        USER_QUALIFICATION_DEGREES=[
+            {"code": "mbbs", "system": DEGREE_SYSTEM, "display": "MBBS"},
+            {"code": "md", "system": DEGREE_SYSTEM, "display": "MD"},
+        ]
+    )
+    def test_practitioner_carries_qualifications_and_registration(self):
+        registration = {
+            "registration_number": "KMC-1234",
+            "issuer": "Kerala Medical Council",
+        }
+        self.user.qualifications = [
+            {**registration, "degree": {"code": "mbbs", "system": DEGREE_SYSTEM}},
+            {**registration, "degree": {"code": "md", "system": DEGREE_SYSTEM}},
+        ]
+
+        practitioner = self.fhir._practitioner(self.user)
+
+        self.assertEqual(
+            [
+                (
+                    qualification.code.coding[0].code,
+                    qualification.code.coding[0].display,
+                    qualification.identifier[0].value,
+                    qualification.issuer.display,
+                )
+                for qualification in practitioner.qualification
+            ],
+            [
+                ("mbbs", "MBBS", "KMC-1234", "Kerala Medical Council"),
+                ("md", "MD", "KMC-1234", "Kerala Medical Council"),
+            ],
+        )
+        self.assertEqual(
+            [
+                (identifier.type.coding[0].code, identifier.value)
+                for identifier in practitioner.identifier
+            ],
+            [("PRN", str(self.user.external_id)), ("LN", "KMC-1234")],
+        )
+        self.assertEqual(
+            practitioner.identifier[1].assigner.display, "Kerala Medical Council"
+        )
 
     def test_encounter_uses_care_class_and_status(self):
         resource = self.fhir._encounter(self.encounter)
