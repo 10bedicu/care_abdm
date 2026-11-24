@@ -14,7 +14,7 @@ from abdm.models import (
     TransactionType,
 )
 from abdm.models.base import Status
-from abdm.models.consent import ConsentArtefact
+from abdm.models.consent import ConsentArtefact, ConsentRequest
 from abdm.service.helper import uuid, validate_and_format_date
 from abdm.service.v3.callback_handlers import CallbackProcessingError
 from abdm.service.v3.gateway import GatewayService
@@ -379,6 +379,63 @@ def handle_health_information_request(validated_data: dict, headers: dict):
         )
 
 
+def _can_set_abha_identifier(abha_number: AbhaNumber, field: str, value: str) -> bool:
+    # Both identifiers are unique across deleted rows too, and consents reference
+    # the address by value, so writing either one blindly fails the whole share.
+    if getattr(abha_number, field) == value:
+        return True
+
+    if (
+        AbhaNumber._base_manager.filter(**{field: value})  # noqa: SLF001
+        .exclude(pk=abha_number.pk)
+        .exists()
+    ):
+        return False
+
+    if field == "health_id" and abha_number.health_id:
+        return not any(
+            consent._base_manager.filter(  # noqa: SLF001
+                patient_abha_id=abha_number.health_id
+            ).exists()
+            for consent in (ConsentRequest, ConsentArtefact)
+        )
+
+    return True
+
+
+def _match_shared_abha(patient_data: dict) -> tuple[AbhaNumber | None, dict]:
+    identifiers = {
+        "abha_number": patient_data.get("abhaNumber"),
+        "health_id": patient_data.get("abhaAddress"),
+    }
+
+    # the ABHA number identifies the person; the address can differ between visits
+    abha_number = None
+    if identifiers["abha_number"]:
+        abha_number = AbhaNumber.objects.filter(
+            abha_number=identifiers["abha_number"]
+        ).first()
+    if not abha_number:
+        abha_number = AbhaNumber.objects.filter(
+            health_id=identifiers["health_id"]
+        ).first()
+    if not abha_number:
+        return None, identifiers
+
+    writable = {
+        field: value
+        for field, value in identifiers.items()
+        if value and _can_set_abha_identifier(abha_number, field, value)
+    }
+    if "health_id" not in writable:
+        logger.info(
+            "Shared ABHA address was not stored on ABHA record %s, keeping the one in use",
+            abha_number.external_id,
+        )
+
+    return abha_number, writable
+
+
 def handle_patient_share(validated_data: dict, headers: dict):
     hip_id = validated_data.get("metaData").get("hipId")
     health_facility = HealthFacility.objects.filter(hf_id=hip_id).first()
@@ -399,18 +456,11 @@ def handle_patient_share(validated_data: dict, headers: dict):
         )
 
     patient_data = validated_data.get("profile").get("patient")
-    abha_number = AbhaNumber.objects.filter(
-        Q(health_id=patient_data.get("abhaAddress"))
-        | (
-            Q(abha_number=patient_data.get("abhaNumber"))
-            & Q(abha_number__isnull=False)
-        )
-    ).first()
+    abha_number, shared_identifiers = _match_shared_abha(patient_data)
     (abha_number, created) = AbhaNumber.objects.update_or_create(
         pk=abha_number.pk if abha_number else None,
         defaults={
-            "abha_number": patient_data.get("abhaNumber"),
-            "health_id": patient_data.get("abhaAddress"),
+            **shared_identifiers,
             "name": patient_data.get("name"),
             "gender": patient_data.get("gender"),
             "date_of_birth": validate_and_format_date(
@@ -524,7 +574,7 @@ def handle_patient_share(validated_data: dict, headers: dict):
         {
             "acknowledgement": {
                 "status": "SUCCESS",
-                "abha_address": abha_number.health_id,
+                "abha_address": patient_data.get("abhaAddress"),
                 "context": validated_data.get("metaData").get("context"),
                 "token_number": token.number,
                 "expiry": settings.ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME,
