@@ -34,6 +34,7 @@ ABHA_NUMBER = "91-1111-2222-3333"
 OTHER_ABHA_NUMBER = "91-4444-5555-6666"
 
 ABHA_NUMBER_URL = "/api/abdm/abha_number/"
+ABHA_CARD_URL = "/api/abdm/v3/health_id/abha_card/"
 CONSENT_URL = "/api/abdm/consent/"
 LINK_PATIENT_URL = "/api/abdm/v3/health_id/link_patient/"
 VERIFY_IDENTITY_URL = "/api/abdm/v3/hiu/verify_identity/"
@@ -324,8 +325,6 @@ class AbhaNumberApiTests(AbhaAuthTestBase):
         _, elsewhere, _ = self.authenticate(
             ABHA_NUMBER, "elsewhere@sbx", self.other_health_facility
         )
-        unverified = self.create_facility(self.user)
-        baker.make(HealthFacility, facility=unverified, hf_id="HIP_C")
 
         def get(key, facility):
             response = self.client.get(
@@ -355,10 +354,53 @@ class AbhaNumberApiTests(AbhaAuthTestBase):
         self.assertEqual(there["abha_address"], "elsewhere@sbx")
         self.assertEqual(there["auth"]["id"], str(elsewhere.external_id))
 
-        # no auth there: the address last used anywhere, and no auth to act on
-        nowhere = get(self.patient.external_id, unverified)
-        self.assertEqual(nowhere["abha_address"], "elsewhere@sbx")
-        self.assertIsNone(nowhere["auth"])
+    def test_record_is_hidden_from_a_facility_it_was_not_verified_at(self):
+        self.link_patient()
+        unverified = self.create_facility(self.user)
+        baker.make(HealthFacility, facility=unverified, hf_id="HIP_C")
+        unregistered = self.create_facility(self.user)
+        invalidated = self.create_facility(self.user)
+        invalidated_health_facility = baker.make(
+            HealthFacility, facility=invalidated, hf_id="HIP_D"
+        )
+        _, auth, _ = self.authenticate(
+            ABHA_NUMBER, "ravi@sbx", invalidated_health_facility
+        )
+        AbhaAuth.objects.filter(pk=auth.pk).update(
+            invalidated_at=timezone.now(),
+            invalidation_reason=AbhaAuthInvalidationReason.LINK_TOKEN_REFUSED,
+        )
+
+        for query in (
+            {"facility": str(unverified.external_id)},
+            {"facility": str(unregistered.external_id)},
+            {"facility": str(invalidated.external_id)},
+            {"facility": "not-a-uuid"},
+            {},
+        ):
+            with self.subTest(query=query):
+                response = self.client.get(
+                    f"{ABHA_NUMBER_URL}{self.patient.external_id}/", query
+                )
+
+                self.assertEqual(response.status_code, 404)
+
+    @patch("abdm.api.v3.viewsets.health_id.HealthIdService.profile__account__abha_card")
+    def test_card_is_only_given_to_a_facility_it_was_verified_at(self, abha_card):
+        abha_card.return_value = b"card"
+        self.link_patient()
+
+        def get(facility):
+            return self.client.get(
+                ABHA_CARD_URL,
+                {"abha_id": ABHA_NUMBER, "type": "png"}
+                | ({"facility": str(facility.external_id)} if facility else {}),
+            )
+
+        self.assertEqual(get(self.facility).status_code, 200)
+        self.assertEqual(get(self.other_facility).status_code, 404)
+        self.assertEqual(get(None).status_code, 400)
+        abha_card.assert_called_once()
 
     def test_scan_and_pull_records_an_auth_at_the_facility(self):
         body = {

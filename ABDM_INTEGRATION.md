@@ -362,9 +362,10 @@ See [abdm/urls.py](abdm/urls.py).
 - `POST /abha_number` — scan and pull: record an ABHA read at a facility
   (`facility` required) and the auth for it.
 - `GET /abha_number/{id}?facility=` — retrieve by patient id, ABHA number or ABHA
-  address. The response carries `abha_address` and `auth` as seen from that
-  facility: the latest valid auth there, with the address falling back to the one
-  last used anywhere.
+  address. Only a facility holding a valid auth for the record may see it; any
+  other facility, or a request without `facility`, gets a 404. The response
+  carries `abha_address` and `auth` as seen from that facility: the latest valid
+  auth there, with the address falling back to the one last used anywhere.
 
 #### `ConsentViewSet` — [abdm/api/viewsets/consent.py](abdm/api/viewsets/consent.py)
 - `POST /consent` — create a consent request for an `encounter` via
@@ -399,6 +400,9 @@ Every endpoint that returns a verified ABHA takes `facility` and records an
 valid auth for it at `facility`, and creates a `PatientIdentifier`. Repeating it
 for the same record is how a patient verifies again; a different record is
 refused. It then links the patient's ready records at that facility.
+
+**ABHA card**: `GET abha_card?abha_id=&facility=` — the card image, only for a
+facility holding a valid auth for the record; any other facility gets a 404.
 
 #### `HIPViewSet` & `HIPCallbackViewSet` — [abdm/api/v3/viewsets/hip.py](abdm/api/v3/viewsets/hip.py)
 

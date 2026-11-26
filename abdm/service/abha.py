@@ -10,6 +10,7 @@ to a health facility, through the ``AbhaAuth`` made there.
 
 import logging
 import re
+from uuid import UUID
 
 from django.db import transaction
 from django.db.models import F
@@ -67,6 +68,20 @@ def health_facility_for_facility(facility_external_id) -> HealthFacility:
     if not health_facility:
         raise HealthFacilityNotRegistered
     return health_facility
+
+
+def viewing_health_facility(facility_external_id) -> HealthFacility | None:
+    """The health facility an ABHA is looked at from, by the facility's external id
+    as a request gives it. None when the id is missing, malformed or unregistered."""
+    try:
+        facility = UUID(str(facility_external_id)) if facility_external_id else None
+    except ValueError:
+        return None
+    return (
+        HealthFacility.objects.filter(facility_id=facility).first()
+        if facility
+        else None
+    )
 
 
 def abha_number_variants(abha_number: str | None) -> list[str]:

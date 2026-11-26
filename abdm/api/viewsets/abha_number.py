@@ -22,7 +22,9 @@ from abdm.models import (
 from abdm.service.abha import (
     find_abha_number,
     health_facility_for_facility,
+    latest_valid_auth,
     record_abha_auth,
+    viewing_health_facility,
 )
 from abdm.service.helper import uuid
 from care.security.authorization.base import AuthorizationController
@@ -51,15 +53,19 @@ class AbhaNumberViewSet(
 
         return super().get_serializer_class()
 
+    def get_viewing_health_facility(self) -> HealthFacility | None:
+        if not hasattr(self, "_viewing_health_facility"):
+            self._viewing_health_facility = viewing_health_facility(
+                self.request.query_params.get("facility")
+            )
+        return self._viewing_health_facility
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
 
-        # the facility the ABHA record is being looked at from
-        facility = _as_uuid(self.request.query_params.get("facility"))
-        if facility:
-            context["health_facility"] = HealthFacility.objects.filter(
-                facility_id=facility
-            ).first()
+        health_facility = self.get_viewing_health_facility()
+        if health_facility:
+            context["health_facility"] = health_facility
 
         return context
 
@@ -73,6 +79,13 @@ class AbhaNumberViewSet(
             instance = find_abha_number(id)
 
         if not instance:
+            raise Http404
+
+        # only a facility the ABHA has been verified at may see it; an auth made
+        # before the ABHA had an address still counts
+        if not latest_valid_auth(
+            instance, self.get_viewing_health_facility(), require_address=False
+        ):
             raise Http404
 
         if not AuthorizationController.call(

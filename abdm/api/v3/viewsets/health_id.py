@@ -35,6 +35,7 @@ from abdm.service.abha import (
     health_facility_for_facility,
     latest_valid_auth,
     record_abha_auth,
+    viewing_health_facility,
 )
 from abdm.service.helper import validate_and_format_date
 from abdm.service.v3.health_id import HealthIdService
@@ -996,9 +997,33 @@ class HealthIdViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        facility = request.query_params.get("facility")
+
+        if not facility:
+            return Response(
+                {
+                    "detail": "Facility is required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         abha_number = find_abha_number(abha_id)
 
-        if not abha_number:
+        # only a facility the ABHA has been verified at may download its card
+        if (
+            not abha_number
+            or not latest_valid_auth(
+                abha_number,
+                viewing_health_facility(facility),
+                require_address=False,
+            )
+            or (
+                abha_number.patient
+                and not AuthorizationController.call(
+                    "can_view_patient_obj", request.user, abha_number.patient
+                )
+            )
+        ):
             return Response(
                 {
                     "detail": "ABHA Number not found for the given ABHA ID",
