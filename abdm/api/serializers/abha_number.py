@@ -26,7 +26,7 @@ class AbhaNumberSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AbhaNumber
-        exclude = ("deleted", "access_token", "refresh_token")
+        exclude = ("deleted", "access_token", "refresh_token", "abha_address_legacy")
 
     def get_abha_address(self, obj):
         return current_abha_address(obj, self.context.get("health_facility"))

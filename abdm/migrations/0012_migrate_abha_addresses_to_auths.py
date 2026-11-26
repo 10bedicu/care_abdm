@@ -1,4 +1,5 @@
-"""Moves ABHA addresses off ``AbhaNumber.health_id`` before the column is dropped.
+"""Moves ABHA addresses off ``AbhaNumber.health_id`` before the column is retired
+as ``abha_address_legacy``.
 
 Every step walks its table in primary-key batches. Historical models have no
 soft-delete manager, so ``deleted`` is filtered explicitly where it matters.
@@ -12,6 +13,7 @@ BATCH_SIZE = 1000
 
 LEGACY = "legacy"
 
+SCAN_AND_SHARE = 3
 LINK_CARE_CONTEXT = 4
 TRANSACTION_INITIATED = 1
 TRANSACTION_COMPLETED = 2
@@ -175,6 +177,61 @@ def create_legacy_auths(apps, by_facility):
                 for patient_id, facility_id in visits
             },
         )
+
+
+def backfill_scan_and_share_auths(apps, by_facility):
+    AbhaAuth = apps.get_model("abdm", "AbhaAuth")
+    AbhaNumber = apps.get_model("abdm", "AbhaNumber")
+    Facility = apps.get_model("facility", "Facility")
+    Token = apps.get_model("emr", "Token")
+    Transaction = apps.get_model("abdm", "Transaction")
+
+    health_facilities = {
+        facility_pk: by_facility[facility_external_id]
+        for facility_external_id, facility_pk in Facility.objects.filter(
+            external_id__in=list(by_facility)
+        ).values_list("external_id", "pk")
+    }
+    if not health_facilities:
+        return
+
+    transactions = Transaction.objects.filter(type=SCAN_AND_SHARE, deleted=False)
+    for batch in batched(transactions, "meta_data"):
+        meta_datas = [meta_data_of(row) for row in batch]
+
+        abha_numbers = {
+            external_id: (pk, health_id)
+            for external_id, pk, health_id in AbhaNumber.objects.filter(
+                external_id__in={
+                    as_uuid(meta_data.get("abha_number")) for meta_data in meta_datas
+                }
+                - {None},
+                deleted=False,
+                health_id__isnull=False,
+            ).values_list("external_id", "pk", "health_id")
+        }
+        # the share does not record the facility, the token issued for it does;
+        # soft-deleted tokens are kept since they still name it
+        token_facilities = dict(
+            Token.objects.filter(
+                external_id__in={
+                    as_uuid(meta_data.get("token")) for meta_data in meta_datas
+                }
+                - {None}
+            ).values_list("external_id", "facility_id")
+        )
+
+        addresses = {}
+        for meta_data in meta_datas:
+            abha_number = abha_numbers.get(as_uuid(meta_data.get("abha_number")))
+            health_facility_id = health_facilities.get(
+                token_facilities.get(as_uuid(meta_data.get("token")))
+            )
+            if abha_number and health_facility_id:
+                abha_number_id, health_id = abha_number
+                addresses[(abha_number_id, health_facility_id)] = normalize(health_id)
+
+        ensure_legacy_auths(AbhaAuth, addresses)
 
 
 def migrate_consent_requests(apps, by_hf_id, by_facility):
@@ -398,6 +455,7 @@ def forwards(apps, schema_editor):
 
     fill_payment_order_addresses(apps)
     create_legacy_auths(apps, by_facility)
+    backfill_scan_and_share_auths(apps, by_facility)
     migrate_consent_requests(apps, by_hf_id, by_facility)
     migrate_consent_artefacts(apps, by_hf_id)
     backfill_care_contexts(apps, by_hf_id)

@@ -1,4 +1,4 @@
-from django.db import migrations
+from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
@@ -16,8 +16,14 @@ class Migration(migrations.Migration):
             model_name='consentrequest',
             name='patient_abha',
         ),
-        migrations.RemoveField(
+        migrations.AlterField(
             model_name='abhanumber',
             name='health_id',
+            field=models.TextField(blank=True, editable=False, null=True),
+        ),
+        migrations.RenameField(
+            model_name='abhanumber',
+            old_name='health_id',
+            new_name='abha_address_legacy',
         ),
     ]
