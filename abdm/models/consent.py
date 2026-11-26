@@ -3,7 +3,6 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
-from abdm.models import AbhaNumber
 from abdm.models.base import (
     AccessMode,
     FrequencyUnit,
@@ -35,9 +34,6 @@ class Consent(BaseModel):
 
     consent_id = models.UUIDField(null=True, blank=True, unique=True)
 
-    patient_abha = models.ForeignKey(
-        AbhaNumber, on_delete=models.PROTECT, to_field="health_id"
-    )
     encounter = models.ForeignKey(
         "emr.Encounter",
         on_delete=models.PROTECT,
@@ -84,7 +80,6 @@ class Consent(BaseModel):
 
     def consent_details_dict(self):
         return {
-            "patient_abha": self.patient_abha,
             "care_contexts": self.care_contexts,
             "status": self.status,
             "purpose": self.purpose,
@@ -103,9 +98,29 @@ class Consent(BaseModel):
 
 
 class ConsentRequest(Consent):
+    # null only on requests raised before auths existed that could not be migrated
+    abha_auth = models.ForeignKey(
+        "abdm.AbhaAuth",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="consent_requests",
+    )
+
     @property
     def request_id(self):
         return self.consent_id
+
+    def artefact_scope_dict(self):
+        auth = self.abha_auth
+        if not auth:
+            return {}
+
+        return {
+            "health_facility": auth.health_facility,
+            "abha_address": auth.abha_address,
+            "patient": auth.abha_number.patient,
+        }
 
 
 class ConsentArtefact(Consent):
@@ -153,6 +168,16 @@ class ConsentArtefact(Consent):
         null=True,
         blank=True,
         related_name="consent_artefacts",
+    )
+
+    # HIU side: copied from the consent request's auth
+    # HIP side: taken from the consent notification
+    health_facility = models.ForeignKey(
+        "abdm.HealthFacility", on_delete=models.PROTECT, null=True, blank=True
+    )
+    abha_address = models.CharField(max_length=255, blank=True, default="")
+    patient = models.ForeignKey(
+        "emr.Patient", on_delete=models.PROTECT, null=True, blank=True
     )
 
     cm = models.CharField(max_length=50, null=True, blank=True)

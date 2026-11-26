@@ -23,7 +23,7 @@ from care.emr.models.medication_statement import (
 from care.emr.models.observation import Observation as ObservationModel
 from care.emr.resources.observation.spec import ObservationStatus
 
-from .op_consult import _empty_reason
+from .op_consult import _composition_status, _empty_reason
 
 
 class DischargeSummaryCompositionMixin:
@@ -51,7 +51,7 @@ class DischargeSummaryCompositionMixin:
                 ],
             ),
             identifier=Identifier(value=care_context_id),
-            status="final",
+            status=_composition_status(encounter),
             type=CodeableConcept(
                 coding=[
                     Coding(

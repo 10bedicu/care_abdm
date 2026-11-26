@@ -51,7 +51,7 @@ created, discovered, and exchanged across providers with the patient's consent.
 | Term | Expansion | What it is |
 | --- | --- | --- |
 | **ABHA Number** | Ayushman Bharat Health Account number | A 14-digit unique health ID for a citizen (displayed as `XX-XXXX-XXXX-XXXX`). The permanent identity anchor. |
-| **ABHA Address** | (a.k.a. PHR address / `health_id`) | A human-readable handle like `username@abdm` / `username@sbx`. Used for consent and login. |
+| **ABHA Address** | (a.k.a. PHR address) | A human-readable handle like `username@abdm` / `username@sbx`. Used for consent, linking and login. One ABHA number can have several, and an address can exist without a number. |
 | **HIP** | Health Information Provider | An entity that *produces/stores* records (e.g. a hospital running CARE). CARE acts as a HIP. |
 | **HIU** | Health Information User | An entity that *requests/consumes* records to provide care. CARE also acts as a HIU. |
 | **HIE-CM / CM** | Health Information Exchange & Consent Manager | The ABDM component that brokers consent between patients, HIPs and HIUs. Identified by a **CM ID** (e.g. `sbx`). |
@@ -138,10 +138,11 @@ abdm/
 ├── settings.py        # PluginSettings (env / PLUGIN_CONFIGS driven)
 ├── urls.py            # DRF router with optional-trailing-slash
 ├── authentication.py  # ABDMAuthentication (validates ABDM-signed JWTs on callbacks)
+├── extensions.py      # the `abdm` encounter extension (opt-out of linking)
 ├── admin.py           # Django admin registrations
-├── models/            # AbhaNumber, Consent*, Transaction, HealthFacility, base enums
+├── models/            # AbhaNumber, AbhaAuth, CareContext, Consent*, Transaction, HealthFacility, base enums
 ├── api/               # viewsets (model APIs) + api/v3 (gateway proxy & callbacks)
-├── service/           # HTTP client + v3 services (gateway, health_id, facility)
+├── service/           # HTTP client + v3 services (gateway, health_id, facility), abha.py (identity & auth), linking.py
 ├── utils/             # crypto (fidelius, cipher), fhir/, token helpers
 ├── signals/           # auto care-context registration on EMR changes
 ├── tasks/             # Celery tasks (retry failed care contexts)
@@ -150,6 +151,7 @@ abdm/
 ```
 
 `apps.py` registers the app under the name **`abdm`** and, on `ready()`, imports
+`abdm.extensions`, which registers the `abdm` encounter extension with CARE, and
 `abdm.signals` so the EMR `post_save`/`pre_save` receivers are wired up.
 
 See [abdm/apps.py](abdm/apps.py).
@@ -190,6 +192,7 @@ ABDM_CM_ID, CURRENT_DOMAIN, BACKEND_DOMAIN
 | `ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM` | `https://care.ohc.network/abha_number` | FHIR identifier system |
 | `ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME` | `1800` | 30 min |
 | `ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT` | `True` | allow linking unverified ABHA |
+| `ABDM_DEEP_LINK_SMS_ENABLED` | `True` | ask ABDM to text a deep link to a patient whose records are ready and who has no ABHA auth at the facility |
 | `CURRENT_DOMAIN` | `https://care.ohc.network` | frontend domain |
 | `BACKEND_DOMAIN` | `https://careapi.ohc.network` | used in callback/push URLs |
 
@@ -213,9 +216,10 @@ Located in `abdm/models/`.
 
 #### `AbhaNumber` — [abdm/models/abha_number.py](abdm/models/abha_number.py)
 
-The patient's ABHA identity stored in CARE.
+The patient's ABHA identity stored in CARE. It is instance-wide: one row per
+person, whichever facility verified them.
 
-- Identity: `abha_number`, `health_id` (ABHA address).
+- Identity: `abha_number` (unique, nullable: a person may have an ABHA address only).
 - Link: `patient` (OneToOne → `emr.Patient`).
 - Demographics: `name`, `first_name`, `middle_name`, `last_name`, `gender`,
   `date_of_birth`, `address`, `district`, `state`, `pincode`, `mobile`, `email`,
@@ -224,17 +228,53 @@ The patient's ABHA identity stored in CARE.
 - `new` flag.
 - Property `parsed_date_of_birth()` — tolerates missing month/day by defaulting to `01`.
 
+It holds no ABHA address. Addresses live on `AbhaAuth`.
+
+#### `AbhaAuth` — [abdm/models/abha_auth.py](abdm/models/abha_auth.py)
+
+One row for each time an ABHA was authenticated at a health facility, with the
+ABHA address that was presented. Everything a facility does with an ABHA (link
+tokens, linking, consent requests) uses an auth made at that facility.
+
+- `abha_number` (→ `AbhaNumber`), `health_facility` (→ `HealthFacility`),
+  `abha_address` (trimmed, lower-cased), `method` (`scan_and_share`,
+  `staff_verification`, `abha_creation`, `legacy`), `performed_by`.
+- `link_token`, `link_token_expires_at` — the link token ABDM issued to this
+  facility for this address.
+- `invalidated_at`, `invalidation_reason` (`address_moved`, `link_token_refused`).
+
+A row is never overwritten: only the link token and the invalidation change, and
+`save()` refuses anything else. The **latest valid auth** (newest, not
+invalidated) of a record at a facility is the one in use there.
+
+#### `CareContext` — [abdm/models/care_context.py](abdm/models/care_context.py)
+
+The ledger of care contexts linked, or being linked, at a facility.
+
+- `health_facility`, `patient`, `abha_address`, `abha_auth` (null for links the
+  patient made from a PHR app), `reference` (`v2::<model>::<id>`), `hi_type`.
+- `status`: `pending` → `requested` → `linked`, or `failed`.
+- `via`: `hip_initiated` or `user_initiated`.
+- `request_id` — the `REQUEST-ID` of the link call, matched by the callback.
+- `legacy` — backfilled from `Transaction` history; its address is the one
+  stored at the time of the upgrade, not necessarily the one linked to.
+- Unique on (`health_facility`, `abha_address`, `reference`).
+
 #### Consent models — [abdm/models/consent.py](abdm/models/consent.py)
 
-- **`Consent` (abstract base)**: `consent_id` (UUID from gateway), `patient_abha`
-  (→ `AbhaNumber`), `encounter` (→ `emr.Encounter`), `care_contexts` (JSON, schema
+- **`Consent` (abstract base)**: `consent_id` (UUID from gateway), `encounter`
+  (→ `emr.Encounter`), `care_contexts` (JSON, schema
   validated), `status`, `purpose`, `hi_types`, `hip`, `hiu`, `requester`
   (→ `users.User`), `access_mode`, `from_time`/`to_time` (default: 30 days ago → now),
   `expiry` (default +30 days), and frequency fields (`frequency_unit`,
   `frequency_value`, `frequency_repeats`).
 - **`ConsentRequest`**: the raised request; exposes a `request_id` property.
-- **`ConsentArtefact`**: the granted permission. Adds the **ECDH key material** used
-  for encrypting/decrypting transferred data:
+  `abha_auth` (→ `AbhaAuth`) is the auth it was raised from, which gives the ABHA
+  address and the requesting facility.
+- **`ConsentArtefact`**: the granted permission. `health_facility`,
+  `abha_address` and `patient` scope it: copied from the request's auth when CARE
+  is the HIU, taken from the notification when CARE is the HIP. Adds the **ECDH
+  key material** used for encrypting/decrypting transferred data:
   `key_material_algorithm` (`ECDH`), `key_material_curve` (`Curve25519`),
   `key_material_public_key`, `key_material_private_key`, `key_material_nonce`,
   `signature`, plus `cm` (Consent Manager id). Its `save()` override **auto-generates
@@ -259,6 +299,30 @@ Binds a CARE facility to an ABDM HIP.
   `facility.Facility`).
 - `save()` override: when `hf_id` changes, it updates the pending/failed
   `LINK_CARE_CONTEXT` transactions so they re-link against the new id.
+- `hf_id` cannot change more than 48 hours after the row was created: `save()`
+  raises a `ValidationError`, which the API returns as a `400`. ABDM holds links,
+  link tokens and consents against the id.
+
+#### Encounter extension `abdm` — [abdm/extensions.py](abdm/extensions.py)
+
+Not a model of the plugin: a `PlugExtension` registered for CARE's encounter
+resource, stored under `Encounter.extensions["abdm"]`. It holds the patient's
+choice to keep a visit out of ABDM.
+
+- Written as `{"link_records": false}` when the encounter is created. The plugin
+  then stamps `recorded_by` (the `external_id` of the user who created the
+  encounter) and `recorded_at` into the stored value.
+- It can only be set at creation. A later change to the key is ignored and the
+  stored value is kept, because a linked care context cannot be unlinked. CARE's
+  validator cannot tell an update from a create, so this is kept by a
+  `pre_save` receiver on `Encounter`.
+- An encounter with `link_records` false is never linked, is left out of
+  discovery, never causes a deep-link SMS, and is refused if it is requested.
+- A care context that spans encounters follows from that. A prescription
+  (`v2::prescription::<date>`) is linked when at least one of its medication
+  requests is of an encounter that is not opted out, and the requests of
+  opted-out encounters are left out when it is shared. An invoice is one
+  document, so a charge of an opted-out encounter keeps the whole invoice out.
 
 ### 3.4 URL Routing
 
@@ -295,12 +359,18 @@ See [abdm/urls.py](abdm/urls.py).
 ### 3.5 API ViewSets
 
 #### `AbhaNumberViewSet` — [abdm/api/viewsets/abha_number.py](abdm/api/viewsets/abha_number.py)
-- `POST /abha_number` — create an ABHA record; emits a `SCAN_AND_SHARE` transaction.
-- `GET /abha_number/{id}` — retrieve by `abha_number`, `health_id`, or `patient_id`.
+- `POST /abha_number` — scan and pull: record an ABHA read at a facility
+  (`facility` required) and the auth for it.
+- `GET /abha_number/{id}?facility=` — retrieve by patient id, ABHA number or ABHA
+  address. Only a facility holding a valid auth for the record may see it; any
+  other facility, or a request without `facility`, gets a 404. The response
+  carries `abha_address` and `auth` as seen from that facility: the latest valid
+  auth there, with the address falling back to the one last used anywhere.
 
 #### `ConsentViewSet` — [abdm/api/viewsets/consent.py](abdm/api/viewsets/consent.py)
-- `POST /consent` — create a consent request via
-  `GatewayService.consent__request__init()`.
+- `POST /consent` — create a consent request for an `encounter` via
+  `GatewayService.consent__request__init()`, using the patient's latest valid
+  auth at the encounter's facility (400 when there is none).
 - `GET /consent` — list consents filtered by the user's facilities and patient.
 - Rate-limited (with CAPTCHA fallback).
 
@@ -323,8 +393,16 @@ ABHA **creation** (proxied to the ABHA service):
 ABHA **login**: `abha_login/send_otp`, `verify_otp`, `verify_user`,
 `check_auth_methods`.
 
-**Linking**: `link_patient` — links an existing ABHA to a CARE patient and creates a
-`PatientIdentifier`.
+Every endpoint that returns a verified ABHA takes `facility` and records an
+`AbhaAuth` there through `record_abha_auth`.
+
+**Linking**: `link_patient` — attaches an ABHA record to a CARE patient, given a
+valid auth for it at `facility`, and creates a `PatientIdentifier`. Repeating it
+for the same record is how a patient verifies again; a different record is
+refused. It then links the patient's ready records at that facility.
+
+**ABHA card**: `GET abha_card?abha_id=&facility=` — the card image, only for a
+facility holding a valid auth for the record; any other facility gets a 404.
 
 #### `HIPViewSet` & `HIPCallbackViewSet` — [abdm/api/v3/viewsets/hip.py](abdm/api/v3/viewsets/hip.py)
 
@@ -333,9 +411,15 @@ User-facing HIP ops:
 - `GET v3/hip/patient/fetch-by-token?token=&facility_id=` — resolve a scan-and-share token.
 
 ABDM→CARE webhooks (`HIPCallbackViewSet`, `ABDMAuthentication`):
-`token/on_generate_token`, `link/on_carecontext`, `patient/care_context/discover`,
+`token/on_generate_token`, `link/on_carecontext`, `links/context/on-notify`,
+`patients/sms/on-notify`, `patient/care_context/discover`,
 `link/care_context/init`, `link/care_context/confirm`, `consent/request/notify`,
 `health_information/request`, `patient/share`.
+
+The two `on-notify` callbacks answer `link/context/notify` and the deep-link SMS.
+ABDM's pages for their bodies are not confirmed against the sandbox, so nothing
+in them is required, and each body is logged on arrival at debug level with the
+fields that may hold personal data redacted.
 
 #### `HIUViewSet` & `HIUCallbackViewSet` — [abdm/api/v3/viewsets/hiu.py](abdm/api/v3/viewsets/hiu.py)
 
@@ -371,7 +455,7 @@ The `Request` class is the single outbound HTTP wrapper:
 - `timestamp()`, `uuid()`, `cm_id()`.
 - `encrypt_message()` — RSA-OAEP encryption using the ABDM public certificate.
 - `validate_and_format_date()`.
-- `hf_id_from_encounter()` / `hf_id_from_abha_id()` — resolve the HIP id.
+- `hf_id_from_encounter()` — resolve the HIP id.
 - **Care-context generators** — turn EMR rows into care-context dicts
   (`reference`, `display`, `hi_type`). The reference format is
   `v2::<model>::<id/param>` and is parsed back by
@@ -383,19 +467,73 @@ The `Request` class is the single outbound HTTP wrapper:
   - `create_diagnostic_report_care_context()`
   - `create_invoice_care_context()`
   - `create_immunization_care_context()`
-  - `generate_care_contexts_for_existing_data(patient, hf_id)` — full back-scan of a
-    patient's records.
+  - `ready_care_contexts_for_encounter(encounter)` — the care contexts of an
+    encounter whose records are ready to link.
+  - `resolve_care_context(reference, patient, facility)` — the record behind a
+    reference, when it is that patient's record at that facility, with whether
+    the opt-out of its encounters keeps it out of ABDM.
+  - `encounter_hi_type(encounter)` — discharge summary for the admission classes
+    (`imp`, `emer`, `obsenc`), OP consultation for the others. Used both when
+    linking and when sharing.
+
+#### ABHA identity and auth — [abdm/service/abha.py](abdm/service/abha.py)
+
+- `record_abha_auth(...)` — the only writer of `AbhaNumber` and creator of
+  `AbhaAuth`. Under a lock on the number and the address it finds the record by
+  ABHA number, then by the address on a valid auth anywhere; the number wins when
+  the two disagree, and an address that moved to another number invalidates the
+  auths that held it (`address_moved`).
+- `latest_valid_auth(abha_number, health_facility)`,
+  `abha_number_for_address(address)`, `patient_for_abha(abha_number, abha_address)`.
+
+#### Linking — [abdm/service/linking.py](abdm/service/linking.py)
+
+- `ready_care_contexts(patient, health_facility)` — full back-scan of a patient's
+  records at a facility that are ready to link.
+- `link_care_contexts(patient, health_facility, care_contexts=None, user=None)` —
+  the one linking routine. Leaves out opted-out encounters
+  (`is_linking_opted_out`, which reads the `abdm` encounter extension) and
+  references already in the ledger, creates `pending` rows under the latest valid
+  auth, and sends them. Without an auth at the facility it links nothing and
+  calls `notify_patient_without_auth`.
+- `notify_patient_without_auth(patient, health_facility)` — asks ABDM to text the
+  patient a deep link (`link/patient/links/sms/notify2`). At most once per
+  patient and facility in a calendar day (a cache key taken before the call and
+  kept whatever comes of it), only for a patient with an Indian mobile number,
+  and only when `ABDM_DEEP_LINK_SMS_ENABLED` is on. A failure is logged and does
+  not fail the linking routine.
+- `send_pending_care_contexts(auth)` — sends pending rows in batches of 20 when
+  the auth has an unexpired link token, otherwise requests a token (at most once
+  in 30 minutes per facility and address).
+- `receive_link_token(...)`, `complete_link_request(...)` — the two callbacks.
+- **Already linked is done, not failed.** `ABDM-1056` "already linked" on the
+  callback, and "Duplicate HIP link request" on the link call itself, mark a
+  request of one care context `linked`. A request of several is sent again one
+  care context at a time, since ABDM does not say which of them it holds; a
+  request of one is never split, so this cannot go round. A duplicate answer to
+  a request that is being sent again under the same id leaves it `requested`,
+  to wait for the callback of the first attempt.
+- `notify_care_context_updated(patient, health_facility, reference)` and
+  `sync_linked_record_type(encounter)` — call `link/context/notify` for care
+  contexts that are `linked` in the ledger, with the address and facility of the
+  ledger row: when a prescription gains a medication request, and when an
+  encounter's class makes it another record type, in which case
+  `CareContext.hi_type` is updated too.
+- `record_user_initiated_links(...)` — links a patient made from a PHR app.
 
 #### `GatewayService` — [abdm/service/v3/gateway.py](abdm/service/v3/gateway.py)
 
 The largest service (~2k LOC). Key method groups:
 
-- **Token**: `token__generate_token()` — kicks off the link-token handshake (cached
-  in Redis, async `202`).
+- **Token**: `token__generate_token()` — requests a link token for an auth (async
+  `202`; the token arrives on the callback and is stored on the auth).
 - **Care-context linking**: `link__carecontext()` — groups care contexts by
-  `hi_type`, creates a `LINK_CARE_CONTEXT` transaction, and POSTs to
-  `/hip/v3/link/carecontext` with the `X-LINK-TOKEN`. User-initiated variants handle
-  discover/init/confirm with OTP.
+  `hi_type` and POSTs to `/hip/v3/link/carecontext` with the `X-LINK-TOKEN`. The
+  ledger and the `LINK_CARE_CONTEXT` transaction are kept by `service/linking.py`.
+  User-initiated variants handle discover/init/confirm with OTP.
+  `link__context__notify()` POSTs to `/hip/v3/link/context/notify` and
+  `link__patient__links__sms__notify2()` to
+  `/hip/v3/link/patient/links/sms/notify2`; both answer on a callback.
 - **Consent**: `consent__request__init()`, `consent__request__status()`,
   `consent__fetch()`, plus the HIP/HIU `on_notify` handlers.
 - **Data flow** (the heart of HIE):
@@ -403,7 +541,9 @@ The largest service (~2k LOC). Key method groups:
     declares the push URL
     `BACKEND_DOMAIN/api/abdm/api/v3/hiu/health-information/transfer`.
   - **`data_flow__health_information__transfer()`** — for each consented care
-    context, resolves the EMR row, builds the matching FHIR record via `Fhir()`,
+    context, checks that it is a record of the artefact's patient at the
+    artefact's facility (and, where the ledger has a link for it, linked to the
+    artefact's address), resolves the EMR row, builds the matching FHIR record via `Fhir()`,
     encrypts it (ECDH + AES-256-GCM), and POSTs to the requester's URL; records an
     `EXCHANGE_DATA` transaction.
   - `..._hip__on_request()`, `..._notify()`.
@@ -416,7 +556,7 @@ The mapping used in `data_flow__health_information__transfer()`:
 | `reference` model | EMR source | FHIR builder |
 | --- | --- | --- |
 | `prescription` | `MedicationRequest` | `create_prescription_record()` |
-| `encounter` | `Encounter` | `create_op_consult_record()` / `create_discharge_summary_record()` |
+| `encounter` | `Encounter` | `create_discharge_summary_record()` for an admission class, else `create_op_consult_record()`, by the encounter's current class and only if the consent allows that type |
 | `file_upload` | `FileUpload` | `create_health_document_record()` |
 | `questionnaire_response` | `QuestionnaireResponse` | `create_wellness_record()` |
 | `diagnostic_report` | `DiagnosticReport` | `create_diagnostic_report_record()` |
@@ -481,36 +621,54 @@ Fidelius for `ConsentArtefact` key material: `generate_key_pair()`, `encrypt()` 
 `create_wellness_record`, `create_diagnostic_report_record`, `create_invoice_record`,
 `create_immunization_record`.
 
+An encounter whose status is `entered_in_error` is still shared when it is
+requested, since a link cannot be undone. Its OP consultation or discharge
+summary `Composition` carries the status `entered-in-error`, and its sections
+are left as they are.
+
 ### 3.10 Signals (Auto Care-Context Linking)
 
 [abdm/signals/register_care_contexts.py](abdm/signals/register_care_contexts.py) — the
-plugin automatically registers care contexts whenever clinical data is written, so
-records become discoverable without manual steps:
+plugin links a care context when its record becomes ready to share, so records
+become discoverable without manual steps:
 
-| Signal | Model | When |
+| Signal | Model | Ready when |
 | --- | --- | --- |
-| `post_save` | `MedicationRequest` | prescription created |
-| `post_save` | `Encounter` | encounter created |
+| `pre_save` + `post_save` | `MedicationRequest` | first request of the day that is not a draft |
+| `pre_save` + `post_save` | `Encounter` | status changes to `completed` or `discharged`, or the encounter is created in one of them |
 | `pre_save` | `FileUpload` | upload completes (`upload_completed → True`) |
 | `post_save` | `QuestionnaireResponse` | questionnaire filled |
-| `post_save` | `DiagnosticReport` | report created |
-| `post_save` | `Invoice` | non-draft invoice issued |
+| `pre_save` | `DiagnosticReport` | status changes to `final` |
+| `pre_save` | `Invoice` | non-draft invoice issued |
 | `pre_save` | `Immunization` | dose recorded as `completed` / `not_done`, or a draft finalised |
 
-Each receiver checks that the patient has an ABHA and the encounter's facility is a
-**registered HIP**, then calls `GatewayService.link__carecontext()` inside
-`transaction.on_commit()`. Failures are logged (warnings) and never crash the EMR
-write path.
+Each receiver only checks that the encounter's facility is a **registered HIP**,
+then queues `abdm.link_care_context` inside `transaction.on_commit()`. Whether the
+record is linked, and to which ABHA address, is decided by
+`link_care_contexts`. Failures never crash the EMR write path.
+
+The same receivers report changes to care contexts that are already linked: a
+medication request added on a day whose prescription is `linked` queues
+`abdm.notify_care_context_update` (one notification a minute at most per
+prescription), and an encounter whose class moves between the admission classes
+and the others queues `abdm.sync_encounter_record_type`. The `Encounter`
+`pre_save` receiver also stamps the `abdm` extension on creation and keeps it
+unchanged afterwards.
 
 ### 3.11 Background Tasks
 
-[abdm/tasks/retry_failed_care_contexts.py](abdm/tasks/retry_failed_care_contexts.py):
-- `retry_failed_care_contexts()` (`@shared_task`, Celery Beat) — batches
-  `LINK_CARE_CONTEXT` transactions in `INITIATED`/`FAILED` state (batch size 500) and
-  dispatches `process_care_context_batch.delay()`.
-- `process_care_context_batch(ids)` (`queue="care_context_queue"`) — groups by
-  `(hf_id, abha_number)`, reconstructs care contexts from `meta_data`, re-calls
-  `link__carecontext()`, and marks transactions `CANCELLED` once handled.
+- [abdm/tasks/link_care_context.py](abdm/tasks/link_care_context.py):
+  `abdm.link_care_context` links one care context;
+  `abdm.link_patient_care_contexts` links everything ready for a patient at a
+  facility, and runs after `link_patient` and after a scan and share by a
+  patient CARE already knows. `abdm.notify_care_context_update` and
+  `abdm.sync_encounter_record_type` call `link/context/notify` for linked care
+  contexts that changed.
+- [abdm/tasks/retry_failed_care_contexts.py](abdm/tasks/retry_failed_care_contexts.py):
+  `retry_failed_care_contexts()` (`@shared_task`, Celery Beat) moves `failed`
+  care contexts, and `requested` ones unanswered for a day, back to `pending`,
+  then dispatches `send_pending_care_contexts_batch` (`queue="care_context_queue"`)
+  for the auths that have care contexts waiting.
 
 ### 3.12 Scan & Share Tokens
 
@@ -522,9 +680,9 @@ front desk.
 
 ### 3.13 Admin
 
-[abdm/admin.py](abdm/admin.py) registers `AbhaNumber` (searchable by number/health
-id/name/mobile), `ConsentArtefact`, `ConsentRequest`, `Transaction`, and
-`HealthFacility`. A non-production-only `delete_abdm_records` action cascade-deletes
+[abdm/admin.py](abdm/admin.py) registers `AbhaNumber` (searchable by number/ABHA
+address/name/mobile), `AbhaAuth` (read only), `CareContext`, `ConsentArtefact`,
+`ConsentRequest`, `Transaction`, and `HealthFacility`. A non-production-only `delete_abdm_records` action cascade-deletes
 ABHA + consent data.
 
 ---
@@ -660,9 +818,10 @@ sequenceDiagram
     ABHA-->>BE: ABHA number + txn id
     U->>BE: link_mobile_number → verify_mobile_otp
     U->>BE: abha_address_suggestion → enrol_abha_address
-    ABHA-->>BE: ABHA address (health_id) + profile
-    U->>BE: link_patient (abha_number, patient)
-    BE->>BE: create AbhaNumber + PatientIdentifier + Transaction
+    ABHA-->>BE: ABHA address + profile
+    BE->>BE: record_abha_auth: AbhaNumber + AbhaAuth at the facility
+    U->>BE: link_patient (abha_number, patient, facility)
+    BE->>BE: attach patient + PatientIdentifier, link ready records
 ```
 
 ### 5.2 Automatic care-context linking (CARE as HIP)
@@ -672,13 +831,13 @@ sequenceDiagram
     participant EMR as CARE EMR
     participant BE as care_abdm signals
     participant GW as ABDM Gateway
-    EMR->>BE: post_save (Encounter / MedicationRequest / ...)
-    BE->>BE: patient has ABHA? facility is registered HIP?
-    BE->>GW: token/generate-token (202)
-    GW-->>BE: callback token/on_generate_token (X-LINK-TOKEN)
-    BE->>GW: hip/v3/link/carecontext (grouped by hi_type)
+    EMR->>BE: record becomes ready (Encounter completed, report final, ...)
+    BE->>BE: latest valid AbhaAuth at this facility? CareContext(pending)
+    BE->>GW: token/generate-token (202), only without an unexpired link token
+    GW-->>BE: callback token/on_generate_token (token stored on the auth)
+    BE->>GW: hip/v3/link/carecontext (grouped by hi_type), CareContext(requested)
     GW-->>BE: callback link/on_carecontext
-    BE->>BE: Transaction(LINK_CARE_CONTEXT, COMPLETED)
+    BE->>BE: CareContext(linked), Transaction(LINK_CARE_CONTEXT, COMPLETED)
 ```
 
 ### 5.3 Consent + health-information exchange (CARE as HIU)
@@ -734,6 +893,7 @@ Facility configures HF ID → generates per-counter QR (scanAndShareUrl?hf=&coun
 | `ABDM_REQUEST_TIMEOUT` | — | `30` | request timeout (s) |
 | `ABDM_SCAN_AND_SHARE_TOKEN_EXPIRY_TIME` | — | `1800` | token TTL (s) |
 | `ABDM_ALLOW_UNVERIFIED_ABHA_ACCOUNT` | — | `True` | allow unverified ABHA linking |
+| `ABDM_DEEP_LINK_SMS_ENABLED` | — | `True` | Ask ABDM to text a deep link to a patient whose records are ready to link and who has no ABHA auth at the facility. At most one text per patient and facility in a day; only for an Indian mobile number; never for an opted-out encounter |
 | `ABDM_SCAN_AND_PAY_POLLING_ENABLED` | — | `False` | Celery status polling for scan-and-pay orders. Off unless set in the environment |
 | `ABDM_SCAN_AND_PAY_POLLING_INTERVAL` | — | `10` | Polling interval in seconds, used only when polling is enabled |
 | `ABDM_ABHA_NUMBER_IDENTIFIER_SYSTEM_SYSTEM` | — | `https://care.ohc.network/abha_number` | FHIR identifier system |
@@ -753,7 +913,9 @@ Facility configures HF ID → generates per-counter QR (scanAndShareUrl?hf=&coun
 ## 7. Glossary
 
 - **ABHA Number** — 14-digit permanent health id.
-- **ABHA Address (`health_id`)** — `name@cm` handle for consent/login.
+- **ABHA Address** — `name@cm` handle for consent, linking and login.
+- **ABHA Auth** — one authentication of an ABHA at a health facility, with the
+  address presented; what the facility uses to link records and request consent.
 - **HIP / HIU** — provider of / user of health information. CARE is both.
 - **HIE-CM / CM** — consent broker; `ABDM_CM_ID` (e.g. `sbx`).
 - **HF ID** — ABDM facility id; prerequisite for HIP operation.

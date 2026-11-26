@@ -1,9 +1,21 @@
+from datetime import timedelta
+
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import models, transaction
 from django.db.models import F, Func, Value
+from django.utils import timezone
 
 from abdm.models.transaction import Transaction, TransactionStatus, TransactionType
 from care.utils.models.base import BaseModel
+
+# links, link tokens and consents are held by ABDM against the hf_id, so it can
+# be corrected only shortly after the health facility is added
+HF_ID_CHANGE_WINDOW = timedelta(hours=48)
+HF_ID_CHANGE_WINDOW_MESSAGE = (
+    "The health facility ID cannot be changed more than 48 hours after the "
+    "health facility was added"
+)
 
 
 class HealthFacility(BaseModel):
@@ -42,6 +54,18 @@ class HealthFacility(BaseModel):
 
         return total_updated
 
+    def _is_hf_id_change_late(self, stored: "HealthFacility") -> bool:
+        if stored.hf_id == self.hf_id:
+            return False
+        added_at = stored.created_date
+        return not added_at or timezone.now() - added_at > HF_ID_CHANGE_WINDOW
+
+    def clean(self):
+        super().clean()
+        stored = HealthFacility.objects.filter(pk=self.pk).first() if self.pk else None
+        if stored and self._is_hf_id_change_late(stored):
+            raise ValidationError({"hf_id": HF_ID_CHANGE_WINDOW_MESSAGE})
+
     def save(self, *args, **kwargs):
         from abdm.service.helper import ABDMAPIException
 
@@ -49,6 +73,11 @@ class HealthFacility(BaseModel):
             if self.pk:
                 old_instance = HealthFacility.objects.get(pk=self.pk)
                 if old_instance.hf_id != self.hf_id:
+                    if self._is_hf_id_change_late(old_instance):
+                        raise ValidationError(
+                            HF_ID_CHANGE_WINDOW_MESSAGE, code="hf_id_change_window"
+                        )
+
                     try:
                         self._update_hf_id_in_transactions(
                             old_instance.hf_id, self.hf_id, batch_size=1000

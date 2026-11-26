@@ -1,8 +1,10 @@
 import re
 
 from celery import shared_task
+from django.core.exceptions import ValidationError as DjangoValidationError
 from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.mixins import (
     CreateModelMixin,
     ListModelMixin,
@@ -18,6 +20,17 @@ from abdm.models import HealthFacility
 from abdm.service.v3.facility import FacilityService
 from abdm.settings import plugin_settings as settings
 from care.emr.models.organization import FacilityOrganizationUser
+
+
+def _mark_registered(health_facility: HealthFacility, hf_id: str):
+    health_facility.hf_id = hf_id
+    health_facility.registered = True
+    try:
+        health_facility.save()
+    except DjangoValidationError as e:
+        # ABDM holds the service under another id, and it is too late to take it
+        return [False, e.messages[0]]
+    return [True, None]
 
 
 @shared_task
@@ -49,10 +62,7 @@ def register_health_facility_as_service(facility_external_id):
 
                 if match:
                     hf_id = match.group(1)
-                    health_facility.hf_id = hf_id
-                    health_facility.registered = True
-                    health_facility.save()
-                    return [True, None]
+                    return _mark_registered(health_facility, hf_id)
 
             return [
                 False,
@@ -61,10 +71,7 @@ def register_health_facility_as_service(facility_external_id):
 
         if "servicesLinked" in data:
             hf_id = data.get("servicesLinked", {}).get("id")
-            health_facility.hf_id = hf_id
-            health_facility.registered = True
-            health_facility.save()
-            return [True, None]
+            return _mark_registered(health_facility, hf_id)
 
     return [False, None]
 
@@ -109,5 +116,9 @@ class HealthFacilityViewSet(
 
     def perform_update(self, serializer):
         serializer.validated_data["registered"] = False
-        instance = serializer.save()
+        try:
+            instance = serializer.save()
+        except DjangoValidationError as e:
+            # the hf_id can no longer be changed
+            raise ValidationError({"detail": e.messages[0]}) from e
         register_health_facility_as_service.delay(instance.facility.external_id)

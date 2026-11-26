@@ -1,10 +1,8 @@
 from unittest.mock import patch
 
-from abdm.models import AbhaNumber, HealthFacility, HealthInformationType
-from abdm.service.helper import (
-    care_context_dict_from_reference_id,
-    generate_care_contexts_for_existing_data,
-)
+from abdm.models import HealthFacility, HealthInformationType
+from abdm.service.helper import care_context_dict_from_reference_id
+from abdm.service.linking import ready_care_contexts
 from model_bakery import baker
 
 from care.emr.models.immunisation import Immunization
@@ -23,9 +21,10 @@ class ImmunizationCareContextTests(CareAPITestBase):
         super().setUp()
         self.user = self.create_super_user()
         self.facility = self.create_facility(self.user)
-        baker.make(HealthFacility, facility=self.facility, hf_id="TEST_HIP")
+        self.health_facility = baker.make(
+            HealthFacility, facility=self.facility, hf_id="TEST_HIP"
+        )
         self.patient = self.create_patient(name="Vaccine Patient", gender="female")
-        baker.make(AbhaNumber, patient=self.patient, health_id="vaccine@sbx")
         self.encounter = self.create_encounter(
             self.patient,
             self.facility,
@@ -92,9 +91,7 @@ class ImmunizationCareContextTests(CareAPITestBase):
 
         discovered = [
             care_context["reference"]
-            for care_context in generate_care_contexts_for_existing_data(self.patient)[
-                "TEST_HIP"
-            ]
+            for care_context in ready_care_contexts(self.patient, self.health_facility)
             if care_context["hi_type"] == HealthInformationType.IMMUNIZATION_RECORD
         ]
 

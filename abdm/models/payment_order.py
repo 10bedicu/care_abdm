@@ -56,7 +56,7 @@ class PaymentOrder(BaseModel):
 
     @property
     def requesting_abha_address(self) -> str:
-        return self.abha_address or self.abha_number.health_id
+        return self.abha_address
 
 
 def latest_open_payment_link(invoice_id: int) -> PaymentOrder | None:

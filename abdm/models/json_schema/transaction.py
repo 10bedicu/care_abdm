@@ -66,7 +66,9 @@ LINK_CARE_CONTEXT = {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "type": "object",
     "properties": {
+        # absent when a patient without an ABHA record links from their PHR app
         "abha_number": {"type": "string", "format": "uuid"},
+        "patient": {"type": "string", "format": "uuid"},
         "type": {
             "type": "string",
             "enum": ["hip_initiated_linking", "patient_initiated_linking"],
@@ -80,7 +82,7 @@ LINK_CARE_CONTEXT = {
         "hf_id": {"type": "string"},
     },
     "additionalProperties": False,
-    "required": ["abha_number", "care_contexts", "type"],
+    "required": ["care_contexts", "type"],
 }
 
 

@@ -5,7 +5,8 @@ from care.utils.models.base import BaseModel
 
 class AbhaNumber(BaseModel):
     abha_number = models.TextField(null=True, blank=True, unique=True)
-    health_id = models.TextField(null=True, blank=True, unique=True)
+    # the address held before ABHA auths, kept as it was; nothing writes to it
+    abha_address_legacy = models.TextField(null=True, blank=True, editable=False)
 
     patient = models.OneToOneField(
         "emr.Patient",
@@ -38,7 +39,7 @@ class AbhaNumber(BaseModel):
     refresh_token = models.TextField(null=True, blank=True)
 
     def __str__(self):
-        return f"{self.pk} {self.health_id}"
+        return f"{self.pk} {self.abha_number}"
 
     @property
     def parsed_date_of_birth(self):

@@ -4,6 +4,7 @@ from rest_framework.serializers import (
     CharField,
     ChoiceField,
     DateTimeField,
+    DictField,
     FloatField,
     IntegerField,
     ListField,
@@ -24,12 +25,27 @@ from abdm.settings import plugin_settings as settings
 
 
 class HipTokenOnGenerateTokenSerializer(Serializer):
+    class ErrorSerializer(Serializer):
+        code = CharField(max_length=50, required=False, allow_null=True)
+        message = CharField(max_length=1000, required=False, allow_null=True)
+
     class ResponseSerializer(Serializer):
         requestId = UUIDField(required=True)
 
-    abhaAddress = CharField(max_length=50, required=True)
-    linkToken = CharField(max_length=1000, required=True)
+    # a refusal carries an error in place of the token
+    abhaAddress = CharField(max_length=50, required=False, allow_null=True)
+    linkToken = CharField(max_length=1000, required=False, allow_null=True)
+    error = ErrorSerializer(required=False, allow_null=True)
     response = ResponseSerializer(required=True)
+
+    def validate(self, attrs):
+        if not attrs.get("error") and not (
+            attrs.get("abhaAddress") and attrs.get("linkToken")
+        ):
+            raise ValidationError(
+                {"linkToken": "Required with abhaAddress unless an error is reported"}
+            )
+        return attrs
 
 
 class LinkOnCarecontextSerializer(Serializer):
@@ -44,6 +60,36 @@ class LinkOnCarecontextSerializer(Serializer):
     status = CharField(max_length=1000, required=False)
     error = ErrorSerializer(required=False)
     response = ResponseSerializer(required=True)
+
+
+class HipOnNotifySerializer(Serializer):
+    # ABDM's page for this body is not confirmed against the sandbox, so nothing
+    # in it is required and what is not known is let through
+    class AcknowledgementSerializer(Serializer):
+        status = CharField(
+            max_length=50, required=False, allow_null=True, allow_blank=True
+        )
+
+    class ErrorSerializer(Serializer):
+        code = CharField(
+            max_length=50, required=False, allow_null=True, allow_blank=True
+        )
+        message = CharField(
+            max_length=1000, required=False, allow_null=True, allow_blank=True
+        )
+
+    acknowledgement = AcknowledgementSerializer(required=False, allow_null=True)
+    error = ErrorSerializer(required=False, allow_null=True)
+    # {"requestId": the REQUEST-ID of the call this answers}
+    response = DictField(required=False, allow_null=True)
+
+
+class LinksContextOnNotifySerializer(HipOnNotifySerializer):
+    pass
+
+
+class PatientsSmsOnNotifySerializer(HipOnNotifySerializer):
+    pass
 
 
 class HipPatientCareContextDiscoverSerializer(Serializer):

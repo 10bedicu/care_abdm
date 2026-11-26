@@ -98,6 +98,7 @@ The following configurations variables are available for Care Abdm:
 - `ABDM_HIP_NAME_SUFFIX`: The suffix for the HIP name. Used to avoid conflicts while registering a facility as ABDM health facility.
 - `ABDM_USERNAME`: The internal username for the ABDM service. Intended to track the records created via ABDM.
 - `ABDM_CM_ID`: The X-CM-ID header value for the ABDM service.
+- `ABDM_DEEP_LINK_SMS_ENABLED`: Whether ABDM is asked to text a patient a deep link when their records are ready to link and they have no ABHA verified at the facility. At most one text per patient and facility in a day. Defaults to `True`.
 - `AUTH_USER_MODEL`: The user model to use for the ABDM service.
 
 The plugin will try to find the API key from the config first and then from the environment variable.

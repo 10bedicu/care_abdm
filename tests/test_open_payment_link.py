@@ -10,6 +10,7 @@ from abdm.service.v3.payment_providers import (
     cancel_scan_pay_invoice,
 )
 from abdm.settings import plugin_settings as abdm_settings
+from abdm.utils import user as abdm_user
 from django.urls import reverse
 from model_bakery import baker
 from rest_framework.exceptions import ValidationError
@@ -25,6 +26,8 @@ from care.utils.tests.base import CareAPITestBase
 class TestOpenScanPayPaymentLink(CareAPITestBase):
     def setUp(self):
         super().setUp()
+        # cached across tests but each test rolls back; reset to avoid stale FK.
+        abdm_user.ABDM_USER = None
         self.user = self.create_super_user()
         self.facility = self.create_facility(self.user)
         self.health_facility = baker.make(
@@ -34,7 +37,6 @@ class TestOpenScanPayPaymentLink(CareAPITestBase):
         self.abha_number = baker.make(
             AbhaNumber,
             patient=self.patient,
-            health_id="testpatient@sbx",
             abha_number="91123456789012",
         )
         self.account = baker.make(

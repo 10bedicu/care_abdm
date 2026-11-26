@@ -1,7 +1,8 @@
 import logging
 
-from abdm.models import AbhaNumber, HealthFacility, PaymentOrder
+from abdm.models import HealthFacility, PaymentOrder
 from abdm.models.payment_order import PaymentOrderStatus
+from abdm.service.abha import abha_number_for_address
 from abdm.service.v3.callback_handlers import CallbackProcessingError
 from abdm.service.v3.gateway import GatewayService
 from abdm.service.v3.scan_pay import (
@@ -43,11 +44,7 @@ def handle_patient_share_open_order(validated_data: dict, headers: dict):
             f"Health Facility with ID: {hip_id} not found in the database"
         )
 
-    abha_number = (
-        AbhaNumber.objects.filter(health_id=abha_address)
-        .select_related("patient")
-        .first()
-    )
+    abha_number = abha_number_for_address(abha_address)
 
     if not abha_number or not abha_number.patient_id:
         GatewayService.patient__on_share_open_order(

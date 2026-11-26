@@ -40,6 +40,7 @@ class CareBillingContractTests(ScanPayTestBase):
         return PaymentOrder.objects.create(
             open_order_request_id=uuid(),
             abha_number=self.abha_number,
+            abha_address=self.abha_address,
             health_facility=self.health_facility,
             status=PaymentOrderStatus.OPEN_ORDER_SHARED,
         )
@@ -57,7 +58,7 @@ class CareBillingContractTests(ScanPayTestBase):
             self.account,
             self.facility,
             self.patient,
-            self.abha_number.health_id,
+            self.abha_address,
             order,
         )
 
@@ -81,7 +82,7 @@ class CareBillingContractTests(ScanPayTestBase):
             self.account,
             self.facility,
             self.patient,
-            self.abha_number.health_id,
+            self.abha_address,
             self.open_order(),
         )
 
@@ -104,7 +105,7 @@ class CareBillingContractTests(ScanPayTestBase):
             self.account,
             self.facility,
             self.patient,
-            self.abha_number.health_id,
+            self.abha_address,
             self.open_order(),
         )
 
@@ -129,7 +130,7 @@ class CareBillingContractTests(ScanPayTestBase):
             self.account,
             self.facility,
             self.patient,
-            self.abha_number.health_id,
+            self.abha_address,
             order,
         )
         open_item = self.create_charge_item(amount=40, title="Still open")
